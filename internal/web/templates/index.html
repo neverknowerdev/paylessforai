@@ -1,0 +1,53 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>PayLessForAI</title>
+    <link rel="stylesheet" href="/static/style.css">
+  </head>
+  <body>
+    <main>
+      <p class="eyebrow">LOCAL LLM ROUTER</p>
+      <h1>PayLessForAI</h1>
+      <p class="lead">A local base URL for price-aware, provider-neutral inference.</p>
+      <section class="card">
+        <h2>Base URL</h2>
+        <code id="base-url">loading…</code>
+        <p class="muted">Use this URL as an OpenAI-compatible provider base URL.</p>
+      </section>
+      <section class="card">
+        <h2>System status</h2>
+        <p id="status">Checking database…</p>
+      </section>
+      <section class="card">
+        <h2>Recent usage</h2>
+        <ul id="request-list"><li class="muted">Loading…</li></ul>
+      </section>
+      <section class="card">
+        <h2>Client API keys</h2>
+        <form id="key-form">
+          <label for="key-label">Label</label>
+          <input id="key-label" name="label" placeholder="IDE" autocomplete="off">
+          <button type="submit">Create key</button>
+        </form>
+        <p id="new-key" class="secret" hidden></p>
+        <ul id="key-list"><li class="muted">Loading…</li></ul>
+      </section>
+      <section class="card">
+        <h2>Provider credentials</h2>
+        <form id="provider-form">
+          <label for="provider-name">Provider</label>
+          <select id="provider-name"><option value="openrouter">OpenRouter</option><option value="surplus">Surplus Intelligence</option></select>
+          <label for="provider-label">Label</label>
+          <input id="provider-label" placeholder="main" autocomplete="off">
+          <label for="provider-key">API key</label>
+          <input id="provider-key" type="password" required autocomplete="off">
+          <button type="submit">Save credential</button>
+        </form>
+        <ul id="provider-list"><li class="muted">Loading…</li></ul>
+      </section>
+    </main>
+    <script src="/static/app.js"></script>
+  </body>
+</html>

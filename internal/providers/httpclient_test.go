@@ -1,0 +1,80 @@
+package providers
+
+import (
+	"context"
+	"io"
+	"net/http"
+	"strings"
+	"testing"
+
+	"github.com/neverknowerdev/paylessforai/internal/matcher"
+	"github.com/neverknowerdev/paylessforai/internal/retry"
+)
+
+type roundTripFunc func(*http.Request) (*http.Response, error)
+
+func (f roundTripFunc) RoundTrip(request *http.Request) (*http.Response, error) { return f(request) }
+
+func TestDiscoverAndParsePricing(t *testing.T) {
+	client := NewHTTPClient("openrouter", "https://provider.invalid/v1", "key")
+	client.Client = &http.Client{Transport: roundTripFunc(func(r *http.Request) (*http.Response, error) {
+		if r.URL.Path != "/v1/models/user" {
+			t.Fatalf("unexpected path %s", r.URL.Path)
+		}
+		return &http.Response{StatusCode: http.StatusOK, Body: io.NopCloser(strings.NewReader(`{"data":[{"id":"model-a","name":"Model A","context_length":1000,"pricing":{"prompt":"0.000001","completion":"0.000002","cacheRead":"0.0000002","cacheWrite":"0.0000005","reasoning":"0.000003","request":"0.00001"},"supported_parameters":["tools"]}]}`)), Header: make(http.Header), Request: r}, nil
+	})}
+	models, err := client.Discover(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(models) != 1 || !models[0].PriceAvailable || models[0].Pricing.InputPicoUSDPerToken != 1_000_000 || models[0].Pricing.CachedReadPicoUSDPerToken != 200_000 || models[0].Pricing.FixedPicoUSD != 10_000_000 {
+		t.Fatalf("unexpected models: %#v", models)
+	}
+}
+
+func TestDiscoverRecognizesFreeVariantWithoutPricing(t *testing.T) {
+	client := NewHTTPClient("openrouter", "https://provider.invalid/v1", "key")
+	client.Client = &http.Client{Transport: roundTripFunc(func(r *http.Request) (*http.Response, error) {
+		return &http.Response{StatusCode: http.StatusOK, Body: io.NopCloser(strings.NewReader(`{"data":[{"id":"model-a:free","name":"Model A Free"}]}`)), Header: make(http.Header), Request: r}, nil
+	})}
+	models, err := client.Discover(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(models) != 1 || !models[0].Free || !models[0].PriceAvailable || models[0].Pricing.InputPicoUSDPerToken != 0 || models[0].Pricing.OutputPicoUSDPerToken != 0 {
+		t.Fatalf("unexpected free model: %#v", models)
+	}
+}
+
+func TestDiscoverAcceptsNumericPricingValues(t *testing.T) {
+	client := NewHTTPClient("surplus", "https://provider.invalid/v1", "key")
+	client.Client = &http.Client{Transport: roundTripFunc(func(r *http.Request) (*http.Response, error) {
+		return &http.Response{StatusCode: http.StatusOK, Body: io.NopCloser(strings.NewReader(`{"data":[{"id":"model-a","pricing":{"prompt":0.000001,"completion":0.000002}}]}`)), Header: make(http.Header), Request: r}, nil
+	})}
+	models, err := client.Discover(context.Background())
+	if err != nil || len(models) != 1 || !models[0].PriceAvailable || models[0].Pricing.OutputPicoUSDPerToken != 2_000_000 {
+		t.Fatalf("unexpected numeric pricing: %#v, %v", models, err)
+	}
+}
+
+func TestDoRewritesModelAndClassifiesErrors(t *testing.T) {
+	client := NewHTTPClient("openrouter", "https://provider.invalid/v1", "key")
+	client.Client = &http.Client{Transport: roundTripFunc(func(r *http.Request) (*http.Response, error) {
+		if r.URL.Path != "/v1/chat/completions" || r.Header.Get("Authorization") != "Bearer key" {
+			t.Fatalf("unexpected request: %s %s", r.Method, r.URL)
+		}
+		body, _ := io.ReadAll(r.Body)
+		if !strings.Contains(string(body), `"model":"upstream"`) {
+			t.Fatalf("model was not rewritten: %s", body)
+		}
+		return &http.Response{StatusCode: http.StatusTooManyRequests, Body: io.NopCloser(strings.NewReader("slow down")), Header: make(http.Header), Request: r}, nil
+	})}
+	_, err := client.Do(context.Background(), matcher.ProtocolChatCompletions, "upstream", []byte(`{"model":"logical","messages":[]}`))
+	if err == nil {
+		t.Fatal("expected error")
+	}
+	upstreamErr, ok := err.(*UpstreamError)
+	if !ok || upstreamErr.Class != retry.ErrorRateLimit {
+		t.Fatalf("unexpected error: %#v", err)
+	}
+}

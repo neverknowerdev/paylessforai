@@ -1,0 +1,352 @@
+package store
+
+import (
+	"context"
+	"crypto/rand"
+	"crypto/sha256"
+	"embed"
+	"encoding/hex"
+	"errors"
+	"fmt"
+	"io/fs"
+	"os"
+	"path/filepath"
+	"sort"
+	"strings"
+	"time"
+
+	"database/sql"
+
+	_ "modernc.org/sqlite"
+)
+
+//go:embed migrations/*.sql
+var migrationFS embed.FS
+
+type Store struct {
+	db *sql.DB
+}
+
+type ClientKey struct {
+	ID         string  `json:"id"`
+	Label      string  `json:"label"`
+	Prefix     string  `json:"prefix"`
+	CreatedAt  string  `json:"created_at"`
+	LastUsedAt *string `json:"last_used_at,omitempty"`
+	RevokedAt  *string `json:"revoked_at,omitempty"`
+}
+
+type RequestUsage struct {
+	RequestID         string
+	InputTokens       int64
+	OutputTokens      int64
+	TotalTokens       int64
+	CachedReadTokens  int64
+	CacheWriteTokens  int64
+	ReasoningTokens   int64
+	EstimatedCostPico int64
+	ActualCostPico    *int64
+	RawUsageJSON      string
+}
+
+type RequestStat struct {
+	ID                string  `json:"id"`
+	Protocol          string  `json:"protocol"`
+	Model             string  `json:"model"`
+	State             string  `json:"state"`
+	ReceivedAt        string  `json:"received_at"`
+	CompletedAt       *string `json:"completed_at,omitempty"`
+	ErrorCode         *string `json:"error_code,omitempty"`
+	InputTokens       int64   `json:"input_tokens"`
+	OutputTokens      int64   `json:"output_tokens"`
+	TotalTokens       int64   `json:"total_tokens"`
+	CachedReadTokens  int64   `json:"cached_read_tokens"`
+	CacheWriteTokens  int64   `json:"cache_write_tokens"`
+	ReasoningTokens   int64   `json:"reasoning_tokens"`
+	EstimatedCostPico int64   `json:"estimated_cost_pico_usd"`
+	ActualCostPico    *int64  `json:"actual_cost_pico_usd,omitempty"`
+}
+
+type ProviderCredential struct {
+	ID            string  `json:"id"`
+	Provider      string  `json:"provider"`
+	Label         string  `json:"label"`
+	Ciphertext    []byte  `json:"-"`
+	Nonce         []byte  `json:"-"`
+	Enabled       bool    `json:"enabled"`
+	CreatedAt     string  `json:"created_at"`
+	UpdatedAt     string  `json:"updated_at"`
+	LastCheckedAt *string `json:"last_checked_at,omitempty"`
+	LastError     *string `json:"last_error,omitempty"`
+}
+
+func Open(ctx context.Context, path string) (*Store, error) {
+	if path == "" {
+		return nil, errors.New("database path is required")
+	}
+	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
+		return nil, fmt.Errorf("create database directory: %w", err)
+	}
+	db, err := sql.Open("sqlite", path)
+	if err != nil {
+		return nil, fmt.Errorf("open sqlite: %w", err)
+	}
+	db.SetMaxOpenConns(1)
+	db.SetMaxIdleConns(1)
+	store := &Store{db: db}
+	if err := store.configure(ctx); err != nil {
+		db.Close()
+		return nil, err
+	}
+	if err := store.Migrate(ctx); err != nil {
+		db.Close()
+		return nil, err
+	}
+	return store, nil
+}
+
+func (s *Store) configure(ctx context.Context) error {
+	for _, statement := range []string{"PRAGMA foreign_keys = ON", "PRAGMA journal_mode = WAL", "PRAGMA busy_timeout = 5000"} {
+		if _, err := s.db.ExecContext(ctx, statement); err != nil {
+			return fmt.Errorf("configure sqlite: %s: %w", statement, err)
+		}
+	}
+	return nil
+}
+
+func (s *Store) DB() *sql.DB { return s.db }
+
+func (s *Store) Close() error { return s.db.Close() }
+
+func (s *Store) CreateClientKey(ctx context.Context, label string) (ClientKey, string, error) {
+	if strings.TrimSpace(label) == "" {
+		label = "default"
+	}
+	secretBytes := make([]byte, 32)
+	if _, err := rand.Read(secretBytes); err != nil {
+		return ClientKey{}, "", fmt.Errorf("generate client key: %w", err)
+	}
+	secret := "plai_" + hex.EncodeToString(secretBytes)
+	hash := sha256.Sum256([]byte(secret))
+	idBytes := make([]byte, 16)
+	if _, err := rand.Read(idBytes); err != nil {
+		return ClientKey{}, "", fmt.Errorf("generate client key ID: %w", err)
+	}
+	id := hex.EncodeToString(idBytes)
+	now := time.Now().UTC().Format(time.RFC3339Nano)
+	if _, err := s.db.ExecContext(ctx, `INSERT INTO client_api_keys(id, label, key_hash, key_prefix, created_at) VALUES(?, ?, ?, ?, ?)`, id, label, hex.EncodeToString(hash[:]), secret[:13], now); err != nil {
+		return ClientKey{}, "", fmt.Errorf("store client key: %w", err)
+	}
+	return ClientKey{ID: id, Label: label, Prefix: secret[:13], CreatedAt: now}, secret, nil
+}
+
+func (s *Store) AuthenticateClientKey(ctx context.Context, secret string) (ClientKey, bool, error) {
+	hash := sha256.Sum256([]byte(secret))
+	var key ClientKey
+	var lastUsed, revoked *string
+	err := s.db.QueryRowContext(ctx, `SELECT id, label, key_prefix, created_at, last_used_at, revoked_at FROM client_api_keys WHERE key_hash = ?`, hex.EncodeToString(hash[:])).Scan(&key.ID, &key.Label, &key.Prefix, &key.CreatedAt, &lastUsed, &revoked)
+	if errors.Is(err, sql.ErrNoRows) {
+		return ClientKey{}, false, nil
+	}
+	if err != nil {
+		return ClientKey{}, false, err
+	}
+	key.LastUsedAt, key.RevokedAt = lastUsed, revoked
+	if revoked != nil {
+		return key, false, nil
+	}
+	now := time.Now().UTC().Format(time.RFC3339Nano)
+	if _, err := s.db.ExecContext(ctx, `UPDATE client_api_keys SET last_used_at = ? WHERE id = ?`, now, key.ID); err != nil {
+		return ClientKey{}, false, err
+	}
+	key.LastUsedAt = &now
+	return key, true, nil
+}
+
+func (s *Store) ListClientKeys(ctx context.Context) ([]ClientKey, error) {
+	rows, err := s.db.QueryContext(ctx, `SELECT id, label, key_prefix, created_at, last_used_at, revoked_at FROM client_api_keys ORDER BY created_at DESC`)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var keys []ClientKey
+	for rows.Next() {
+		var key ClientKey
+		if err := rows.Scan(&key.ID, &key.Label, &key.Prefix, &key.CreatedAt, &key.LastUsedAt, &key.RevokedAt); err != nil {
+			return nil, err
+		}
+		keys = append(keys, key)
+	}
+	return keys, rows.Err()
+}
+
+func (s *Store) RevokeClientKey(ctx context.Context, id string) error {
+	_, err := s.db.ExecContext(ctx, `UPDATE client_api_keys SET revoked_at = ? WHERE id = ? AND revoked_at IS NULL`, time.Now().UTC().Format(time.RFC3339Nano), id)
+	return err
+}
+
+func (s *Store) UpsertProviderCredential(ctx context.Context, credential ProviderCredential) error {
+	now := time.Now().UTC().Format(time.RFC3339Nano)
+	if credential.CreatedAt == "" {
+		credential.CreatedAt = now
+	}
+	_, err := s.db.ExecContext(ctx, `INSERT INTO provider_credentials(id, provider, label, ciphertext, nonce, enabled, created_at, updated_at) VALUES(?, ?, ?, ?, ?, ?, ?, ?) ON CONFLICT(id) DO UPDATE SET provider=excluded.provider, label=excluded.label, ciphertext=excluded.ciphertext, nonce=excluded.nonce, enabled=excluded.enabled, updated_at=excluded.updated_at`, credential.ID, credential.Provider, credential.Label, credential.Ciphertext, credential.Nonce, boolInt(credential.Enabled), credential.CreatedAt, now)
+	return err
+}
+
+func (s *Store) ListProviderCredentials(ctx context.Context) ([]ProviderCredential, error) {
+	rows, err := s.db.QueryContext(ctx, `SELECT id, provider, label, ciphertext, nonce, enabled, created_at, updated_at, last_checked_at, last_error FROM provider_credentials ORDER BY created_at DESC`)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var result []ProviderCredential
+	for rows.Next() {
+		var credential ProviderCredential
+		var enabled int
+		if err := rows.Scan(&credential.ID, &credential.Provider, &credential.Label, &credential.Ciphertext, &credential.Nonce, &enabled, &credential.CreatedAt, &credential.UpdatedAt, &credential.LastCheckedAt, &credential.LastError); err != nil {
+			return nil, err
+		}
+		credential.Enabled = enabled != 0
+		result = append(result, credential)
+	}
+	return result, rows.Err()
+}
+
+func (s *Store) DeleteProviderCredential(ctx context.Context, id string) error {
+	_, err := s.db.ExecContext(ctx, `DELETE FROM provider_credentials WHERE id = ?`, id)
+	return err
+}
+
+func boolInt(value bool) int {
+	if value {
+		return 1
+	}
+	return 0
+}
+
+func (s *Store) CreateProxyRequest(ctx context.Context, id, clientKeyID, protocol, model string) error {
+	_, err := s.db.ExecContext(ctx, `INSERT INTO proxy_requests(id, client_key_id, protocol, logical_model, state, received_at) VALUES(?, NULLIF(?, ''), ?, ?, 'received', ?)`, id, clientKeyID, protocol, model, time.Now().UTC().Format(time.RFC3339Nano))
+	return err
+}
+
+func (s *Store) CompleteProxyRequest(ctx context.Context, id, state, errorCode, errorMessage string) error {
+	_, err := s.db.ExecContext(ctx, `UPDATE proxy_requests SET state = ?, completed_at = ?, error_code = NULLIF(?, ''), error_message = NULLIF(?, '') WHERE id = ?`, state, time.Now().UTC().Format(time.RFC3339Nano), errorCode, errorMessage, id)
+	return err
+}
+
+func (s *Store) RecordUsage(ctx context.Context, usage RequestUsage) error {
+	_, err := s.db.ExecContext(ctx, `INSERT INTO request_usage(request_id, input_tokens, output_tokens, total_tokens, cached_read_tokens, cache_write_tokens, reasoning_tokens, estimated_cost_pico_usd, actual_cost_pico_usd, raw_usage_json) VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?) ON CONFLICT(request_id) DO UPDATE SET input_tokens=excluded.input_tokens, output_tokens=excluded.output_tokens, total_tokens=excluded.total_tokens, cached_read_tokens=excluded.cached_read_tokens, cache_write_tokens=excluded.cache_write_tokens, reasoning_tokens=excluded.reasoning_tokens, estimated_cost_pico_usd=excluded.estimated_cost_pico_usd, actual_cost_pico_usd=excluded.actual_cost_pico_usd, raw_usage_json=excluded.raw_usage_json`, usage.RequestID, usage.InputTokens, usage.OutputTokens, usage.TotalTokens, usage.CachedReadTokens, usage.CacheWriteTokens, usage.ReasoningTokens, usage.EstimatedCostPico, usage.ActualCostPico, usage.RawUsageJSON)
+	return err
+}
+
+func (s *Store) ListRequestStats(ctx context.Context, limit int) ([]RequestStat, error) {
+	if limit <= 0 || limit > 500 {
+		limit = 100
+	}
+	rows, err := s.db.QueryContext(ctx, `SELECT r.id, r.protocol, r.logical_model, r.state, r.received_at, r.completed_at, r.error_code,
+		u.input_tokens, u.output_tokens, u.total_tokens, u.cached_read_tokens, u.cache_write_tokens, u.reasoning_tokens,
+		u.estimated_cost_pico_usd, u.actual_cost_pico_usd
+		FROM proxy_requests r LEFT JOIN request_usage u ON u.request_id = r.id
+		ORDER BY r.received_at DESC LIMIT ?`, limit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	result := make([]RequestStat, 0)
+	for rows.Next() {
+		var item RequestStat
+		var completedAt, errorCode sql.NullString
+		var input, output, total, cachedRead, cacheWrite, reasoning, estimated sql.NullInt64
+		var actual sql.NullInt64
+		if err := rows.Scan(&item.ID, &item.Protocol, &item.Model, &item.State, &item.ReceivedAt, &completedAt, &errorCode,
+			&input, &output, &total, &cachedRead, &cacheWrite, &reasoning, &estimated, &actual); err != nil {
+			return nil, err
+		}
+		if completedAt.Valid {
+			item.CompletedAt = &completedAt.String
+		}
+		if errorCode.Valid {
+			item.ErrorCode = &errorCode.String
+		}
+		item.InputTokens, item.OutputTokens, item.TotalTokens = input.Int64, output.Int64, total.Int64
+		item.CachedReadTokens, item.CacheWriteTokens, item.ReasoningTokens = cachedRead.Int64, cacheWrite.Int64, reasoning.Int64
+		item.EstimatedCostPico = estimated.Int64
+		if actual.Valid {
+			item.ActualCostPico = &actual.Int64
+		}
+		result = append(result, item)
+	}
+	return result, rows.Err()
+}
+
+type migration struct {
+	name     string
+	checksum string
+	contents string
+}
+
+func loadMigrations() ([]migration, error) {
+	entries, err := fs.Glob(migrationFS, "migrations/*.sql")
+	if err != nil {
+		return nil, err
+	}
+	sort.Strings(entries)
+	result := make([]migration, 0, len(entries))
+	for _, entry := range entries {
+		contents, err := fs.ReadFile(migrationFS, entry)
+		if err != nil {
+			return nil, err
+		}
+		result = append(result, migration{name: strings.TrimPrefix(entry, "migrations/"), checksum: checksum(contents), contents: string(contents)})
+	}
+	return result, nil
+}
+
+func (s *Store) Migrate(ctx context.Context) error {
+	if _, err := s.db.ExecContext(ctx, `CREATE TABLE IF NOT EXISTS schema_migrations (
+		name TEXT PRIMARY KEY,
+		checksum TEXT NOT NULL,
+		applied_at TEXT NOT NULL
+	)`); err != nil {
+		return fmt.Errorf("create migration table: %w", err)
+	}
+	migrations, err := loadMigrations()
+	if err != nil {
+		return fmt.Errorf("load migrations: %w", err)
+	}
+	for _, migration := range migrations {
+		var appliedChecksum string
+		err := s.db.QueryRowContext(ctx, `SELECT checksum FROM schema_migrations WHERE name = ?`, migration.name).Scan(&appliedChecksum)
+		if err == nil {
+			if appliedChecksum != migration.checksum {
+				return fmt.Errorf("migration checksum mismatch for %s", migration.name)
+			}
+			continue
+		}
+		if !errors.Is(err, sql.ErrNoRows) {
+			return fmt.Errorf("read migration %s: %w", migration.name, err)
+		}
+		tx, err := s.db.BeginTx(ctx, nil)
+		if err != nil {
+			return fmt.Errorf("begin migration %s: %w", migration.name, err)
+		}
+		if _, err = tx.ExecContext(ctx, migration.contents); err != nil {
+			tx.Rollback()
+			return fmt.Errorf("apply migration %s: %w", migration.name, err)
+		}
+		if _, err = tx.ExecContext(ctx, `INSERT INTO schema_migrations(name, checksum, applied_at) VALUES(?, ?, ?)`, migration.name, migration.checksum, time.Now().UTC().Format(time.RFC3339Nano)); err != nil {
+			tx.Rollback()
+			return fmt.Errorf("record migration %s: %w", migration.name, err)
+		}
+		if err = tx.Commit(); err != nil {
+			return fmt.Errorf("commit migration %s: %w", migration.name, err)
+		}
+	}
+	return nil
+}
+
+func checksum(contents []byte) string {
+	hash := sha256.Sum256(contents)
+	return hex.EncodeToString(hash[:])
+}

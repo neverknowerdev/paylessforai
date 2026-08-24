@@ -143,7 +143,7 @@ PayLessForAI will be a modular monolith:
 ```text
 cmd/paylessforai/             CLI, startup, lifecycle, graceful shutdown
 internal/config/              validated runtime configuration
-internal/httpapi/             public inference and management HTTP APIs
+internal/controllers/             public inference and management HTTP APIs
 internal/protocol/openai/     Chat Completions and Responses wire handling
 internal/protocol/anthropic/  Messages wire handling
 internal/providers/           provider contracts and shared types

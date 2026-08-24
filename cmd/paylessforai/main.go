@@ -14,7 +14,7 @@ import (
 
 	"github.com/neverknowerdev/paylessforai/internal/catalog"
 	"github.com/neverknowerdev/paylessforai/internal/config"
-	"github.com/neverknowerdev/paylessforai/internal/httpapi"
+	"github.com/neverknowerdev/paylessforai/internal/controllers"
 	"github.com/neverknowerdev/paylessforai/internal/providers"
 	"github.com/neverknowerdev/paylessforai/internal/proxy"
 	"github.com/neverknowerdev/paylessforai/internal/secrets"
@@ -58,7 +58,7 @@ func run(parent context.Context, args []string) error {
 		return catalogManager.Refresh(appContext)
 	}
 	proxyHandler := proxy.New(catalogManager, s)
-	server, err := httpapi.NewWithDeps(c.ListenAddr, c.ReadHeaderTimeout, c.IdleTimeout, s, catalogManager, proxyHandler, httpapi.CredentialDeps{Box: secretBox, ProviderBases: providerBases, Reload: reloadProviders})
+	server, err := controllers.NewWithDeps(c.ListenAddr, c.ReadHeaderTimeout, c.IdleTimeout, s, catalogManager, proxyHandler, controllers.CredentialDeps{Box: secretBox, ProviderBases: providerBases, Reload: reloadProviders})
 	if err != nil {
 		return fmt.Errorf("create HTTP server: %w", err)
 	}

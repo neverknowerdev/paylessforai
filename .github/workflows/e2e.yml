@@ -1,0 +1,54 @@
+name: Browser E2E
+
+on:
+  push:
+    branches:
+      - main
+      - 'codex/**'
+  pull_request: {}
+
+permissions:
+  contents: read
+
+jobs:
+  playwright:
+    name: Playwright E2E
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+
+    steps:
+      - name: Check out source
+        uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Install E2E dependencies
+        working-directory: test/e2e
+        run: npm install --no-audit --no-fund
+
+      - name: Install Playwright Chromium
+        working-directory: test/e2e
+        run: npx playwright install --with-deps chromium
+
+      - name: Run browser tests
+        working-directory: test/e2e
+        run: npm test
+
+      - name: Upload Playwright diagnostics
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: playwright-diagnostics
+          if-no-files-found: ignore
+          path: |
+            test/e2e/test-results
+            test/e2e/playwright-report

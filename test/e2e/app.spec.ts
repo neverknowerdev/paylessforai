@@ -25,6 +25,7 @@ test('configures providers, creates a client key, and routes an OpenAI request',
 
   await page.locator('#key-label').fill('playwright');
   await page.getByRole('button', { name: 'Create key' }).click();
+  await expect(page.locator('#new-key')).toContainText('plai_');
   const secretText = await page.locator('#new-key').textContent();
   const secret = secretText?.match(/plai_[0-9a-f]+/)?.[0];
   expect(secret).toBeTruthy();
@@ -46,6 +47,7 @@ test('supports Responses and Anthropic Messages contracts', async ({ page, reque
   await page.goto('/');
   await page.locator('#key-label').fill('protocols');
   await page.getByRole('button', { name: 'Create key' }).click();
+  await expect(page.locator('#new-key')).toContainText('plai_');
   const secretText = await page.locator('#new-key').textContent();
   const secret = secretText?.match(/plai_[0-9a-f]+/)?.[0];
   expect(secret).toBeTruthy();

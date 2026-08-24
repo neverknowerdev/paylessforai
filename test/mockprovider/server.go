@@ -49,6 +49,10 @@ type Server struct {
 }
 
 func New(scenario Scenario) *Server {
+	return &Server{scenario: normalizeScenario(scenario)}
+}
+
+func normalizeScenario(scenario Scenario) Scenario {
 	if scenario.ResponseText == "" {
 		scenario.ResponseText = "mock response"
 	}
@@ -58,7 +62,7 @@ func New(scenario Scenario) *Server {
 	if scenario.FailureStatus == 0 {
 		scenario.FailureStatus = http.StatusServiceUnavailable
 	}
-	return &Server{scenario: scenario}
+	return scenario
 }
 
 func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
@@ -135,6 +139,7 @@ func (s *Server) handleControl(w http.ResponseWriter, r *http.Request, body []by
 		if scenario.Status == 0 {
 			scenario.Status = http.StatusOK
 		}
+		scenario = normalizeScenario(scenario)
 		s.mu.Lock()
 		s.scenario = scenario
 		s.mu.Unlock()

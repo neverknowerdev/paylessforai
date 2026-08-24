@@ -37,6 +37,20 @@ func TestScenarioFailureCountIsBounded(t *testing.T) {
 	}
 }
 
+func TestControlScenarioAppliesDefaultFailureStatus(t *testing.T) {
+	server := New(Scenario{})
+	control := httptest.NewRecorder()
+	server.ServeHTTP(control, httptest.NewRequest(http.MethodPost, "/__mock/scenario", strings.NewReader(`{"failure_count":1}`)))
+	if control.Code != http.StatusOK {
+		t.Fatalf("unexpected control response: %d", control.Code)
+	}
+	first := httptest.NewRecorder()
+	server.ServeHTTP(first, httptest.NewRequest(http.MethodPost, "/v1/chat/completions", strings.NewReader(`{"model":"model-a","messages":[]}`)))
+	if first.Code != http.StatusServiceUnavailable {
+		t.Fatalf("unexpected default failure status: %d", first.Code)
+	}
+}
+
 func TestScenarioOnlyStreamsWhenRequested(t *testing.T) {
 	server := New(Scenario{ResponseText: "hello"})
 	request := httptest.NewRequest(http.MethodPost, "/v1/chat/completions", strings.NewReader(`{"model":"model-a","messages":[]}`))

@@ -11,20 +11,24 @@ test('configures providers, creates a client key, and routes an OpenAI request',
   await page.goto('/');
   await expect(page.getByRole('heading', { name: 'PayLessForAI' })).toBeVisible();
 
+  await page.getByRole('link', { name: 'Access & keys' }).click();
+  await page.getByRole('button', { name: 'Add provider' }).click();
   await page.locator('#provider-name').selectOption('openrouter');
   await page.locator('#provider-label').fill('mock-openrouter');
   await page.locator('#provider-key').fill('mock-key');
   await page.getByRole('button', { name: 'Save credential' }).click();
   await expect(page.locator('#provider-list')).toContainText('openrouter');
 
+  await page.getByRole('button', { name: 'Add provider' }).click();
   await page.locator('#provider-name').selectOption('surplus');
   await page.locator('#provider-label').fill('mock-surplus');
   await page.locator('#provider-key').fill('mock-key');
   await page.getByRole('button', { name: 'Save credential' }).click();
   await expect(page.locator('#provider-list')).toContainText('surplus');
 
+  await page.getByRole('button', { name: 'Create API key' }).click();
   await page.locator('#key-label').fill('playwright');
-  await page.getByRole('button', { name: 'Create key' }).click();
+  await page.locator('#key-modal').getByRole('button', { name: 'Create key' }).click();
   await expect(page.locator('#new-key')).toContainText('plai_');
   const secretText = await page.locator('#new-key').textContent();
   const secret = secretText?.match(/plai_[0-9a-f]+/)?.[0];
@@ -45,8 +49,10 @@ test('configures providers, creates a client key, and routes an OpenAI request',
 
 test('supports Responses and Anthropic Messages contracts', async ({ page, request }) => {
   await page.goto('/');
+  await page.getByRole('link', { name: 'Access & keys' }).click();
+  await page.getByRole('button', { name: 'Create API key' }).click();
   await page.locator('#key-label').fill('protocols');
-  await page.getByRole('button', { name: 'Create key' }).click();
+  await page.locator('#key-modal').getByRole('button', { name: 'Create key' }).click();
   await expect(page.locator('#new-key')).toContainText('plai_');
   const secretText = await page.locator('#new-key').textContent();
   const secret = secretText?.match(/plai_[0-9a-f]+/)?.[0];

@@ -94,6 +94,11 @@ func TestRequestStatsAPI(t *testing.T) {
 	if response.Code != http.StatusOK || !strings.Contains(response.Body.String(), `"total_tokens":5`) {
 		t.Fatalf("unexpected request stats response: %d %s", response.Code, response.Body.String())
 	}
+	summary := httptest.NewRecorder()
+	server.httpServer.Handler.ServeHTTP(summary, httptest.NewRequest(http.MethodGet, "/api/stats/summary", nil))
+	if summary.Code != http.StatusOK || !strings.Contains(summary.Body.String(), `"total_requests":1`) {
+		t.Fatalf("unexpected stats summary response: %d %s", summary.Code, summary.Body.String())
+	}
 }
 
 func TestServerUI(t *testing.T) {

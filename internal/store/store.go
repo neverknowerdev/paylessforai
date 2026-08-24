@@ -67,6 +67,22 @@ type RequestStat struct {
 	ActualCostPico    *int64  `json:"actual_cost_pico_usd,omitempty"`
 }
 
+type StatsSummary struct {
+	TotalRequests      int64 `json:"total_requests"`
+	SucceededRequests  int64 `json:"succeeded_requests"`
+	FailedRequests     int64 `json:"failed_requests"`
+	PartialRequests    int64 `json:"partial_requests"`
+	InputTokens        int64 `json:"input_tokens"`
+	OutputTokens       int64 `json:"output_tokens"`
+	TotalTokens        int64 `json:"total_tokens"`
+	CachedReadTokens   int64 `json:"cached_read_tokens"`
+	CacheWriteTokens   int64 `json:"cache_write_tokens"`
+	ReasoningTokens    int64 `json:"reasoning_tokens"`
+	EstimatedCostPico  int64 `json:"estimated_cost_pico_usd"`
+	ActualCostPico     int64 `json:"actual_cost_pico_usd"`
+	RequestsWithActual int64 `json:"requests_with_actual_cost"`
+}
+
 type ProviderCredential struct {
 	ID            string  `json:"id"`
 	Provider      string  `json:"provider"`
@@ -278,6 +294,30 @@ func (s *Store) ListRequestStats(ctx context.Context, limit int) ([]RequestStat,
 		result = append(result, item)
 	}
 	return result, rows.Err()
+}
+
+func (s *Store) RequestStatsSummary(ctx context.Context) (StatsSummary, error) {
+	var summary StatsSummary
+	err := s.db.QueryRowContext(ctx, `SELECT
+		COUNT(*),
+		COALESCE(SUM(CASE WHEN r.state = 'succeeded' THEN 1 ELSE 0 END), 0),
+		COALESCE(SUM(CASE WHEN r.state = 'failed' THEN 1 ELSE 0 END), 0),
+		COALESCE(SUM(CASE WHEN r.state = 'partial' THEN 1 ELSE 0 END), 0),
+		COALESCE(SUM(u.input_tokens), 0),
+		COALESCE(SUM(u.output_tokens), 0),
+		COALESCE(SUM(u.total_tokens), 0),
+		COALESCE(SUM(u.cached_read_tokens), 0),
+		COALESCE(SUM(u.cache_write_tokens), 0),
+		COALESCE(SUM(u.reasoning_tokens), 0),
+		COALESCE(SUM(u.estimated_cost_pico_usd), 0),
+		COALESCE(SUM(u.actual_cost_pico_usd), 0),
+		COUNT(u.actual_cost_pico_usd)
+		FROM proxy_requests r LEFT JOIN request_usage u ON u.request_id = r.id`).Scan(
+		&summary.TotalRequests, &summary.SucceededRequests, &summary.FailedRequests, &summary.PartialRequests,
+		&summary.InputTokens, &summary.OutputTokens, &summary.TotalTokens, &summary.CachedReadTokens,
+		&summary.CacheWriteTokens, &summary.ReasoningTokens, &summary.EstimatedCostPico,
+		&summary.ActualCostPico, &summary.RequestsWithActual)
+	return summary, err
 }
 
 type migration struct {

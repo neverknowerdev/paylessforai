@@ -28,4 +28,11 @@ func TestRequestStatsIncludeUsage(t *testing.T) {
 	if len(items) != 1 || items[0].State != "succeeded" || items[0].TotalTokens != 5 || items[0].EstimatedCostPico != 7 {
 		t.Fatalf("unexpected request stats: %#v", items)
 	}
+	summary, err := s.RequestStatsSummary(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if summary.TotalRequests != 1 || summary.SucceededRequests != 1 || summary.TotalTokens != 5 || summary.EstimatedCostPico != 7 {
+		t.Fatalf("unexpected summary: %#v", summary)
+	}
 }

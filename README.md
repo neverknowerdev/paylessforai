@@ -12,7 +12,7 @@ will be added later; v1 is intentionally local-only.
 ## v1 capabilities
 
 - OpenRouter and Surplus Intelligence provider clients.
-- OpenRouter `:free` variants and zero-priced models, ranked before paid routes.
+- OpenRouter `:free` variants and explicitly zero-priced token models, ranked before paid routes.
 - Startup model/catalog discovery with periodic refresh.
 - Provider architecture metadata: input/output modalities and supported feature tags,
   surfaced in `/v1/models` and the UI; requests automatically require compatible
@@ -35,6 +35,12 @@ detail view.
   fastest/average/slowest response time, tokens, cost, and per-model breakdowns;
   free models receive a distinct FREE label. Requests also show end-to-end
   response time in the table and detail view.
+
+The Models view exposes tag/provider filters, price and discount sorting, and a
+historical discount column when requests have an official pricing baseline.
+Surplus routes are marked free only when the provider metadata explicitly labels
+them free (for example `hy3-free`); zero prompt/completion fields alone are not
+enough because media models may use a separate image, audio, video, or job meter.
 
 ## Quick start
 

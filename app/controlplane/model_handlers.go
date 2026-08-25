@@ -3,6 +3,8 @@ package controlplane
 import (
 	"net/http"
 	"sort"
+
+	"github.com/neverknowerdev/paylessforai/internal/store"
 )
 
 func modalityNames(values map[string]bool) []string {
@@ -30,6 +32,14 @@ func (s *Server) handleCatalogModels(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	routes := s.catalog.Snapshot().Routes
+	modelStats := make(map[string]store.ModelStats)
+	if s.db != nil {
+		if stats, err := s.db.ModelStats(r.Context(), nil); err == nil {
+			for _, stat := range stats {
+				modelStats[stat.Model] = stat
+			}
+		}
+	}
 	data := make([]map[string]any, 0, len(routes))
 	seen := make(map[string]struct{}, len(routes))
 	for _, route := range routes {
@@ -38,7 +48,7 @@ func (s *Server) handleCatalogModels(w http.ResponseWriter, r *http.Request) {
 			continue
 		}
 		seen[key] = struct{}{}
-		data = append(data, map[string]any{
+		item := map[string]any{
 			"id": route.ID, "provider": route.Provider, "model": route.LogicalModel, "upstream_model": route.UpstreamModel,
 			"free": route.Free, "price_available": route.PriceAvailable, "health": route.Health,
 			"context_length": route.Capabilities.MaxContext, "max_output_tokens": route.Capabilities.MaxOutput,
@@ -49,7 +59,11 @@ func (s *Server) handleCatalogModels(w http.ResponseWriter, r *http.Request) {
 				"cached_read": route.Price.CachedReadPicoUSDPerToken, "cache_write": route.Price.CacheWritePicoUSDPerToken,
 				"reasoning": route.Price.ReasoningPicoUSDPerToken, "fixed": route.Price.FixedPicoUSD,
 			},
-		})
+		}
+		if stat, ok := modelStats[route.LogicalModel]; ok && stat.DiscountBPS != nil {
+			item["discount_percent_bps"] = *stat.DiscountBPS
+		}
+		data = append(data, item)
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"data": data})
 }

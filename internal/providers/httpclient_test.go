@@ -63,6 +63,31 @@ func TestDiscoverMapsTopLevelModalityTags(t *testing.T) {
 	}
 }
 
+func TestDiscoverDoesNotCallMediaMeteredZeroTokenModelFree(t *testing.T) {
+	client := NewHTTPClient("surplus", "https://provider.invalid/v1", "key")
+	client.Client = &http.Client{Transport: roundTripFunc(func(r *http.Request) (*http.Response, error) {
+		return &http.Response{StatusCode: http.StatusOK, Body: io.NopCloser(strings.NewReader(`{"data":[{"id":"image-model","pricing":{"prompt":"0","completion":"0","image":"0.36"},"architecture":{"modality":"text->image"}}]}`)), Header: make(http.Header), Request: r}, nil
+	})}
+	models, err := client.Discover(context.Background())
+	if err != nil || len(models) != 1 {
+		t.Fatalf("unexpected models: %#v, %v", models, err)
+	}
+	if models[0].Free {
+		t.Fatalf("media-metered model was classified as free: %#v", models[0])
+	}
+}
+
+func TestDiscoverRequiresExplicitFreeLabelForSurplusZeroTokenModel(t *testing.T) {
+	client := NewHTTPClient("surplus", "https://provider.invalid/v1", "key")
+	client.Client = &http.Client{Transport: roundTripFunc(func(r *http.Request) (*http.Response, error) {
+		return &http.Response{StatusCode: http.StatusOK, Body: io.NopCloser(strings.NewReader(`{"data":[{"id":"zero-token-model","name":"Zero Token Model","pricing":{"prompt":"0","completion":"0"}}]}`)), Header: make(http.Header), Request: r}, nil
+	})}
+	models, err := client.Discover(context.Background())
+	if err != nil || len(models) != 1 || models[0].Free {
+		t.Fatalf("bare zero token pricing must not imply free: %#v, %v", models, err)
+	}
+}
+
 func TestDiscoverAcceptsNumericPricingValues(t *testing.T) {
 	client := NewHTTPClient("surplus", "https://provider.invalid/v1", "key")
 	client.Client = &http.Client{Transport: roundTripFunc(func(r *http.Request) (*http.Response, error) {

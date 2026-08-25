@@ -50,6 +50,7 @@ func (c *HTTPClient) Discover(ctx context.Context) ([]Model, error) {
 		Data []struct {
 			ID                  string                     `json:"id"`
 			Name                string                     `json:"name"`
+			Description         string                     `json:"description"`
 			ContextLength       int64                      `json:"context_length"`
 			MaxCompletionTokens int64                      `json:"max_completion_tokens"`
 			Pricing             map[string]json.RawMessage `json:"pricing"`
@@ -74,7 +75,7 @@ func (c *HTTPClient) Discover(ctx context.Context) ([]Model, error) {
 		cacheWrite, _ := firstPrice(item.Pricing, "cache_write", "cacheWrite", "cache_creation_input")
 		reasoning, _ := firstPrice(item.Pricing, "reasoning", "thinking")
 		fixed, _ := firstPrice(item.Pricing, "request", "fixed", "per_request")
-		free := isFreeModel(c.Provider, item.ID, input, output, inputOK && outputOK)
+		free := isFreeModel(c.Provider, item.ID, item.Name, item.Description, input, output, inputOK && outputOK && !hasNonTokenCharge(item.Pricing))
 		if free {
 			if !inputOK {
 				input, inputOK = 0, true
@@ -133,11 +134,42 @@ func normalizeTags(values []string) []string {
 	return result
 }
 
-func isFreeModel(provider, id string, input, output int64, priced bool) bool {
-	if strings.HasSuffix(strings.ToLower(id), ":free") || (provider == "openrouter" && id == "openrouter/free") {
+func isFreeModel(provider, id, name, description string, input, output int64, priced bool) bool {
+	label := strings.ToLower(strings.TrimSpace(id + " " + name))
+	if strings.HasSuffix(strings.ToLower(id), ":free") || strings.HasSuffix(strings.ToLower(id), "-free") || strings.Contains(label, "(free)") || strings.Contains(strings.ToLower(description), "free") || (provider == "openrouter" && id == "openrouter/free") {
 		return true
 	}
-	return priced && input == 0 && output == 0
+	if provider == "openrouter" {
+		return priced && input == 0 && output == 0
+	}
+	// Surplus can mirror catalog entries whose token fields are zero because
+	// their non-token meter is omitted. Treat only an explicit free label as
+	// free there; a bare zero price is not enough evidence.
+	return false
+}
+
+// hasNonTokenCharge prevents media models with zero token prices but a paid
+// per-image, per-minute, or per-job meter from being presented as free LLMs.
+func hasNonTokenCharge(pricing map[string]json.RawMessage) bool {
+	for name, raw := range pricing {
+		switch strings.ToLower(name) {
+		case "prompt", "input", "completion", "output", "cache_read", "cacheread", "cache_write", "cachewrite", "cache_creation_input", "reasoning", "thinking":
+			continue
+		}
+		var value string
+		if json.Unmarshal(raw, &value) != nil {
+			var number json.Number
+			if json.Unmarshal(raw, &number) != nil {
+				continue
+			}
+			value = number.String()
+		}
+		amount, ok := new(big.Float).SetString(value)
+		if ok && amount.Sign() > 0 {
+			return true
+		}
+	}
+	return false
 }
 
 func firstPrice(pricing map[string]json.RawMessage, names ...string) (int64, bool) {

@@ -94,7 +94,11 @@ func (m *Manager) Refresh(ctx context.Context) error {
 	for _, batch := range all {
 		for _, model := range batch.models {
 			logical := logicalModel(batch.provider, model.ID, openRouterIDs)
-			free := model.Free || (model.PriceAvailable && model.Pricing.InputPicoUSDPerToken == 0 && model.Pricing.OutputPicoUSDPerToken == 0)
+			// Providers classify free routes while parsing their native catalog
+			// metadata. Do not infer free from zero token prices here: media APIs
+			// commonly expose prompt/completion as zero while charging per image,
+			// audio minute, video, or job.
+			free := model.Free
 			if _, ok := modelMap[logical]; !ok {
 				modelMap[logical] = Model{ID: logical, Name: model.Name, Free: free, ContextLength: model.ContextLength, MaxCompletionTokens: model.MaxCompletionTokens, SupportedParameters: append([]string(nil), model.SupportedParameters...), InputModalities: append([]string(nil), model.InputModalities...), OutputModalities: append([]string(nil), model.OutputModalities...), Tags: append([]string(nil), model.Tags...)}
 			} else if free {

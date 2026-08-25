@@ -135,8 +135,11 @@ type ModelStats struct {
 	CacheWriteTokens  int64  `json:"cache_write_tokens"`
 	ReasoningTokens   int64  `json:"reasoning_tokens"`
 	EstimatedCostPico int64  `json:"estimated_cost_pico_usd"`
+	OfficialCostPico  int64  `json:"official_cost_pico_usd"`
 	ActualCostPico    int64  `json:"actual_cost_pico_usd"`
 	SavedCostPico     int64  `json:"saved_cost_pico_usd"`
+	DiscountPico      int64  `json:"discount_pico_usd"`
+	DiscountBPS       *int64 `json:"discount_percent_bps,omitempty"`
 }
 
 type ProviderCredential struct {
@@ -467,8 +470,8 @@ func (s *Store) ModelStats(ctx context.Context, freeModels map[string]bool) ([]M
 		MIN(r.duration_ms), MAX(r.duration_ms), CAST(AVG(r.duration_ms) AS INTEGER), COUNT(r.duration_ms),
 		COALESCE(SUM(u.input_tokens), 0), COALESCE(SUM(u.output_tokens), 0), COALESCE(SUM(u.total_tokens), 0),
 		COALESCE(SUM(u.cached_read_tokens), 0), COALESCE(SUM(u.cache_write_tokens), 0), COALESCE(SUM(u.reasoning_tokens), 0),
-		COALESCE(SUM(u.estimated_cost_pico_usd), 0), COALESCE(SUM(u.actual_cost_pico_usd), 0),
-		COALESCE(SUM(CASE WHEN u.discount_pico_usd > 0 THEN u.discount_pico_usd ELSE 0 END), 0)
+		COALESCE(SUM(u.estimated_cost_pico_usd), 0), COALESCE(SUM(u.official_cost_pico_usd), 0), COALESCE(SUM(u.actual_cost_pico_usd), 0),
+		COALESCE(SUM(u.discount_pico_usd), 0), COALESCE(SUM(CASE WHEN u.discount_pico_usd > 0 THEN u.discount_pico_usd ELSE 0 END), 0)
 		FROM proxy_requests r LEFT JOIN request_usage u ON u.request_id = r.id
 		GROUP BY r.logical_model ORDER BY COUNT(*) DESC, r.logical_model`)
 	if err != nil {
@@ -483,13 +486,17 @@ func (s *Store) ModelStats(ctx context.Context, freeModels map[string]bool) ([]M
 		if err := rows.Scan(&item.Model, &observedFree, &item.Requests, &item.SucceededRequests, &item.FailedRequests, &item.PartialRequests,
 			&item.TotalAttempts, &item.RetriedRequests, &fastest, &slowest, &average, &item.RequestsWithTime,
 			&item.InputTokens, &item.OutputTokens, &item.TotalTokens, &item.CachedReadTokens, &item.CacheWriteTokens, &item.ReasoningTokens,
-			&item.EstimatedCostPico, &item.ActualCostPico, &item.SavedCostPico); err != nil {
+			&item.EstimatedCostPico, &item.OfficialCostPico, &item.ActualCostPico, &item.DiscountPico, &item.SavedCostPico); err != nil {
 			return nil, err
 		}
 		item.Free = freeModels[item.Model] || observedFree != 0
 		if item.Requests > 0 {
 			item.SuccessRateBPS = item.SucceededRequests * 10000 / item.Requests
 			item.RetryRateBPS = item.RetriedRequests * 10000 / item.Requests
+		}
+		if item.OfficialCostPico > 0 {
+			value := item.DiscountPico * 10000 / item.OfficialCostPico
+			item.DiscountBPS = &value
 		}
 		if fastest.Valid {
 			item.FastestMS = &fastest.Int64

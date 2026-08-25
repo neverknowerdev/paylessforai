@@ -52,6 +52,17 @@ func TestRefreshMergesFreeOpenRouterVariantWithPaidProvider(t *testing.T) {
 	}
 }
 
+func TestRefreshDoesNotInferFreeFromZeroTokenPrice(t *testing.T) {
+	manager := New([]providers.Client{fakeClient{name: "surplus", models: []providers.Model{{ID: "media-model", Name: "Media Model", PriceAvailable: true}}}})
+	if err := manager.Refresh(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	snapshot := manager.Snapshot()
+	if len(snapshot.Routes) != 1 || snapshot.Routes[0].Free {
+		t.Fatalf("zero token price must not imply a free route: %#v", snapshot.Routes)
+	}
+}
+
 func TestRefreshPropagatesModalitiesAndTags(t *testing.T) {
 	manager := New([]providers.Client{fakeClient{name: "surplus", models: []providers.Model{{ID: "model-a", Name: "Model A", Pricing: matcher.Price{InputPicoUSDPerToken: 1, OutputPicoUSDPerToken: 1}, PriceAvailable: true, InputModalities: []string{"text", "audio"}, OutputModalities: []string{"text"}, Tags: []string{"streaming"}}}}})
 	if err := manager.Refresh(context.Background()); err != nil {

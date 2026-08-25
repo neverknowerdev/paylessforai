@@ -31,7 +31,10 @@ default, while the original raw payload remains available from the request
 detail view.
 - Local client API keys and encrypted provider-credential management.
 - Embedded UI for the base URL, keys, provider credentials, and recent request
-  statistics.
+  statistics. The Statistics view shows overall attempts/retries, success rate,
+  fastest/average/slowest response time, tokens, cost, and per-model breakdowns;
+  free models receive a distinct FREE label. Requests also show end-to-end
+  response time in the table and detail view.
 
 ## Quick start
 
@@ -88,7 +91,7 @@ Messages also accepts `x-api-key: <client-key>`. Every proxied response includes
 an `X-PayLess-Request-ID` header for tracing.
 
 The local UI uses management endpoints under `/api/` for client keys, provider
-credentials, request statistics, and status. Keep the listener bound to
+credentials, request statistics, model statistics, and status. Keep the listener bound to
 loopback unless those endpoints are protected by an external access layer.
 
 ## Routing and pricing

@@ -71,6 +71,7 @@ type RequestStat struct {
 	State             string        `json:"state"`
 	ReceivedAt        string        `json:"received_at"`
 	CompletedAt       *string       `json:"completed_at,omitempty"`
+	DurationMS        *int64        `json:"duration_ms,omitempty"`
 	ErrorCode         *string       `json:"error_code,omitempty"`
 	InputTokens       int64         `json:"input_tokens"`
 	OutputTokens      int64         `json:"output_tokens"`
@@ -90,20 +91,52 @@ type RequestStat struct {
 }
 
 type StatsSummary struct {
-	TotalRequests      int64 `json:"total_requests"`
-	SucceededRequests  int64 `json:"succeeded_requests"`
-	FailedRequests     int64 `json:"failed_requests"`
-	PartialRequests    int64 `json:"partial_requests"`
-	InputTokens        int64 `json:"input_tokens"`
-	OutputTokens       int64 `json:"output_tokens"`
-	TotalTokens        int64 `json:"total_tokens"`
-	CachedReadTokens   int64 `json:"cached_read_tokens"`
-	CacheWriteTokens   int64 `json:"cache_write_tokens"`
-	ReasoningTokens    int64 `json:"reasoning_tokens"`
-	EstimatedCostPico  int64 `json:"estimated_cost_pico_usd"`
-	ActualCostPico     int64 `json:"actual_cost_pico_usd"`
-	SavedCostPico      int64 `json:"saved_cost_pico_usd"`
-	RequestsWithActual int64 `json:"requests_with_actual_cost"`
+	TotalRequests      int64  `json:"total_requests"`
+	SucceededRequests  int64  `json:"succeeded_requests"`
+	FailedRequests     int64  `json:"failed_requests"`
+	PartialRequests    int64  `json:"partial_requests"`
+	InputTokens        int64  `json:"input_tokens"`
+	OutputTokens       int64  `json:"output_tokens"`
+	TotalTokens        int64  `json:"total_tokens"`
+	CachedReadTokens   int64  `json:"cached_read_tokens"`
+	CacheWriteTokens   int64  `json:"cache_write_tokens"`
+	ReasoningTokens    int64  `json:"reasoning_tokens"`
+	EstimatedCostPico  int64  `json:"estimated_cost_pico_usd"`
+	ActualCostPico     int64  `json:"actual_cost_pico_usd"`
+	SavedCostPico      int64  `json:"saved_cost_pico_usd"`
+	RequestsWithActual int64  `json:"requests_with_actual_cost"`
+	TotalAttempts      int64  `json:"total_attempts"`
+	RetriedRequests    int64  `json:"retried_requests"`
+	FastestMS          *int64 `json:"fastest_response_ms,omitempty"`
+	SlowestMS          *int64 `json:"slowest_response_ms,omitempty"`
+	AverageMS          *int64 `json:"average_response_ms,omitempty"`
+	RequestsWithTime   int64  `json:"requests_with_response_time"`
+}
+
+type ModelStats struct {
+	Model             string `json:"model"`
+	Free              bool   `json:"free"`
+	Requests          int64  `json:"requests"`
+	SucceededRequests int64  `json:"succeeded_requests"`
+	FailedRequests    int64  `json:"failed_requests"`
+	PartialRequests   int64  `json:"partial_requests"`
+	SuccessRateBPS    int64  `json:"success_rate_bps"`
+	TotalAttempts     int64  `json:"total_attempts"`
+	RetriedRequests   int64  `json:"retried_requests"`
+	RetryRateBPS      int64  `json:"retry_rate_bps"`
+	FastestMS         *int64 `json:"fastest_response_ms,omitempty"`
+	SlowestMS         *int64 `json:"slowest_response_ms,omitempty"`
+	AverageMS         *int64 `json:"average_response_ms,omitempty"`
+	RequestsWithTime  int64  `json:"requests_with_response_time"`
+	InputTokens       int64  `json:"input_tokens"`
+	OutputTokens      int64  `json:"output_tokens"`
+	TotalTokens       int64  `json:"total_tokens"`
+	CachedReadTokens  int64  `json:"cached_read_tokens"`
+	CacheWriteTokens  int64  `json:"cache_write_tokens"`
+	ReasoningTokens   int64  `json:"reasoning_tokens"`
+	EstimatedCostPico int64  `json:"estimated_cost_pico_usd"`
+	ActualCostPico    int64  `json:"actual_cost_pico_usd"`
+	SavedCostPico     int64  `json:"saved_cost_pico_usd"`
 }
 
 type ProviderCredential struct {
@@ -270,7 +303,21 @@ func (s *Store) CreateProxyRequest(ctx context.Context, id, clientKeyID, protoco
 }
 
 func (s *Store) CompleteProxyRequest(ctx context.Context, id, state, errorCode, errorMessage string) error {
-	_, err := s.db.ExecContext(ctx, `UPDATE proxy_requests SET state = ?, completed_at = ?, error_code = NULLIF(?, ''), error_message = NULLIF(?, '') WHERE id = ?`, state, time.Now().UTC().Format(time.RFC3339Nano), errorCode, errorMessage, id)
+	now := time.Now().UTC()
+	completedAt := now.Format(time.RFC3339Nano)
+	var receivedAt string
+	if err := s.db.QueryRowContext(ctx, `SELECT received_at FROM proxy_requests WHERE id = ?`, id).Scan(&receivedAt); err != nil && !errors.Is(err, sql.ErrNoRows) {
+		return err
+	}
+	var duration any
+	if parsed, err := time.Parse(time.RFC3339Nano, receivedAt); err == nil {
+		ms := now.Sub(parsed).Milliseconds()
+		if ms < 0 {
+			ms = 0
+		}
+		duration = ms
+	}
+	_, err := s.db.ExecContext(ctx, `UPDATE proxy_requests SET state = ?, completed_at = ?, duration_ms = ?, error_code = NULLIF(?, ''), error_message = NULLIF(?, '') WHERE id = ?`, state, completedAt, duration, errorCode, errorMessage, id)
 	return err
 }
 
@@ -301,7 +348,7 @@ func (s *Store) ListRequestStats(ctx context.Context, limit int) ([]RequestStat,
 	if limit <= 0 || limit > 500 {
 		limit = 100
 	}
-	rows, err := s.db.QueryContext(ctx, `SELECT r.id, r.protocol, r.logical_model, r.state, r.received_at, r.completed_at, r.error_code,
+	rows, err := s.db.QueryContext(ctx, `SELECT r.id, r.protocol, r.logical_model, r.state, r.received_at, r.completed_at, r.duration_ms, r.error_code,
 		COALESCE(r.selected_provider, ''), COALESCE(r.selected_upstream_model, ''), r.attempt_count,
 		u.input_tokens, u.output_tokens, u.total_tokens, u.cached_read_tokens, u.cache_write_tokens, u.reasoning_tokens,
 		u.estimated_cost_pico_usd, u.official_cost_pico_usd, u.actual_cost_pico_usd, u.discount_pico_usd, u.discount_percent_bps
@@ -314,9 +361,10 @@ func (s *Store) ListRequestStats(ctx context.Context, limit int) ([]RequestStat,
 	for rows.Next() {
 		var item RequestStat
 		var completedAt, errorCode sql.NullString
+		var duration sql.NullInt64
 		var input, output, total, cachedRead, cacheWrite, reasoning, estimated sql.NullInt64
 		var official, actual, discount, discountBPS sql.NullInt64
-		if err := rows.Scan(&item.ID, &item.Protocol, &item.Model, &item.State, &item.ReceivedAt, &completedAt, &errorCode,
+		if err := rows.Scan(&item.ID, &item.Protocol, &item.Model, &item.State, &item.ReceivedAt, &completedAt, &duration, &errorCode,
 			&item.Provider, &item.UpstreamModel, &item.Attempts, &input, &output, &total, &cachedRead, &cacheWrite, &reasoning, &estimated, &official, &actual, &discount, &discountBPS); err != nil {
 			return nil, err
 		}
@@ -325,6 +373,9 @@ func (s *Store) ListRequestStats(ctx context.Context, limit int) ([]RequestStat,
 		}
 		if errorCode.Valid {
 			item.ErrorCode = &errorCode.String
+		}
+		if duration.Valid {
+			item.DurationMS = &duration.Int64
 		}
 		item.InputTokens, item.OutputTokens, item.TotalTokens = input.Int64, output.Int64, total.Int64
 		item.CachedReadTokens, item.CacheWriteTokens, item.ReasoningTokens = cachedRead.Int64, cacheWrite.Int64, reasoning.Int64
@@ -390,13 +441,68 @@ func (s *Store) RequestStatsSummary(ctx context.Context) (StatsSummary, error) {
 		COALESCE(SUM(u.estimated_cost_pico_usd), 0),
 		COALESCE(SUM(u.actual_cost_pico_usd), 0),
 		COALESCE(SUM(CASE WHEN u.discount_pico_usd > 0 THEN u.discount_pico_usd ELSE 0 END), 0),
-		COUNT(u.actual_cost_pico_usd)
+		COUNT(u.actual_cost_pico_usd),
+		COALESCE(SUM(r.attempt_count), 0),
+		COALESCE(SUM(CASE WHEN r.attempt_count > 1 THEN 1 ELSE 0 END), 0),
+		MIN(r.duration_ms), MAX(r.duration_ms), CAST(AVG(r.duration_ms) AS INTEGER), COUNT(r.duration_ms)
 		FROM proxy_requests r LEFT JOIN request_usage u ON u.request_id = r.id`).Scan(
 		&summary.TotalRequests, &summary.SucceededRequests, &summary.FailedRequests, &summary.PartialRequests,
 		&summary.InputTokens, &summary.OutputTokens, &summary.TotalTokens, &summary.CachedReadTokens,
 		&summary.CacheWriteTokens, &summary.ReasoningTokens, &summary.EstimatedCostPico,
-		&summary.ActualCostPico, &summary.SavedCostPico, &summary.RequestsWithActual)
+		&summary.ActualCostPico, &summary.SavedCostPico, &summary.RequestsWithActual,
+		&summary.TotalAttempts, &summary.RetriedRequests, &summary.FastestMS, &summary.SlowestMS, &summary.AverageMS, &summary.RequestsWithTime)
 	return summary, err
+}
+
+func (s *Store) ModelStats(ctx context.Context, freeModels map[string]bool) ([]ModelStats, error) {
+	rows, err := s.db.QueryContext(ctx, `SELECT
+		r.logical_model,
+		CASE WHEN EXISTS (SELECT 1 FROM proxy_attempts pa JOIN proxy_requests rp ON rp.id = pa.request_id WHERE rp.logical_model = r.logical_model AND pa.upstream_model LIKE '%:free') THEN 1 ELSE 0 END,
+		COUNT(*),
+		COALESCE(SUM(CASE WHEN r.state = 'succeeded' THEN 1 ELSE 0 END), 0),
+		COALESCE(SUM(CASE WHEN r.state = 'failed' THEN 1 ELSE 0 END), 0),
+		COALESCE(SUM(CASE WHEN r.state = 'partial' THEN 1 ELSE 0 END), 0),
+		COALESCE(SUM(r.attempt_count), 0),
+		COALESCE(SUM(CASE WHEN r.attempt_count > 1 THEN 1 ELSE 0 END), 0),
+		MIN(r.duration_ms), MAX(r.duration_ms), CAST(AVG(r.duration_ms) AS INTEGER), COUNT(r.duration_ms),
+		COALESCE(SUM(u.input_tokens), 0), COALESCE(SUM(u.output_tokens), 0), COALESCE(SUM(u.total_tokens), 0),
+		COALESCE(SUM(u.cached_read_tokens), 0), COALESCE(SUM(u.cache_write_tokens), 0), COALESCE(SUM(u.reasoning_tokens), 0),
+		COALESCE(SUM(u.estimated_cost_pico_usd), 0), COALESCE(SUM(u.actual_cost_pico_usd), 0),
+		COALESCE(SUM(CASE WHEN u.discount_pico_usd > 0 THEN u.discount_pico_usd ELSE 0 END), 0)
+		FROM proxy_requests r LEFT JOIN request_usage u ON u.request_id = r.id
+		GROUP BY r.logical_model ORDER BY COUNT(*) DESC, r.logical_model`)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	result := make([]ModelStats, 0)
+	for rows.Next() {
+		var item ModelStats
+		var observedFree int
+		var fastest, slowest, average sql.NullInt64
+		if err := rows.Scan(&item.Model, &observedFree, &item.Requests, &item.SucceededRequests, &item.FailedRequests, &item.PartialRequests,
+			&item.TotalAttempts, &item.RetriedRequests, &fastest, &slowest, &average, &item.RequestsWithTime,
+			&item.InputTokens, &item.OutputTokens, &item.TotalTokens, &item.CachedReadTokens, &item.CacheWriteTokens, &item.ReasoningTokens,
+			&item.EstimatedCostPico, &item.ActualCostPico, &item.SavedCostPico); err != nil {
+			return nil, err
+		}
+		item.Free = freeModels[item.Model] || observedFree != 0
+		if item.Requests > 0 {
+			item.SuccessRateBPS = item.SucceededRequests * 10000 / item.Requests
+			item.RetryRateBPS = item.RetriedRequests * 10000 / item.Requests
+		}
+		if fastest.Valid {
+			item.FastestMS = &fastest.Int64
+		}
+		if slowest.Valid {
+			item.SlowestMS = &slowest.Int64
+		}
+		if average.Valid {
+			item.AverageMS = &average.Int64
+		}
+		result = append(result, item)
+	}
+	return result, rows.Err()
 }
 
 type migration struct {

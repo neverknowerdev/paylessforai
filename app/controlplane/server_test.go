@@ -99,6 +99,11 @@ func TestRequestStatsAPI(t *testing.T) {
 	if summary.Code != http.StatusOK || !strings.Contains(summary.Body.String(), `"total_requests":1`) {
 		t.Fatalf("unexpected stats summary response: %d %s", summary.Code, summary.Body.String())
 	}
+	modelSummary := httptest.NewRecorder()
+	server.httpServer.Handler.ServeHTTP(modelSummary, httptest.NewRequest(http.MethodGet, "/api/stats/models", nil))
+	if modelSummary.Code != http.StatusOK || !strings.Contains(modelSummary.Body.String(), `"model":"model-a"`) {
+		t.Fatalf("unexpected model stats response: %d %s", modelSummary.Code, modelSummary.Body.String())
+	}
 }
 
 func TestServerUI(t *testing.T) {

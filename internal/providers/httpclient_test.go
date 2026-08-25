@@ -61,6 +61,24 @@ func TestDiscoverFallsBackAcrossKnownModelEndpoints(t *testing.T) {
 	}
 }
 
+func TestVerifyModelsUsesMinimalInference(t *testing.T) {
+	client := NewHTTPClient("custom", "https://provider.invalid/v1", "key")
+	client.Client = &http.Client{Transport: roundTripFunc(func(r *http.Request) (*http.Response, error) {
+		if r.URL.Path != "/v1/chat/completions" || r.Method != http.MethodPost {
+			t.Fatalf("unexpected verification request: %s %s", r.Method, r.URL.Path)
+		}
+		body, _ := io.ReadAll(r.Body)
+		if !strings.Contains(string(body), `"model":"manual-model"`) || !strings.Contains(string(body), `"max_tokens":1`) {
+			t.Fatalf("unexpected verification body: %s", body)
+		}
+		return &http.Response{StatusCode: http.StatusOK, Body: io.NopCloser(strings.NewReader(`{"choices":[]}`)), Header: make(http.Header), Request: r}, nil
+	})}
+	models, err := client.VerifyModels(context.Background(), []ManualModel{{ID: "manual-model", InputPicoUSDPerToken: 1_000_000, OutputPicoUSDPerToken: 2_000_000}})
+	if err != nil || len(models) != 1 || models[0].ID != "manual-model" || !models[0].PriceAvailable {
+		t.Fatalf("unexpected verified model: %#v, %v", models, err)
+	}
+}
+
 func TestDiscoverRecognizesFreeVariantWithoutPricing(t *testing.T) {
 	client := NewHTTPClient("openrouter", "https://provider.invalid/v1", "key")
 	client.Client = &http.Client{Transport: roundTripFunc(func(r *http.Request) (*http.Response, error) {

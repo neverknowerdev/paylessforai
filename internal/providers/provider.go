@@ -24,6 +24,27 @@ type Model struct {
 	Tags                   []string
 }
 
+// ManualModel is a model definition supplied by the user when an upstream
+// does not expose a catalog endpoint. Prices are pico-USD per token so the
+// manually configured route uses the same deterministic accounting as native
+// provider metadata.
+type ManualModel struct {
+	ID                    string   `json:"id"`
+	InputPicoUSDPerToken  int64    `json:"input_price_pico_usd_per_token"`
+	OutputPicoUSDPerToken int64    `json:"output_price_pico_usd_per_token"`
+	ContextLength         int64    `json:"context_length,omitempty"`
+	MaxCompletionTokens   int64    `json:"max_output_tokens,omitempty"`
+	InputModalities       []string `json:"input_modalities,omitempty"`
+	OutputModalities      []string `json:"output_modalities,omitempty"`
+	Tags                  []string `json:"tags,omitempty"`
+}
+
+// ModelVerifier is implemented by clients that can validate explicit model
+// IDs with a minimal, non-streaming inference request.
+type ModelVerifier interface {
+	VerifyModels(context.Context, []ManualModel) ([]Model, error)
+}
+
 type Client interface {
 	Name() string
 	Discover(context.Context) ([]Model, error)

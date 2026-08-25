@@ -27,14 +27,14 @@ test('configures providers, creates a client key, and routes an OpenAI request',
   await expect(page.locator('#custom-provider-fields')).toBeHidden();
   await page.locator('#provider-label').fill('mock-openrouter');
   await page.locator('#provider-key').fill('mock-key');
-  await page.getByRole('button', { name: 'Save credential' }).click();
+  await page.getByRole('button', { name: 'Verify & save' }).click();
   await expect(page.locator('#provider-list')).toContainText('openrouter');
 
   await page.getByRole('button', { name: 'Add provider' }).click();
   await page.locator('#provider-type').selectOption('surplus');
   await page.locator('#provider-label').fill('mock-surplus');
   await page.locator('#provider-key').fill('mock-key');
-  await page.getByRole('button', { name: 'Save credential' }).click();
+  await page.getByRole('button', { name: 'Verify & save' }).click();
   await expect(page.locator('#provider-list')).toContainText('surplus');
 
   await page.getByRole('button', { name: 'Create API key' }).click();
@@ -93,4 +93,25 @@ test('supports Responses and Anthropic Messages contracts', async ({ page, reque
   });
   expect(messages.ok()).toBeTruthy();
   expect((await messages.json()).type).toBe('message');
+});
+
+test('keeps provider verification errors visible and verifies manual models before saving', async ({ page, request }) => {
+  await request.post('http://127.0.0.1:19475/__mock/scenario', {
+    data: { models: [], response_text: 'manual response' },
+  });
+  await page.goto('/#access');
+  await page.getByRole('button', { name: 'Add provider' }).click();
+  await page.locator('#provider-type').selectOption('custom');
+  await page.locator('#provider-name').fill('manual-mock');
+  await page.locator('#provider-base-url').fill('http://127.0.0.1:19475/manual/v1');
+  await page.locator('#provider-label').fill('Manual test');
+  await page.locator('#provider-key').fill('mock-key');
+  await page.getByRole('button', { name: 'Verify & save' }).click();
+  await expect(page.locator('#provider-feedback')).toContainText('no models');
+  await expect(page.locator('#manual-model-fields')).toBeVisible();
+  await page.locator('#manual-models').fill('manual-model | 1.00 | 2.00');
+  await page.getByRole('button', { name: 'Verify & save' }).click();
+  await expect(page.locator('#provider-list')).toContainText('manual-mock');
+  await page.goto('/#models');
+  await expect(page.locator('#models-table-body')).toContainText('manual-model');
 });

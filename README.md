@@ -64,6 +64,14 @@ encrypted in SQLite, and the generated `master.key` in the data directory is
 required to decrypt them. Back up that file if you need to move the installation
 to another machine.
 
+Provider onboarding is transactional: the credential is verified and the
+provider catalog is discovered before the credential is saved. If a provider
+returns no models, the dialog stays open and offers manual model definitions in
+the form `model-id | input USD per 1M tokens | output USD per 1M tokens`. Each
+manual model is checked with a minimal inference request before it is persisted;
+discovery and verification failures remain visible in the dialog instead of
+silently closing it.
+
 ## Configure an IDE or API client
 
 After creating a client key in the UI, configure an OpenAI-compatible client

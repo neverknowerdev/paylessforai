@@ -7,6 +7,7 @@ package runtime
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"log/slog"
@@ -131,6 +132,12 @@ func loadProviderClients(registry *providers.Registry, dataStore *store.Store, b
 			client, _, err := registry.Resolve(provider, credential.BaseURL, secret)
 			if err != nil {
 				continue
+			}
+			if strings.TrimSpace(credential.ManualModelsJSON) != "" && credential.ManualModelsJSON != "[]" {
+				var manual []providers.ManualModel
+				if json.Unmarshal([]byte(credential.ManualModelsJSON), &manual) == nil && len(manual) > 0 {
+					client = providers.WithManualModels{Client: client, Models: manual}
+				}
 			}
 			clients = append(clients, client)
 			configured[provider] = true

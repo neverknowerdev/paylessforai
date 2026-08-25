@@ -176,17 +176,18 @@ type ProviderStats struct {
 }
 
 type ProviderCredential struct {
-	ID            string  `json:"id"`
-	Provider      string  `json:"provider"`
-	Label         string  `json:"label"`
-	BaseURL       string  `json:"base_url,omitempty"`
-	Ciphertext    []byte  `json:"-"`
-	Nonce         []byte  `json:"-"`
-	Enabled       bool    `json:"enabled"`
-	CreatedAt     string  `json:"created_at"`
-	UpdatedAt     string  `json:"updated_at"`
-	LastCheckedAt *string `json:"last_checked_at,omitempty"`
-	LastError     *string `json:"last_error,omitempty"`
+	ID               string  `json:"id"`
+	Provider         string  `json:"provider"`
+	Label            string  `json:"label"`
+	BaseURL          string  `json:"base_url,omitempty"`
+	Ciphertext       []byte  `json:"-"`
+	Nonce            []byte  `json:"-"`
+	Enabled          bool    `json:"enabled"`
+	CreatedAt        string  `json:"created_at"`
+	UpdatedAt        string  `json:"updated_at"`
+	LastCheckedAt    *string `json:"last_checked_at,omitempty"`
+	LastError        *string `json:"last_error,omitempty"`
+	ManualModelsJSON string  `json:"-"`
 }
 
 func Open(ctx context.Context, path string) (*Store, error) {
@@ -299,12 +300,12 @@ func (s *Store) UpsertProviderCredential(ctx context.Context, credential Provide
 	if credential.CreatedAt == "" {
 		credential.CreatedAt = now
 	}
-	_, err := s.db.ExecContext(ctx, `INSERT INTO provider_credentials(id, provider, label, base_url, ciphertext, nonce, enabled, created_at, updated_at) VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?) ON CONFLICT(id) DO UPDATE SET provider=excluded.provider, label=excluded.label, base_url=excluded.base_url, ciphertext=excluded.ciphertext, nonce=excluded.nonce, enabled=excluded.enabled, updated_at=excluded.updated_at`, credential.ID, credential.Provider, credential.Label, credential.BaseURL, credential.Ciphertext, credential.Nonce, boolInt(credential.Enabled), credential.CreatedAt, now)
+	_, err := s.db.ExecContext(ctx, `INSERT INTO provider_credentials(id, provider, label, base_url, ciphertext, nonce, enabled, created_at, updated_at, manual_models_json) VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?) ON CONFLICT(id) DO UPDATE SET provider=excluded.provider, label=excluded.label, base_url=excluded.base_url, ciphertext=excluded.ciphertext, nonce=excluded.nonce, enabled=excluded.enabled, updated_at=excluded.updated_at, manual_models_json=excluded.manual_models_json`, credential.ID, credential.Provider, credential.Label, credential.BaseURL, credential.Ciphertext, credential.Nonce, boolInt(credential.Enabled), credential.CreatedAt, now, credential.ManualModelsJSON)
 	return err
 }
 
 func (s *Store) ListProviderCredentials(ctx context.Context) ([]ProviderCredential, error) {
-	rows, err := s.db.QueryContext(ctx, `SELECT id, provider, label, base_url, ciphertext, nonce, enabled, created_at, updated_at, last_checked_at, last_error FROM provider_credentials ORDER BY created_at DESC`)
+	rows, err := s.db.QueryContext(ctx, `SELECT id, provider, label, base_url, ciphertext, nonce, enabled, created_at, updated_at, last_checked_at, last_error, manual_models_json FROM provider_credentials ORDER BY created_at DESC`)
 	if err != nil {
 		return nil, err
 	}
@@ -313,7 +314,7 @@ func (s *Store) ListProviderCredentials(ctx context.Context) ([]ProviderCredenti
 	for rows.Next() {
 		var credential ProviderCredential
 		var enabled int
-		if err := rows.Scan(&credential.ID, &credential.Provider, &credential.Label, &credential.BaseURL, &credential.Ciphertext, &credential.Nonce, &enabled, &credential.CreatedAt, &credential.UpdatedAt, &credential.LastCheckedAt, &credential.LastError); err != nil {
+		if err := rows.Scan(&credential.ID, &credential.Provider, &credential.Label, &credential.BaseURL, &credential.Ciphertext, &credential.Nonce, &enabled, &credential.CreatedAt, &credential.UpdatedAt, &credential.LastCheckedAt, &credential.LastError, &credential.ManualModelsJSON); err != nil {
 			return nil, err
 		}
 		credential.Enabled = enabled != 0

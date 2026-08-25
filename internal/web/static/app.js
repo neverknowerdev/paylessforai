@@ -55,10 +55,16 @@
   function appendTextCell(row, value, className) { const cell = document.createElement('td'); if (className) cell.className = className; cell.textContent = value; row.append(cell); return cell; }
   function stateBadge(value) { const badge = document.createElement('span'); badge.className = `state-badge ${value || 'received'}`; badge.textContent = value || 'received'; return badge; }
   function providerBadge(provider) { const badge = document.createElement('span'); badge.className = 'badge provider'; badge.textContent = providerName(provider); return badge; }
-  const modalityGlyphs = { text: 'T', image: '▧', video: '▶', file: '▤', audio: '◖' };
+  const modalityIcons = {
+    text: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 5h14M12 5v14M8 19h8"/></svg>',
+    image: '<svg viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="4" width="18" height="16" rx="2"/><circle cx="8" cy="9" r="2" fill="currentColor" stroke="none"/><path d="m5 17 4.5-4 3.5 3 2.5-2.5L20 17" fill="currentColor" stroke="none"/></svg>',
+    video: '<svg viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="5" width="13" height="14" rx="2"/><path d="m16 10 5-3v10l-5-3z"/><path d="m8 9 4 3-4 3z" fill="currentColor" stroke="none"/></svg>',
+    file: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 3h8l4 4v14H6z" fill="currentColor" fill-opacity=".18"/><path d="M14 3v5h4M9 12h6M9 16h6"/></svg>',
+    audio: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 9h4l5-4v14l-5-4H4z" fill="currentColor" stroke="none"/><path d="M16 9a4 4 0 0 1 0 6M18.5 6.5a8 8 0 0 1 0 11"/></svg>'
+  };
   function modalityDisplay(input, output) {
     const wrapper = document.createElement('span'); wrapper.className = 'modality-display'; wrapper.setAttribute('aria-label', `Input: ${(input || []).join(', ') || 'unknown'}; output: ${(output || []).join(', ') || 'unknown'}`);
-    const group = (values) => { const container = document.createElement('span'); container.className = 'modality-group'; (values || []).forEach((value) => { const name = String(value).toLowerCase(); const icon = document.createElement('span'); icon.className = `modality-icon modality-${name}`; icon.textContent = modalityGlyphs[name] || '•'; icon.title = name; icon.setAttribute('aria-label', name); container.append(icon); }); return container; };
+    const group = (values) => { const container = document.createElement('span'); container.className = 'modality-group'; (values || []).forEach((value) => { const name = String(value).toLowerCase(); const icon = document.createElement('span'); icon.className = `modality-icon modality-${name}`; icon.innerHTML = modalityIcons[name] || '<span aria-hidden="true">•</span>'; icon.title = name; icon.setAttribute('aria-label', name); container.append(icon); }); return container; };
     wrapper.append(group(input)); const arrow = document.createElement('span'); arrow.className = 'modality-arrow'; arrow.textContent = '→'; wrapper.append(arrow, group(output)); return wrapper;
   }
 

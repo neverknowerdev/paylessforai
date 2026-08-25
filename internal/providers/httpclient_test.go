@@ -88,6 +88,17 @@ func TestDiscoverRequiresExplicitFreeLabelForSurplusZeroTokenModel(t *testing.T)
 	}
 }
 
+func TestDiscoverDoesNotCallNonzeroSurplusFreeLabelFree(t *testing.T) {
+	client := NewHTTPClient("surplus", "https://provider.invalid/v1", "key")
+	client.Client = &http.Client{Transport: roundTripFunc(func(r *http.Request) (*http.Response, error) {
+		return &http.Response{StatusCode: http.StatusOK, Body: io.NopCloser(strings.NewReader(`{"data":[{"id":"model-a:free","name":"Model A Free","pricing":{"prompt":"0.000001","completion":"0.000002"}}]}`)), Header: make(http.Header), Request: r}, nil
+	})}
+	models, err := client.Discover(context.Background())
+	if err != nil || len(models) != 1 || models[0].Free {
+		t.Fatalf("nonzero surplus free-labelled route must not be free: %#v, %v", models, err)
+	}
+}
+
 func TestDiscoverAcceptsNumericPricingValues(t *testing.T) {
 	client := NewHTTPClient("surplus", "https://provider.invalid/v1", "key")
 	client.Client = &http.Client{Transport: roundTripFunc(func(r *http.Request) (*http.Response, error) {

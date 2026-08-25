@@ -212,15 +212,19 @@ func normalizeTags(values []string) []string {
 
 func isFreeModel(provider, id, name, description string, input, output int64, priced bool) bool {
 	label := strings.ToLower(strings.TrimSpace(id + " " + name))
-	if strings.HasSuffix(strings.ToLower(id), ":free") || strings.HasSuffix(strings.ToLower(id), "-free") || strings.Contains(label, "(free)") || strings.Contains(strings.ToLower(description), "free") || (provider == "openrouter" && id == "openrouter/free") {
-		return true
-	}
 	if provider == "openrouter" {
+		if strings.HasSuffix(strings.ToLower(id), ":free") || strings.HasSuffix(strings.ToLower(id), "-free") || strings.Contains(label, "(free)") || strings.Contains(strings.ToLower(description), "free") || id == "openrouter/free" {
+			return true
+		}
 		return priced && input == 0 && output == 0
 	}
-	// Surplus can mirror catalog entries whose token fields are zero because
-	// their non-token meter is omitted. Treat only an explicit free label as
-	// free there; a bare zero price is not enough evidence.
+	// Surplus uses “free” labels for heavily discounted routes too. Only treat
+	// an explicitly labelled route as free when its effective token price is
+	// actually zero and it has no non-token meter.
+	if provider == "surplus" {
+		labelledFree := strings.HasSuffix(strings.ToLower(id), ":free") || strings.HasSuffix(strings.ToLower(id), "-free") || strings.Contains(label, "(free)") || strings.Contains(strings.ToLower(description), "free")
+		return labelledFree && priced && input == 0 && output == 0
+	}
 	return false
 }
 

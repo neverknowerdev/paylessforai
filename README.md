@@ -24,7 +24,9 @@ will be added later; v1 is intentionally local-only.
 - Actual token, cache, reasoning, and provider-reported cost accounting, with
 usage-based cost fallback when a provider omits its price. Request statistics also
 include the selected provider, upstream model, and durable attempt count so free
-route failover is visible.
+route failover is visible. Each request compares the provider-catalog (official)
+cost with the actual charged cost and records the dollar and percentage discount
+(or overage).
 - Local client API keys and encrypted provider-credential management.
 - Embedded UI for the base URL, keys, provider credentials, and recent request
   statistics.

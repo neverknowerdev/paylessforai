@@ -45,7 +45,10 @@ type RequestUsage struct {
 	CacheWriteTokens  int64
 	ReasoningTokens   int64
 	EstimatedCostPico int64
+	OfficialCostPico  int64
 	ActualCostPico    *int64
+	DiscountPico      *int64
+	DiscountBPS       *int64
 	RawUsageJSON      string
 }
 
@@ -75,7 +78,10 @@ type RequestStat struct {
 	CacheWriteTokens  int64         `json:"cache_write_tokens"`
 	ReasoningTokens   int64         `json:"reasoning_tokens"`
 	EstimatedCostPico int64         `json:"estimated_cost_pico_usd"`
+	OfficialCostPico  int64         `json:"official_cost_pico_usd"`
 	ActualCostPico    *int64        `json:"actual_cost_pico_usd,omitempty"`
+	DiscountPico      *int64        `json:"discount_pico_usd,omitempty"`
+	DiscountBPS       *int64        `json:"discount_percent_bps,omitempty"`
 	Provider          string        `json:"provider,omitempty"`
 	UpstreamModel     string        `json:"upstream_model,omitempty"`
 	Attempts          int64         `json:"attempts"`
@@ -281,7 +287,7 @@ func (s *Store) RecordProxyAttempt(ctx context.Context, requestID string, attemp
 }
 
 func (s *Store) RecordUsage(ctx context.Context, usage RequestUsage) error {
-	_, err := s.db.ExecContext(ctx, `INSERT INTO request_usage(request_id, input_tokens, output_tokens, total_tokens, cached_read_tokens, cache_write_tokens, reasoning_tokens, estimated_cost_pico_usd, actual_cost_pico_usd, raw_usage_json) VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?) ON CONFLICT(request_id) DO UPDATE SET input_tokens=excluded.input_tokens, output_tokens=excluded.output_tokens, total_tokens=excluded.total_tokens, cached_read_tokens=excluded.cached_read_tokens, cache_write_tokens=excluded.cache_write_tokens, reasoning_tokens=excluded.reasoning_tokens, estimated_cost_pico_usd=excluded.estimated_cost_pico_usd, actual_cost_pico_usd=excluded.actual_cost_pico_usd, raw_usage_json=excluded.raw_usage_json`, usage.RequestID, usage.InputTokens, usage.OutputTokens, usage.TotalTokens, usage.CachedReadTokens, usage.CacheWriteTokens, usage.ReasoningTokens, usage.EstimatedCostPico, usage.ActualCostPico, usage.RawUsageJSON)
+	_, err := s.db.ExecContext(ctx, `INSERT INTO request_usage(request_id, input_tokens, output_tokens, total_tokens, cached_read_tokens, cache_write_tokens, reasoning_tokens, estimated_cost_pico_usd, official_cost_pico_usd, actual_cost_pico_usd, discount_pico_usd, discount_percent_bps, raw_usage_json) VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) ON CONFLICT(request_id) DO UPDATE SET input_tokens=excluded.input_tokens, output_tokens=excluded.output_tokens, total_tokens=excluded.total_tokens, cached_read_tokens=excluded.cached_read_tokens, cache_write_tokens=excluded.cache_write_tokens, reasoning_tokens=excluded.reasoning_tokens, estimated_cost_pico_usd=excluded.estimated_cost_pico_usd, official_cost_pico_usd=excluded.official_cost_pico_usd, actual_cost_pico_usd=excluded.actual_cost_pico_usd, discount_pico_usd=excluded.discount_pico_usd, discount_percent_bps=excluded.discount_percent_bps, raw_usage_json=excluded.raw_usage_json`, usage.RequestID, usage.InputTokens, usage.OutputTokens, usage.TotalTokens, usage.CachedReadTokens, usage.CacheWriteTokens, usage.ReasoningTokens, usage.EstimatedCostPico, usage.OfficialCostPico, usage.ActualCostPico, usage.DiscountPico, usage.DiscountBPS, usage.RawUsageJSON)
 	return err
 }
 
@@ -292,7 +298,7 @@ func (s *Store) ListRequestStats(ctx context.Context, limit int) ([]RequestStat,
 	rows, err := s.db.QueryContext(ctx, `SELECT r.id, r.protocol, r.logical_model, r.state, r.received_at, r.completed_at, r.error_code,
 		COALESCE(r.selected_provider, ''), COALESCE(r.selected_upstream_model, ''), r.attempt_count,
 		u.input_tokens, u.output_tokens, u.total_tokens, u.cached_read_tokens, u.cache_write_tokens, u.reasoning_tokens,
-		u.estimated_cost_pico_usd, u.actual_cost_pico_usd
+		u.estimated_cost_pico_usd, u.official_cost_pico_usd, u.actual_cost_pico_usd, u.discount_pico_usd, u.discount_percent_bps
 		FROM proxy_requests r LEFT JOIN request_usage u ON u.request_id = r.id
 		ORDER BY r.received_at DESC LIMIT ?`, limit)
 	if err != nil {
@@ -303,9 +309,9 @@ func (s *Store) ListRequestStats(ctx context.Context, limit int) ([]RequestStat,
 		var item RequestStat
 		var completedAt, errorCode sql.NullString
 		var input, output, total, cachedRead, cacheWrite, reasoning, estimated sql.NullInt64
-		var actual sql.NullInt64
+		var official, actual, discount, discountBPS sql.NullInt64
 		if err := rows.Scan(&item.ID, &item.Protocol, &item.Model, &item.State, &item.ReceivedAt, &completedAt, &errorCode,
-			&item.Provider, &item.UpstreamModel, &item.Attempts, &input, &output, &total, &cachedRead, &cacheWrite, &reasoning, &estimated, &actual); err != nil {
+			&item.Provider, &item.UpstreamModel, &item.Attempts, &input, &output, &total, &cachedRead, &cacheWrite, &reasoning, &estimated, &official, &actual, &discount, &discountBPS); err != nil {
 			return nil, err
 		}
 		if completedAt.Valid {
@@ -317,8 +323,15 @@ func (s *Store) ListRequestStats(ctx context.Context, limit int) ([]RequestStat,
 		item.InputTokens, item.OutputTokens, item.TotalTokens = input.Int64, output.Int64, total.Int64
 		item.CachedReadTokens, item.CacheWriteTokens, item.ReasoningTokens = cachedRead.Int64, cacheWrite.Int64, reasoning.Int64
 		item.EstimatedCostPico = estimated.Int64
+		item.OfficialCostPico = official.Int64
 		if actual.Valid {
 			item.ActualCostPico = &actual.Int64
+		}
+		if discount.Valid {
+			item.DiscountPico = &discount.Int64
+		}
+		if discountBPS.Valid {
+			item.DiscountBPS = &discountBPS.Int64
 		}
 		result = append(result, item)
 	}

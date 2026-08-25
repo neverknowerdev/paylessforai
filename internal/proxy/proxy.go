@@ -91,7 +91,8 @@ func (p *Proxy) ServeHTTP(w http.ResponseWriter, r *http.Request, protocol match
 		writeError(w, http.StatusServiceUnavailable, "no_eligible_route", message)
 		return
 	}
-	if err := p.execute(r.Context(), w, requestID, body, request, match.Ranked); err != nil {
+	officialPrice, officialExpectedCost := officialPricing(match.Ranked)
+	if err := p.execute(r.Context(), w, requestID, body, request, match.Ranked, officialPrice, officialExpectedCost); err != nil {
 		var partial *partialStreamError
 		if errors.As(err, &partial) {
 			return
@@ -230,7 +231,7 @@ func appendUnique(values []string, additions ...string) []string {
 	return values
 }
 
-func (p *Proxy) execute(ctx context.Context, writer http.ResponseWriter, requestID string, body []byte, request parsedRequest, ranked []matcher.RankedRoute) error {
+func (p *Proxy) execute(ctx context.Context, writer http.ResponseWriter, requestID string, body []byte, request parsedRequest, ranked []matcher.RankedRoute, officialPrice matcher.Price, officialExpectedCost int64) error {
 	current := 0
 	policy := retry.DefaultPolicy()
 	for attempt := 1; attempt <= policy.MaximumAttempts; attempt++ {
@@ -251,7 +252,7 @@ func (p *Proxy) execute(ctx context.Context, writer http.ResponseWriter, request
 		response, err := client.Do(ctx, request.Protocol, route.UpstreamModel, body)
 		if err == nil {
 			if request.Stream || strings.Contains(strings.ToLower(response.Header.Get("Content-Type")), "text/event-stream") {
-				streamErr := p.stream(ctx, writer, requestID, response, ranked[current].ExpectedCost, route.Price)
+				streamErr := p.stream(ctx, writer, requestID, response, ranked[current].ExpectedCost, officialExpectedCost, route.Price, officialPrice)
 				if p.Store != nil {
 					state, code, message := "succeeded", "", ""
 					if streamErr != nil {
@@ -261,7 +262,7 @@ func (p *Proxy) execute(ctx context.Context, writer http.ResponseWriter, request
 				}
 				return streamErr
 			}
-			completeErr := p.complete(ctx, writer, requestID, response, ranked[current].ExpectedCost, route.Price)
+			completeErr := p.complete(ctx, writer, requestID, response, ranked[current].ExpectedCost, officialExpectedCost, route.Price, officialPrice)
 			if p.Store != nil {
 				state, code, message := "succeeded", "", ""
 				if completeErr != nil {
@@ -289,7 +290,7 @@ func (p *Proxy) execute(ctx context.Context, writer http.ResponseWriter, request
 	return &proxyError{status: http.StatusBadGateway, code: "attempt_budget_exhausted", message: "provider attempt budget exhausted"}
 }
 
-func (p *Proxy) complete(ctx context.Context, writer http.ResponseWriter, requestID string, response *http.Response, expectedCost int64, price matcher.Price) error {
+func (p *Proxy) complete(ctx context.Context, writer http.ResponseWriter, requestID string, response *http.Response, expectedCost, officialExpectedCost int64, price, officialPrice matcher.Price) error {
 	defer response.Body.Close()
 	body, err := io.ReadAll(io.LimitReader(response.Body, p.MaximumBody))
 	if err != nil {
@@ -298,14 +299,14 @@ func (p *Proxy) complete(ctx context.Context, writer http.ResponseWriter, reques
 	copyHeaders(writer.Header(), response.Header)
 	writer.WriteHeader(response.StatusCode)
 	_, _ = writer.Write(body)
-	persistUsage(ctx, p.Store, requestID, usage.FromJSON(body), expectedCost, price)
+	persistUsage(ctx, p.Store, requestID, usage.FromJSON(body), expectedCost, officialExpectedCost, price, officialPrice)
 	if p.Store != nil {
 		_ = p.Store.CompleteProxyRequest(ctx, requestID, "succeeded", "", "")
 	}
 	return nil
 }
 
-func (p *Proxy) stream(ctx context.Context, writer http.ResponseWriter, requestID string, response *http.Response, expectedCost int64, price matcher.Price) error {
+func (p *Proxy) stream(ctx context.Context, writer http.ResponseWriter, requestID string, response *http.Response, expectedCost, officialExpectedCost int64, price, officialPrice matcher.Price) error {
 	defer response.Body.Close()
 	copyHeaders(writer.Header(), response.Header)
 	writer.WriteHeader(response.StatusCode)
@@ -325,7 +326,7 @@ func (p *Proxy) stream(ctx context.Context, writer http.ResponseWriter, requestI
 		}
 		if err != nil {
 			if errors.Is(err, io.EOF) {
-				persistUsage(ctx, p.Store, requestID, stats, expectedCost, price)
+				persistUsage(ctx, p.Store, requestID, stats, expectedCost, officialExpectedCost, price, officialPrice)
 				if p.Store != nil {
 					_ = p.Store.CompleteProxyRequest(ctx, requestID, "succeeded", "", "")
 				}
@@ -377,7 +378,7 @@ func observeSSE(line []byte, stats *usage.Stats) {
 	stats.Raw = observed.Raw
 }
 
-func persistUsage(ctx context.Context, dataStore *store.Store, requestID string, stats usage.Stats, expectedCost int64, price matcher.Price) {
+func persistUsage(ctx context.Context, dataStore *store.Store, requestID string, stats usage.Stats, expectedCost, officialExpectedCost int64, price, officialPrice matcher.Price) {
 	if dataStore == nil {
 		return
 	}
@@ -387,8 +388,43 @@ func persistUsage(ctx context.Context, dataStore *store.Store, requestID string,
 			actualCost = &calculated
 		}
 	}
+	officialCost := officialExpectedCost
+	if stats.InputTokens > 0 || stats.OutputTokens > 0 || stats.CachedReadTokens > 0 || stats.CacheWriteTokens > 0 || stats.ReasoningTokens > 0 {
+		if calculated, err := matcher.EstimateUsageCost(matcher.UsageCostInput{InputTokens: stats.InputTokens, OutputTokens: stats.OutputTokens, CachedReadTokens: stats.CachedReadTokens, CacheWriteTokens: stats.CacheWriteTokens, ReasoningTokens: stats.ReasoningTokens, InputTokensNetOfCache: stats.InputTokensNetOfCache}, officialPrice); err == nil {
+			officialCost = calculated
+		}
+	}
+	var discountPico, discountBPS *int64
+	if actualCost != nil && officialCost > 0 {
+		difference := officialCost - *actualCost
+		maxInt64 := int64(^uint64(0) >> 1)
+		var bps int64
+		if difference > maxInt64/10000 || difference < -maxInt64/10000 {
+			bps = int64(float64(difference) / float64(officialCost) * 10000)
+		} else {
+			bps = difference * 10000 / officialCost
+		}
+		discountPico, discountBPS = &difference, &bps
+	}
 	raw, _ := json.Marshal(stats.Raw)
-	_ = dataStore.RecordUsage(ctx, store.RequestUsage{RequestID: requestID, InputTokens: stats.InputTokens, OutputTokens: stats.OutputTokens, TotalTokens: stats.TotalTokens, CachedReadTokens: stats.CachedReadTokens, CacheWriteTokens: stats.CacheWriteTokens, ReasoningTokens: stats.ReasoningTokens, EstimatedCostPico: expectedCost, ActualCostPico: actualCost, RawUsageJSON: string(raw)})
+	_ = dataStore.RecordUsage(ctx, store.RequestUsage{RequestID: requestID, InputTokens: stats.InputTokens, OutputTokens: stats.OutputTokens, TotalTokens: stats.TotalTokens, CachedReadTokens: stats.CachedReadTokens, CacheWriteTokens: stats.CacheWriteTokens, ReasoningTokens: stats.ReasoningTokens, EstimatedCostPico: expectedCost, OfficialCostPico: officialCost, ActualCostPico: actualCost, DiscountPico: discountPico, DiscountBPS: discountBPS, RawUsageJSON: string(raw)})
+}
+
+func officialPricing(ranked []matcher.RankedRoute) (matcher.Price, int64) {
+	for _, candidate := range ranked {
+		if candidate.Route.Provider == "openrouter" && !candidate.Route.Free {
+			return candidate.Route.Price, candidate.ExpectedCost
+		}
+	}
+	for _, candidate := range ranked {
+		if !candidate.Route.Free {
+			return candidate.Route.Price, candidate.ExpectedCost
+		}
+	}
+	if len(ranked) > 0 {
+		return ranked[0].Route.Price, ranked[0].ExpectedCost
+	}
+	return matcher.Price{}, 0
 }
 
 func classify(err error) retry.ClassifiedError {

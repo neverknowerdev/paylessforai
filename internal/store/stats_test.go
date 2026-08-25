@@ -75,3 +75,33 @@ func TestModelStatsAggregatesRetriesAndFreeLabel(t *testing.T) {
 		t.Fatalf("unexpected model stats: %#v", items)
 	}
 }
+
+func TestProviderStatsAggregatesTerminalProviderAndSavings(t *testing.T) {
+	s, err := Open(context.Background(), filepath.Join(t.TempDir(), "payless.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer s.Close()
+	if err := s.CreateProxyRequest(context.Background(), "provider-request", "", "chat_completions", "model-a"); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.RecordProxyAttempt(context.Background(), "provider-request", 1, "surplus", "model-a", "succeeded", "", ""); err != nil {
+		t.Fatal(err)
+	}
+	discount := int64(25)
+	if err := s.RecordUsage(context.Background(), RequestUsage{RequestID: "provider-request", InputTokens: 4, OutputTokens: 3, TotalTokens: 7, EstimatedCostPico: 40, OfficialCostPico: 100, ActualCostPico: ptrInt64(75), DiscountPico: &discount}); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.CompleteProxyRequest(context.Background(), "provider-request", "succeeded", "", ""); err != nil {
+		t.Fatal(err)
+	}
+	items, err := s.ProviderStats(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(items) != 1 || items[0].Provider != "surplus" || items[0].Requests != 1 || items[0].SucceededRequests != 1 || items[0].TotalTokens != 7 || items[0].SavedCostPico != 25 || items[0].DiscountBPS == nil || *items[0].DiscountBPS != 2500 {
+		t.Fatalf("unexpected provider stats: %#v", items)
+	}
+}
+
+func ptrInt64(value int64) *int64 { return &value }

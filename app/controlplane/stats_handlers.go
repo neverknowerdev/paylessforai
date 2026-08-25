@@ -9,6 +9,7 @@ func (s *Server) registerStatsRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("/api/requests", s.handleRequests)
 	mux.HandleFunc("/api/stats/summary", s.handleStatsSummary)
 	mux.HandleFunc("/api/stats/models", s.handleStatsModels)
+	mux.HandleFunc("/api/stats/providers", s.handleStatsProviders)
 }
 
 func (s *Server) handleStatsModels(w http.ResponseWriter, r *http.Request) {
@@ -27,6 +28,19 @@ func (s *Server) handleStatsModels(w http.ResponseWriter, r *http.Request) {
 	items, err := s.db.ModelStats(r.Context(), freeModels)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "model_stats_failed", "could not load model statistics")
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"data": items})
+}
+
+func (s *Server) handleStatsProviders(w http.ResponseWriter, r *http.Request) {
+	if s.db == nil || r.Method != http.MethodGet {
+		writeError(w, http.StatusMethodNotAllowed, "method_not_allowed", "provider statistics only accepts GET")
+		return
+	}
+	items, err := s.db.ProviderStats(r.Context())
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "provider_stats_failed", "could not load provider statistics")
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"data": items})

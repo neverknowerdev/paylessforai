@@ -144,6 +144,36 @@ type ModelStats struct {
 	DiscountBPS       *int64 `json:"discount_percent_bps,omitempty"`
 }
 
+// ProviderStats aggregates terminal request outcomes by the provider that
+// ultimately served each request. Retry attempts are included in the attempt
+// totals while spend and usage remain attached to the completed request.
+type ProviderStats struct {
+	Provider          string `json:"provider"`
+	Requests          int64  `json:"requests"`
+	SucceededRequests int64  `json:"succeeded_requests"`
+	FailedRequests    int64  `json:"failed_requests"`
+	PartialRequests   int64  `json:"partial_requests"`
+	SuccessRateBPS    int64  `json:"success_rate_bps"`
+	TotalAttempts     int64  `json:"total_attempts"`
+	RetriedRequests   int64  `json:"retried_requests"`
+	RetryRateBPS      int64  `json:"retry_rate_bps"`
+	FastestMS         *int64 `json:"fastest_response_ms,omitempty"`
+	SlowestMS         *int64 `json:"slowest_response_ms,omitempty"`
+	AverageMS         *int64 `json:"average_response_ms,omitempty"`
+	RequestsWithTime  int64  `json:"requests_with_response_time"`
+	InputTokens       int64  `json:"input_tokens"`
+	OutputTokens      int64  `json:"output_tokens"`
+	TotalTokens       int64  `json:"total_tokens"`
+	CachedReadTokens  int64  `json:"cached_read_tokens"`
+	CacheWriteTokens  int64  `json:"cache_write_tokens"`
+	ReasoningTokens   int64  `json:"reasoning_tokens"`
+	EstimatedCostPico int64  `json:"estimated_cost_pico_usd"`
+	OfficialCostPico  int64  `json:"official_cost_pico_usd"`
+	ActualCostPico    int64  `json:"actual_cost_pico_usd"`
+	SavedCostPico     int64  `json:"saved_cost_pico_usd"`
+	DiscountBPS       *int64 `json:"discount_percent_bps,omitempty"`
+}
+
 type ProviderCredential struct {
 	ID            string  `json:"id"`
 	Provider      string  `json:"provider"`
@@ -503,6 +533,65 @@ func (s *Store) ModelStats(ctx context.Context, freeModels map[string]bool) ([]M
 		}
 		if item.OfficialCostPico > 0 {
 			value := item.DiscountPico * 10000 / item.OfficialCostPico
+			item.DiscountBPS = &value
+		}
+		if fastest.Valid {
+			item.FastestMS = &fastest.Int64
+		}
+		if slowest.Valid {
+			item.SlowestMS = &slowest.Int64
+		}
+		if average.Valid {
+			item.AverageMS = &average.Int64
+		}
+		result = append(result, item)
+	}
+	return result, rows.Err()
+}
+
+func (s *Store) ProviderStats(ctx context.Context) ([]ProviderStats, error) {
+	rows, err := s.db.QueryContext(ctx, `SELECT
+		COALESCE(NULLIF(r.selected_provider, ''), 'unknown'),
+		COUNT(*),
+		COALESCE(SUM(CASE WHEN r.state = 'succeeded' THEN 1 ELSE 0 END), 0),
+		COALESCE(SUM(CASE WHEN r.state = 'failed' THEN 1 ELSE 0 END), 0),
+		COALESCE(SUM(CASE WHEN r.state = 'partial' THEN 1 ELSE 0 END), 0),
+		COALESCE(SUM(r.attempt_count), 0),
+		COALESCE(SUM(CASE WHEN r.attempt_count > 1 THEN 1 ELSE 0 END), 0),
+		MIN(r.duration_ms), MAX(r.duration_ms), CAST(AVG(r.duration_ms) AS INTEGER), COUNT(r.duration_ms),
+		COALESCE(SUM(u.input_tokens), 0), COALESCE(SUM(u.output_tokens), 0), COALESCE(SUM(u.total_tokens), 0),
+		COALESCE(SUM(u.cached_read_tokens), 0), COALESCE(SUM(u.cache_write_tokens), 0), COALESCE(SUM(u.reasoning_tokens), 0),
+		COALESCE(SUM(u.estimated_cost_pico_usd), 0), COALESCE(SUM(u.official_cost_pico_usd), 0), COALESCE(SUM(u.actual_cost_pico_usd), 0),
+		COALESCE(SUM(CASE WHEN u.discount_pico_usd > 0 THEN u.discount_pico_usd ELSE 0 END), 0)
+		FROM proxy_requests r LEFT JOIN request_usage u ON u.request_id = r.id
+		GROUP BY COALESCE(NULLIF(r.selected_provider, ''), 'unknown')
+		ORDER BY COUNT(*) DESC, COALESCE(NULLIF(r.selected_provider, ''), 'unknown')`)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	result := make([]ProviderStats, 0)
+	for rows.Next() {
+		var item ProviderStats
+		var fastest, slowest, average sql.NullInt64
+		if err := rows.Scan(&item.Provider, &item.Requests, &item.SucceededRequests, &item.FailedRequests, &item.PartialRequests,
+			&item.TotalAttempts, &item.RetriedRequests, &fastest, &slowest, &average, &item.RequestsWithTime,
+			&item.InputTokens, &item.OutputTokens, &item.TotalTokens, &item.CachedReadTokens, &item.CacheWriteTokens, &item.ReasoningTokens,
+			&item.EstimatedCostPico, &item.OfficialCostPico, &item.ActualCostPico, &item.SavedCostPico); err != nil {
+			return nil, err
+		}
+		if item.Requests > 0 {
+			item.SuccessRateBPS = item.SucceededRequests * 10000 / item.Requests
+			item.RetryRateBPS = item.RetriedRequests * 10000 / item.Requests
+		}
+		if item.OfficialCostPico > 0 {
+			value := item.SavedCostPico * 10000 / item.OfficialCostPico
+			if value < 0 {
+				value = 0
+			}
+			if value > 10000 {
+				value = 10000
+			}
 			item.DiscountBPS = &value
 		}
 		if fastest.Valid {

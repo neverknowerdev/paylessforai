@@ -82,6 +82,9 @@ func TestRequestStatsAPI(t *testing.T) {
 	if err := db.CreateProxyRequest(context.Background(), "request-1", "", "chat_completions", "model-a"); err != nil {
 		t.Fatal(err)
 	}
+	if err := db.RecordProxyAttempt(context.Background(), "request-1", 1, "surplus", "model-a", "succeeded", "", ""); err != nil {
+		t.Fatal(err)
+	}
 	if err := db.RecordUsage(context.Background(), store.RequestUsage{RequestID: "request-1", TotalTokens: 5, EstimatedCostPico: 7}); err != nil {
 		t.Fatal(err)
 	}
@@ -103,6 +106,11 @@ func TestRequestStatsAPI(t *testing.T) {
 	server.httpServer.Handler.ServeHTTP(modelSummary, httptest.NewRequest(http.MethodGet, "/api/stats/models", nil))
 	if modelSummary.Code != http.StatusOK || !strings.Contains(modelSummary.Body.String(), `"model":"model-a"`) {
 		t.Fatalf("unexpected model stats response: %d %s", modelSummary.Code, modelSummary.Body.String())
+	}
+	providerSummary := httptest.NewRecorder()
+	server.httpServer.Handler.ServeHTTP(providerSummary, httptest.NewRequest(http.MethodGet, "/api/stats/providers", nil))
+	if providerSummary.Code != http.StatusOK || !strings.Contains(providerSummary.Body.String(), `"provider":"surplus"`) {
+		t.Fatalf("unexpected provider stats response: %d %s", providerSummary.Code, providerSummary.Body.String())
 	}
 }
 

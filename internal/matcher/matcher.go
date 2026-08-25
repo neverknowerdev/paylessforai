@@ -64,18 +64,20 @@ type Capabilities struct {
 // Route is a fully materialized candidate. MatchEngine does not fetch or
 // mutate route state; callers provide a snapshot.
 type Route struct {
-	ID               string
-	Provider         string
-	LogicalModel     string
-	UpstreamModel    string
-	Free             bool
-	Price            Price
-	PriceAvailable   bool
-	Capabilities     Capabilities
-	Health           Health
-	Trusted          bool
-	SuccessRateBPS   int64
-	LatencyMillisP50 int64
+	ID                     string
+	Provider               string
+	LogicalModel           string
+	UpstreamModel          string
+	Free                   bool
+	Price                  Price
+	PriceAvailable         bool
+	OfficialPrice          Price
+	OfficialPriceAvailable bool
+	Capabilities           Capabilities
+	Health                 Health
+	Trusted                bool
+	SuccessRateBPS         int64
+	LatencyMillisP50       int64
 }
 
 // MatchRequest contains only facts needed by the matcher.

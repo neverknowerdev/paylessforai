@@ -99,6 +99,28 @@ func TestDiscoverAcceptsNumericPricingValues(t *testing.T) {
 	}
 }
 
+func TestDiscoverUsesSurplusMarketDiscountedAndOfficialPrices(t *testing.T) {
+	client := NewHTTPClient("surplus", "https://provider.invalid/v1", "key")
+	client.Client = &http.Client{Transport: roundTripFunc(func(r *http.Request) (*http.Response, error) {
+		if r.URL.Path == "/v1/models" {
+			return &http.Response{StatusCode: http.StatusOK, Body: io.NopCloser(strings.NewReader(`{"data":[{"id":"model-a","pricing":{"prompt":"0.000000200","completion":"0.000000900"}}]}`)), Header: make(http.Header), Request: r}, nil
+		}
+		if r.URL.Path == "/api/markets" {
+			return &http.Response{StatusCode: http.StatusOK, Body: io.NopCloser(strings.NewReader(`{"markets":[{"model":"model-a","best_input_per_1m":12000,"best_output_per_1m":54000,"direct_input_per_1m":200000,"direct_output_per_1m":900000}]}`)), Header: make(http.Header), Request: r}, nil
+		}
+		t.Fatalf("unexpected path %s", r.URL.Path)
+		return nil, nil
+	})}
+	models, err := client.Discover(context.Background())
+	if err != nil || len(models) != 1 {
+		t.Fatalf("unexpected models: %#v, %v", models, err)
+	}
+	model := models[0]
+	if model.Pricing.InputPicoUSDPerToken != 12000 || model.Pricing.OutputPicoUSDPerToken != 54000 || model.OfficialPricing.InputPicoUSDPerToken != 200000 || model.OfficialPricing.OutputPicoUSDPerToken != 900000 || !model.OfficialPriceAvailable {
+		t.Fatalf("market prices were not applied: %#v", model)
+	}
+}
+
 func TestDoRewritesModelAndClassifiesErrors(t *testing.T) {
 	client := NewHTTPClient("openrouter", "https://provider.invalid/v1", "key")
 	client.Client = &http.Client{Transport: roundTripFunc(func(r *http.Request) (*http.Response, error) {

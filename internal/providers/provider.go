@@ -9,17 +9,19 @@ import (
 )
 
 type Model struct {
-	ID                  string
-	Name                string
-	Free                bool
-	ContextLength       int64
-	MaxCompletionTokens int64
-	Pricing             matcher.Price
-	PriceAvailable      bool
-	SupportedParameters []string
-	InputModalities     []string
-	OutputModalities    []string
-	Tags                []string
+	ID                     string
+	Name                   string
+	Free                   bool
+	ContextLength          int64
+	MaxCompletionTokens    int64
+	Pricing                matcher.Price
+	PriceAvailable         bool
+	OfficialPricing        matcher.Price
+	OfficialPriceAvailable bool
+	SupportedParameters    []string
+	InputModalities        []string
+	OutputModalities       []string
+	Tags                   []string
 }
 
 type Client interface {

@@ -29,3 +29,14 @@ func TestCatalogDiscountsRequireOfficialBaseline(t *testing.T) {
 		t.Fatalf("route without OpenRouter baseline received discount: %#v", discounts)
 	}
 }
+
+func TestCatalogDiscountsClampOverpricedRoutesAndUseProviderBaseline(t *testing.T) {
+	routes := []matcher.Route{
+		{Provider: "surplus", LogicalModel: "market-model", UpstreamModel: "market-model", PriceAvailable: true, OfficialPriceAvailable: true, Price: matcher.Price{InputPicoUSDPerToken: 200, OutputPicoUSDPerToken: 50}, OfficialPrice: matcher.Price{InputPicoUSDPerToken: 100, OutputPicoUSDPerToken: 100}},
+	}
+	discounts := catalogDiscounts(routes)
+	item, ok := discounts["surplus\x00market-model\x00market-model"]
+	if !ok || item.InputBPS != 0 || item.OutputBPS != 5000 || item.MaxBPS != 5000 || item.OfficialInput != 100 || item.Source != "surplus" {
+		t.Fatalf("unexpected provider baseline discount: %#v", discounts)
+	}
+}

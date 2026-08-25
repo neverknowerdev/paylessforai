@@ -399,12 +399,18 @@ func persistUsage(ctx context.Context, dataStore *store.Store, requestID string,
 	var discountPico, discountBPS *int64
 	if actualCost != nil && officialCost > 0 {
 		difference := officialCost - *actualCost
+		if difference < 0 {
+			difference = 0
+		}
 		maxInt64 := int64(^uint64(0) >> 1)
-		var bps int64
-		if difference > maxInt64/10000 || difference < -maxInt64/10000 {
+		bps := int64(0)
+		if difference > maxInt64/10000 {
 			bps = int64(float64(difference) / float64(officialCost) * 10000)
 		} else {
 			bps = difference * 10000 / officialCost
+		}
+		if bps > 10000 {
+			bps = 10000
 		}
 		discountPico, discountBPS = &difference, &bps
 	}
@@ -415,18 +421,25 @@ func persistUsage(ctx context.Context, dataStore *store.Store, requestID string,
 func officialPricing(ranked []matcher.RankedRoute) (matcher.Price, int64) {
 	for _, candidate := range ranked {
 		if candidate.Route.Provider == "openrouter" && !candidate.Route.Free {
-			return candidate.Route.Price, candidate.ExpectedCost
+			return referencePrice(candidate.Route), candidate.ExpectedCost
 		}
 	}
 	for _, candidate := range ranked {
 		if !candidate.Route.Free {
-			return candidate.Route.Price, candidate.ExpectedCost
+			return referencePrice(candidate.Route), candidate.ExpectedCost
 		}
 	}
 	if len(ranked) > 0 {
-		return ranked[0].Route.Price, ranked[0].ExpectedCost
+		return referencePrice(ranked[0].Route), ranked[0].ExpectedCost
 	}
 	return matcher.Price{}, 0
+}
+
+func referencePrice(route matcher.Route) matcher.Price {
+	if route.OfficialPriceAvailable {
+		return route.OfficialPrice
+	}
+	return route.Price
 }
 
 func humanErrorMessage(err error) string {

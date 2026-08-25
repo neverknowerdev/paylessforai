@@ -147,6 +147,21 @@ func TestProxyUsesProviderReportedCostAsActualCost(t *testing.T) {
 	if actualCost != 9_000_000 {
 		t.Fatalf("expected provider-reported actual cost, got %d", actualCost)
 	}
+	var discount int64
+	if err := db.DB().QueryRow(`SELECT discount_pico_usd FROM request_usage`).Scan(&discount); err != nil {
+		t.Fatal(err)
+	}
+	if discount != 0 {
+		t.Fatalf("overpriced request must report zero savings, got %d", discount)
+	}
+}
+
+func TestOfficialPricingUsesProviderReferencePrice(t *testing.T) {
+	route := matcher.Route{Provider: "surplus", Price: matcher.Price{InputPicoUSDPerToken: 1}, OfficialPrice: matcher.Price{InputPicoUSDPerToken: 100}, OfficialPriceAvailable: true}
+	price, _ := officialPricing([]matcher.RankedRoute{{Route: route, ExpectedCost: 1}})
+	if price.InputPicoUSDPerToken != 100 {
+		t.Fatalf("expected provider reference price, got %#v", price)
+	}
 }
 
 func TestProxyRetriesThenFailsOver(t *testing.T) {

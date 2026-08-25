@@ -9,37 +9,53 @@ import (
 )
 
 type routeDiscount struct {
-	MaxBPS    int64
-	InputBPS  int64
-	OutputBPS int64
-	Available bool
+	MaxBPS         int64
+	InputBPS       int64
+	OutputBPS      int64
+	OfficialInput  int64
+	OfficialOutput int64
+	Source         string
+	Available      bool
 }
 
 func catalogDiscounts(routes []matcher.Route) map[string]routeDiscount {
 	type baseline struct{ input, output int64 }
 	official := make(map[string]baseline)
 	for _, route := range routes {
-		if route.Provider != "openrouter" || strings.HasSuffix(strings.ToLower(route.UpstreamModel), ":free") || !route.PriceAvailable || (route.Price.InputPicoUSDPerToken <= 0 && route.Price.OutputPicoUSDPerToken <= 0) {
+		if route.Provider != "openrouter" || route.Free || strings.HasSuffix(strings.ToLower(route.UpstreamModel), ":free") {
+			continue
+		}
+		price := route.Price
+		if route.OfficialPriceAvailable {
+			price = route.OfficialPrice
+		}
+		if price.InputPicoUSDPerToken <= 0 && price.OutputPicoUSDPerToken <= 0 {
 			continue
 		}
 		if _, exists := official[route.LogicalModel]; !exists {
-			official[route.LogicalModel] = baseline{input: route.Price.InputPicoUSDPerToken, output: route.Price.OutputPicoUSDPerToken}
+			official[route.LogicalModel] = baseline{input: price.InputPicoUSDPerToken, output: price.OutputPicoUSDPerToken}
 		}
 	}
 	result := make(map[string]routeDiscount)
 	for _, route := range routes {
 		base, ok := official[route.LogicalModel]
+		source := "openrouter"
+		if route.OfficialPriceAvailable {
+			base = baseline{input: route.OfficialPrice.InputPicoUSDPerToken, output: route.OfficialPrice.OutputPicoUSDPerToken}
+			ok = base.input > 0 || base.output > 0
+			source = route.Provider
+		}
 		if !ok || !route.PriceAvailable || (!route.Free && route.Price.InputPicoUSDPerToken <= 0 && route.Price.OutputPicoUSDPerToken <= 0) {
 			continue
 		}
 		values := make([]int64, 0, 2)
-		discount := routeDiscount{Available: true}
+		discount := routeDiscount{OfficialInput: base.input, OfficialOutput: base.output, Source: source, Available: true}
 		if base.input > 0 {
-			discount.InputBPS = (base.input - route.Price.InputPicoUSDPerToken) * 10000 / base.input
+			discount.InputBPS = boundedDiscountBPS(base.input, route.Price.InputPicoUSDPerToken)
 			values = append(values, discount.InputBPS)
 		}
 		if base.output > 0 {
-			discount.OutputBPS = (base.output - route.Price.OutputPicoUSDPerToken) * 10000 / base.output
+			discount.OutputBPS = boundedDiscountBPS(base.output, route.Price.OutputPicoUSDPerToken)
 			values = append(values, discount.OutputBPS)
 		}
 		if len(values) == 0 {
@@ -54,6 +70,23 @@ func catalogDiscounts(routes []matcher.Route) map[string]routeDiscount {
 		result[route.Provider+"\x00"+route.LogicalModel+"\x00"+route.UpstreamModel] = discount
 	}
 	return result
+}
+
+func boundedDiscountBPS(official, current int64) int64 {
+	if official <= 0 || current >= official {
+		return 0
+	}
+	if current <= 0 {
+		return 10000
+	}
+	value := (official - current) * 10000 / official
+	if value < 0 {
+		return 0
+	}
+	if value > 10000 {
+		return 10000
+	}
+	return value
 }
 
 func modalityNames(values map[string]bool) []string {
@@ -106,7 +139,8 @@ func (s *Server) handleCatalogModels(w http.ResponseWriter, r *http.Request) {
 			item["discount_percent_bps"] = discount.MaxBPS
 			item["discount_input_percent_bps"] = discount.InputBPS
 			item["discount_output_percent_bps"] = discount.OutputBPS
-			item["discount_source"] = "openrouter"
+			item["discount_source"] = discount.Source
+			item["official_pricing"] = map[string]any{"input": discount.OfficialInput, "output": discount.OfficialOutput}
 		}
 		data = append(data, item)
 	}

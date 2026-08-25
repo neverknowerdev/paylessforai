@@ -152,7 +152,7 @@
     if (drawer) { state.detailDrawer = drawer; drawer.hidden = true; }
     body.replaceChildren();
     filteredRequests().forEach((request) => {
-      const row = document.createElement('tr'); row.className = 'data-row'; row.dataset.requestId = request.id;
+      const row = document.createElement('tr'); row.className = 'data-row'; row.dataset.requestId = request.id; row.setAttribute('aria-expanded', 'false');
       const id = appendTextCell(row, ''); const idStrong = document.createElement('strong'); idStrong.textContent = shortID(request.id); const idSmall = document.createElement('small'); idSmall.textContent = dateValue(request.received_at); id.append(idStrong, idSmall);
       const model = appendTextCell(row, ''); const modelStrong = document.createElement('strong'); modelStrong.textContent = request.model; const modelSmall = document.createElement('small'); modelSmall.textContent = protocolName(request.protocol); model.append(modelStrong, modelSmall);
       const provider = appendTextCell(row, ''); provider.append(providerBadge(request.provider || 'unknown'));
@@ -167,7 +167,16 @@
 
   function showRequestDetail(id) {
     const request = state.requests.find((item) => item.id === id); const body = $('#requests-table-body'); const drawer = state.detailDrawer || $('#request-detail'); if (!request || !body || !drawer) return;
-    body.querySelector('.request-detail-row')?.remove();
+    const selectedRow = body.querySelector(`tr[data-request-id="${CSS.escape(id)}"]`);
+    const existingDetail = body.querySelector('.request-detail-row');
+    if (existingDetail?.dataset.requestDetailFor === id) {
+      existingDetail.remove();
+      drawer.hidden = true;
+      selectedRow?.setAttribute('aria-expanded', 'false');
+      return;
+    }
+    existingDetail?.previousElementSibling?.setAttribute('aria-expanded', 'false');
+    existingDetail?.remove();
     state.detailDrawer = drawer;
     drawer.hidden = false; drawer.replaceChildren(); const heading = document.createElement('h4'); heading.textContent = `Request ${shortID(request.id)}`; drawer.append(heading);
     const grid = document.createElement('div'); grid.className = 'detail-grid'; const values = [['Model', request.model], ['Provider', providerName(request.provider)], ['Upstream model', request.upstream_model || '—'], ['Attempts', formatNumber(request.attempts)], ['Protocol', protocolName(request.protocol)], ['State', request.state], ['Input tokens', formatNumber(request.input_tokens)], ['Output tokens', formatNumber(request.output_tokens)], ['Cached read', formatNumber(request.cached_read_tokens)], ['Cache write', formatNumber(request.cache_write_tokens)], ['Reasoning', formatNumber(request.reasoning_tokens)], ['Response time', formatDuration(request.duration_ms)], ['Estimated route cost', formatUSD(request.estimated_cost_pico_usd)], ['Official cost', request.official_cost_pico_usd ? formatUSD(request.official_cost_pico_usd) : 'Not available'], ['Actual cost', request.actual_cost_pico_usd != null ? formatUSD(request.actual_cost_pico_usd) : 'Not reported'], ['Discount', discountLabel(request)], ['Received', dateValue(request.received_at)], ['Completed', dateValue(request.completed_at)]];
@@ -192,9 +201,9 @@
     });
     if (!request.attempt_details?.length) { const emptyAttempts = document.createElement('p'); emptyAttempts.className = 'attempt-empty'; emptyAttempts.textContent = 'No provider attempts were recorded for this legacy request.'; attempts.append(emptyAttempts); }
     drawer.append(attempts);
-    const selectedRow = body.querySelector(`tr[data-request-id="${CSS.escape(id)}"]`);
     if (!selectedRow) { drawer.hidden = true; return; }
-    const detailRow = document.createElement('tr'); detailRow.className = 'request-detail-row'; const detailCell = document.createElement('td'); detailCell.colSpan = 10; detailCell.append(drawer); detailRow.append(detailCell); selectedRow.after(detailRow);
+    selectedRow.setAttribute('aria-expanded', 'true');
+    const detailRow = document.createElement('tr'); detailRow.className = 'request-detail-row'; detailRow.dataset.requestDetailFor = id; const detailCell = document.createElement('td'); detailCell.colSpan = 10; detailCell.append(drawer); detailRow.append(detailCell); selectedRow.after(detailRow);
   }
 
   async function loadModels() {

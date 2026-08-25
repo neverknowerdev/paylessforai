@@ -37,7 +37,8 @@ detail view.
   response time in the table and detail view.
 
 The Models view exposes tag/provider filters, price and discount sorting, and a
-historical discount column when requests have an official pricing baseline.
+catalog discount column comparing each current route with the canonical
+OpenRouter price for that logical model.
 Surplus routes are marked free only when the provider metadata explicitly labels
 them free (for example `hy3-free`); zero prompt/completion fields alone are not
 enough because media models may use a separate image, audio, video, or job meter.

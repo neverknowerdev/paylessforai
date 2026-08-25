@@ -3,7 +3,7 @@ import { expect, test } from '@playwright/test';
 test('configures providers, creates a client key, and routes an OpenAI request', async ({ page, request }) => {
   await request.post('http://127.0.0.1:19475/__mock/scenario', {
     data: {
-      models: [{ id: 'model-a:free', name: 'Model A Free', prompt_price: '0', completion_price: '0', context_length: 128000, max_completion_tokens: 4096, supported_parameters: ['tools', 'response_format'] }],
+      models: [{ id: 'model-a:free', name: 'Model A Free', prompt_price: '0', completion_price: '0', context_length: 128000, max_completion_tokens: 4096, supported_parameters: ['tools', 'response_format'], input_modalities: ['text', 'image'], output_modalities: ['text'], supported_features: ['streaming', 'free-tier'] }],
       response_text: 'mock response',
       failure_count: 1,
     },
@@ -44,6 +44,14 @@ test('configures providers, creates a client key, and routes an OpenAI request',
   const surplusRequests = await (await request.get('http://127.0.0.1:19476/__mock/requests')).json();
   expect(openRouterRequests.data.some((item: { path: string; body: string }) => item.path.endsWith('/chat/completions') && item.body.includes('model-a:free'))).toBeTruthy();
   expect(surplusRequests.data.some((item: { path: string; body: string }) => item.path.endsWith('/chat/completions') && item.body.includes('model-a'))).toBeTruthy();
+  await page.getByRole('link', { name: 'Models' }).click();
+  await expect(page.locator('table')).toContainText('Modalities');
+  await expect(page.locator('table')).toContainText('text + image');
+  await expect(page.locator('table')).toContainText('free-tier');
+  await page.getByRole('link', { name: 'Requests' }).click();
+  await expect(page.locator('table')).toContainText('Provider');
+  await expect(page.locator('table')).toContainText('Attempts');
+  await expect(page.locator('table')).toContainText('Surplus Intelligence');
   await expect(page.locator('#status')).toContainText('Ready');
 });
 

@@ -1,6 +1,20 @@
 package controlplane
 
-import "net/http"
+import (
+	"net/http"
+	"sort"
+)
+
+func modalityNames(values map[string]bool) []string {
+	result := make([]string, 0, len(values))
+	for value, enabled := range values {
+		if enabled {
+			result = append(result, value)
+		}
+	}
+	sort.Strings(result)
+	return result
+}
 
 func (s *Server) registerModelRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("/api/models", s.handleCatalogModels)
@@ -29,6 +43,7 @@ func (s *Server) handleCatalogModels(w http.ResponseWriter, r *http.Request) {
 			"free": route.Free, "price_available": route.PriceAvailable, "health": route.Health,
 			"context_length": route.Capabilities.MaxContext, "max_output_tokens": route.Capabilities.MaxOutput,
 			"supported_parameters": route.Capabilities.Parameters,
+			"input_modalities":     modalityNames(route.Capabilities.InputModalities), "output_modalities": modalityNames(route.Capabilities.OutputModalities), "tags": route.Capabilities.Tags,
 			"pricing": map[string]any{
 				"input": route.Price.InputPicoUSDPerToken, "output": route.Price.OutputPicoUSDPerToken,
 				"cached_read": route.Price.CachedReadPicoUSDPerToken, "cache_write": route.Price.CacheWritePicoUSDPerToken,

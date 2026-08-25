@@ -19,6 +19,10 @@ type Model struct {
 	PromptPrice         string   `json:"prompt_price"`
 	CompletionPrice     string   `json:"completion_price"`
 	SupportedParameters []string `json:"supported_parameters"`
+	InputModalities     []string `json:"input_modalities"`
+	OutputModalities    []string `json:"output_modalities"`
+	SupportedFeatures   []string `json:"supported_features"`
+	Tags                []string `json:"tags"`
 }
 
 type Scenario struct {
@@ -157,7 +161,7 @@ func (s *Server) handleControl(w http.ResponseWriter, r *http.Request, body []by
 func (s *Server) writeModels(w http.ResponseWriter, scenario Scenario) {
 	data := make([]map[string]any, 0, len(scenario.Models))
 	for _, model := range scenario.Models {
-		data = append(data, map[string]any{"id": model.ID, "name": model.Name, "context_length": model.ContextLength, "max_completion_tokens": model.MaxCompletionTokens, "pricing": map[string]string{"prompt": model.PromptPrice, "completion": model.CompletionPrice}, "supported_parameters": model.SupportedParameters})
+		data = append(data, map[string]any{"id": model.ID, "name": model.Name, "context_length": model.ContextLength, "max_completion_tokens": model.MaxCompletionTokens, "pricing": map[string]string{"prompt": model.PromptPrice, "completion": model.CompletionPrice}, "supported_parameters": model.SupportedParameters, "architecture": map[string]any{"input_modalities": model.InputModalities, "output_modalities": model.OutputModalities}, "supported_features": model.SupportedFeatures, "tags": model.Tags})
 	}
 	s.writeGeneric(w, "/models", map[string]any{"data": data})
 }

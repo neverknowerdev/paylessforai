@@ -51,3 +51,14 @@ func TestRefreshMergesFreeOpenRouterVariantWithPaidProvider(t *testing.T) {
 		t.Fatalf("expected one free route: %#v", snapshot.Routes)
 	}
 }
+
+func TestRefreshPropagatesModalitiesAndTags(t *testing.T) {
+	manager := New([]providers.Client{fakeClient{name: "surplus", models: []providers.Model{{ID: "model-a", Name: "Model A", Pricing: matcher.Price{InputPicoUSDPerToken: 1, OutputPicoUSDPerToken: 1}, PriceAvailable: true, InputModalities: []string{"text", "audio"}, OutputModalities: []string{"text"}, Tags: []string{"streaming"}}}}})
+	if err := manager.Refresh(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	route := manager.Snapshot().Routes[0]
+	if !route.Capabilities.InputModalities["audio"] || !route.Capabilities.OutputModalities["text"] || len(route.Capabilities.Tags) != 1 {
+		t.Fatalf("metadata not propagated: %#v", route.Capabilities)
+	}
+}

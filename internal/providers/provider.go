@@ -17,6 +17,9 @@ type Model struct {
 	Pricing             matcher.Price
 	PriceAvailable      bool
 	SupportedParameters []string
+	InputModalities     []string
+	OutputModalities    []string
+	Tags                []string
 }
 
 type Client interface {

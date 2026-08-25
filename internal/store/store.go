@@ -65,6 +65,9 @@ type RequestStat struct {
 	ReasoningTokens   int64   `json:"reasoning_tokens"`
 	EstimatedCostPico int64   `json:"estimated_cost_pico_usd"`
 	ActualCostPico    *int64  `json:"actual_cost_pico_usd,omitempty"`
+	Provider          string  `json:"provider,omitempty"`
+	UpstreamModel     string  `json:"upstream_model,omitempty"`
+	Attempts          int64   `json:"attempts"`
 }
 
 type StatsSummary struct {
@@ -251,6 +254,20 @@ func (s *Store) CompleteProxyRequest(ctx context.Context, id, state, errorCode, 
 	return err
 }
 
+// RecordProxyAttempt records both the route actually contacted and the durable
+// attempt count used by the request UI and postmortem diagnostics.
+func (s *Store) RecordProxyAttempt(ctx context.Context, requestID string, attempt int, provider, upstream, state, errorClass, errorMessage string) error {
+	if attempt < 1 {
+		return fmt.Errorf("attempt number must be positive")
+	}
+	now := time.Now().UTC().Format(time.RFC3339Nano)
+	if _, err := s.db.ExecContext(ctx, `UPDATE proxy_requests SET selected_provider = ?, selected_upstream_model = ?, attempt_count = CASE WHEN attempt_count < ? THEN ? ELSE attempt_count END WHERE id = ?`, provider, upstream, attempt, attempt, requestID); err != nil {
+		return err
+	}
+	_, err := s.db.ExecContext(ctx, `INSERT INTO proxy_attempts(id, request_id, attempt_number, route_id, provider, upstream_model, state, started_at, completed_at, error_class, error_message) VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, NULLIF(?, ''), NULLIF(?, '')) ON CONFLICT(id) DO UPDATE SET provider=excluded.provider, upstream_model=excluded.upstream_model, state=excluded.state, completed_at=excluded.completed_at, error_class=excluded.error_class, error_message=excluded.error_message`, requestID+":"+fmt.Sprint(attempt), requestID, attempt, provider+":"+upstream, provider, upstream, state, now, now, errorClass, errorMessage)
+	return err
+}
+
 func (s *Store) RecordUsage(ctx context.Context, usage RequestUsage) error {
 	_, err := s.db.ExecContext(ctx, `INSERT INTO request_usage(request_id, input_tokens, output_tokens, total_tokens, cached_read_tokens, cache_write_tokens, reasoning_tokens, estimated_cost_pico_usd, actual_cost_pico_usd, raw_usage_json) VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?) ON CONFLICT(request_id) DO UPDATE SET input_tokens=excluded.input_tokens, output_tokens=excluded.output_tokens, total_tokens=excluded.total_tokens, cached_read_tokens=excluded.cached_read_tokens, cache_write_tokens=excluded.cache_write_tokens, reasoning_tokens=excluded.reasoning_tokens, estimated_cost_pico_usd=excluded.estimated_cost_pico_usd, actual_cost_pico_usd=excluded.actual_cost_pico_usd, raw_usage_json=excluded.raw_usage_json`, usage.RequestID, usage.InputTokens, usage.OutputTokens, usage.TotalTokens, usage.CachedReadTokens, usage.CacheWriteTokens, usage.ReasoningTokens, usage.EstimatedCostPico, usage.ActualCostPico, usage.RawUsageJSON)
 	return err
@@ -261,6 +278,7 @@ func (s *Store) ListRequestStats(ctx context.Context, limit int) ([]RequestStat,
 		limit = 100
 	}
 	rows, err := s.db.QueryContext(ctx, `SELECT r.id, r.protocol, r.logical_model, r.state, r.received_at, r.completed_at, r.error_code,
+		COALESCE(r.selected_provider, ''), COALESCE(r.selected_upstream_model, ''), r.attempt_count,
 		u.input_tokens, u.output_tokens, u.total_tokens, u.cached_read_tokens, u.cache_write_tokens, u.reasoning_tokens,
 		u.estimated_cost_pico_usd, u.actual_cost_pico_usd
 		FROM proxy_requests r LEFT JOIN request_usage u ON u.request_id = r.id
@@ -276,7 +294,7 @@ func (s *Store) ListRequestStats(ctx context.Context, limit int) ([]RequestStat,
 		var input, output, total, cachedRead, cacheWrite, reasoning, estimated sql.NullInt64
 		var actual sql.NullInt64
 		if err := rows.Scan(&item.ID, &item.Protocol, &item.Model, &item.State, &item.ReceivedAt, &completedAt, &errorCode,
-			&input, &output, &total, &cachedRead, &cacheWrite, &reasoning, &estimated, &actual); err != nil {
+			&item.Provider, &item.UpstreamModel, &item.Attempts, &input, &output, &total, &cachedRead, &cacheWrite, &reasoning, &estimated, &actual); err != nil {
 			return nil, err
 		}
 		if completedAt.Valid {

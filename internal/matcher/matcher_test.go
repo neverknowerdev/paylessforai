@@ -118,3 +118,13 @@ func TestMatchAllowsExplicitStaleAndUntrustedRoutes(t *testing.T) {
 		t.Fatalf("expected explicitly allowed route, got %#v", result)
 	}
 }
+
+func TestMatchRejectsMissingRequiredModalities(t *testing.T) {
+	route := testRoute("r", "p", 1, 1)
+	route.Capabilities.InputModalities = map[string]bool{"text": true}
+	route.Capabilities.OutputModalities = map[string]bool{"text": true}
+	result := New().Match(MatchInput{Request: MatchRequest{Protocol: ProtocolChatCompletions, LogicalModel: "model-a", RequiredInputModalities: []string{"audio"}}, Routes: []Route{route}, Now: time.Unix(20, 0)})
+	if result.Selected != nil || len(result.Rejections) != 1 || result.Rejections[0].Code != "missing_modality" {
+		t.Fatalf("unexpected modality result: %#v", result)
+	}
+}

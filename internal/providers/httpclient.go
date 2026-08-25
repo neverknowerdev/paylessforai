@@ -54,6 +54,13 @@ func (c *HTTPClient) Discover(ctx context.Context) ([]Model, error) {
 			MaxCompletionTokens int64                      `json:"max_completion_tokens"`
 			Pricing             map[string]json.RawMessage `json:"pricing"`
 			SupportedParameters []string                   `json:"supported_parameters"`
+			Architecture        struct {
+				InputModalities  []string `json:"input_modalities"`
+				OutputModalities []string `json:"output_modalities"`
+				Modality         string   `json:"modality"`
+			} `json:"architecture"`
+			SupportedFeatures []string `json:"supported_features"`
+			Tags              []string `json:"tags"`
 		} `json:"data"`
 	}
 	if err := json.NewDecoder(io.LimitReader(response.Body, 16<<20)).Decode(&payload); err != nil {
@@ -76,9 +83,54 @@ func (c *HTTPClient) Discover(ctx context.Context) ([]Model, error) {
 				output, outputOK = 0, true
 			}
 		}
-		models = append(models, Model{ID: item.ID, Name: item.Name, Free: free, ContextLength: item.ContextLength, MaxCompletionTokens: item.MaxCompletionTokens, Pricing: matcher.Price{InputPicoUSDPerToken: input, OutputPicoUSDPerToken: output, CachedReadPicoUSDPerToken: cachedRead, CacheWritePicoUSDPerToken: cacheWrite, ReasoningPicoUSDPerToken: reasoning, FixedPicoUSD: fixed, ObservedAt: time.Now().UTC()}, PriceAvailable: inputOK && outputOK, SupportedParameters: item.SupportedParameters})
+		inputModalities, outputModalities := item.Architecture.InputModalities, item.Architecture.OutputModalities
+		if len(inputModalities) == 0 || len(outputModalities) == 0 {
+			inputModalities, outputModalities = modalitiesFromDescriptor(item.Architecture.Modality)
+		}
+		if len(inputModalities) == 0 {
+			inputModalities, outputModalities = modalitiesFromTags(item.Tags)
+		}
+		tags := append(append([]string(nil), item.SupportedFeatures...), item.Tags...)
+		models = append(models, Model{ID: item.ID, Name: item.Name, Free: free, ContextLength: item.ContextLength, MaxCompletionTokens: item.MaxCompletionTokens, Pricing: matcher.Price{InputPicoUSDPerToken: input, OutputPicoUSDPerToken: output, CachedReadPicoUSDPerToken: cachedRead, CacheWritePicoUSDPerToken: cacheWrite, ReasoningPicoUSDPerToken: reasoning, FixedPicoUSD: fixed, ObservedAt: time.Now().UTC()}, PriceAvailable: inputOK && outputOK, SupportedParameters: item.SupportedParameters, InputModalities: normalizeTags(inputModalities), OutputModalities: normalizeTags(outputModalities), Tags: normalizeTags(tags)})
 	}
 	return models, nil
+}
+
+func modalitiesFromDescriptor(value string) ([]string, []string) {
+	parts := strings.Split(value, "->")
+	if len(parts) != 2 {
+		return nil, nil
+	}
+	return normalizeTags(strings.Split(parts[0], "+")), normalizeTags(strings.Split(parts[1], "+"))
+}
+
+func modalitiesFromTags(values []string) ([]string, []string) {
+	known := map[string]bool{"text": true, "image": true, "audio": true, "video": true}
+	input := make([]string, 0, len(values))
+	for _, value := range values {
+		value = strings.ToLower(strings.TrimSpace(value))
+		if known[value] {
+			input = append(input, value)
+		}
+	}
+	if len(input) == 0 {
+		return nil, nil
+	}
+	output := []string{"text"}
+	return normalizeTags(input), output
+}
+
+func normalizeTags(values []string) []string {
+	seen := map[string]bool{}
+	result := make([]string, 0, len(values))
+	for _, value := range values {
+		value = strings.ToLower(strings.TrimSpace(value))
+		if value != "" && !seen[value] {
+			seen[value] = true
+			result = append(result, value)
+		}
+	}
+	return result
 }
 
 func isFreeModel(provider, id string, input, output int64, priced bool) bool {

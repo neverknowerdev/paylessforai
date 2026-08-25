@@ -18,6 +18,9 @@ func TestRequestStatsIncludeUsage(t *testing.T) {
 	if err := s.RecordUsage(context.Background(), RequestUsage{RequestID: "request-1", InputTokens: 3, OutputTokens: 2, TotalTokens: 5, EstimatedCostPico: 7}); err != nil {
 		t.Fatal(err)
 	}
+	if err := s.RecordProxyAttempt(context.Background(), "request-1", 2, "surplus", "model-a", "succeeded", "", ""); err != nil {
+		t.Fatal(err)
+	}
 	if err := s.CompleteProxyRequest(context.Background(), "request-1", "succeeded", "", ""); err != nil {
 		t.Fatal(err)
 	}
@@ -25,7 +28,7 @@ func TestRequestStatsIncludeUsage(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(items) != 1 || items[0].State != "succeeded" || items[0].TotalTokens != 5 || items[0].EstimatedCostPico != 7 {
+	if len(items) != 1 || items[0].State != "succeeded" || items[0].TotalTokens != 5 || items[0].EstimatedCostPico != 7 || items[0].Provider != "surplus" || items[0].Attempts != 2 {
 		t.Fatalf("unexpected request stats: %#v", items)
 	}
 	summary, err := s.RequestStatsSummary(context.Background())

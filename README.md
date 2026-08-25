@@ -14,12 +14,17 @@ will be added later; v1 is intentionally local-only.
 - OpenRouter and Surplus Intelligence provider clients.
 - OpenRouter `:free` variants and zero-priced models, ranked before paid routes.
 - Startup model/catalog discovery with periodic refresh.
+- Provider architecture metadata: input/output modalities and supported feature tags,
+  surfaced in `/v1/models` and the UI; requests automatically require compatible
+  modalities when multimodal content is sent.
 - OpenAI Chat Completions, OpenAI Responses, and Anthropic Messages APIs,
   including streaming responses.
 - Deterministic, tested route matching and bounded retry/failover behavior.
 - Fixed-point estimated pricing from provider catalogs.
 - Actual token, cache, reasoning, and provider-reported cost accounting, with
-  usage-based cost fallback when a provider omits its price.
+usage-based cost fallback when a provider omits its price. Request statistics also
+include the selected provider, upstream model, and durable attempt count so free
+route failover is visible.
 - Local client API keys and encrypted provider-credential management.
 - Embedded UI for the base URL, keys, provider credentials, and recent request
   statistics.

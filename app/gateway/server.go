@@ -34,6 +34,7 @@ func NewHandler(catalogManager *catalog.Manager, proxyHandler *proxyservice.Prox
 				"free": model.Free, "context_length": model.ContextLength,
 				"max_completion_tokens": model.MaxCompletionTokens,
 				"supported_parameters":  model.SupportedParameters,
+				"input_modalities":      model.InputModalities, "output_modalities": model.OutputModalities, "tags": model.Tags,
 			})
 		}
 		writeJSON(w, http.StatusOK, map[string]any{"object": "list", "data": data})

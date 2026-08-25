@@ -102,20 +102,22 @@ func (p *Proxy) ServeHTTP(w http.ResponseWriter, r *http.Request, protocol match
 }
 
 type parsedRequest struct {
-	Protocol          matcher.Protocol
-	Model             string
-	InputTokens       int64
-	ExpectedOutput    int64
-	MaxContext        int64
-	MaxOutput         int64
-	RequiredParams    []string
-	RequireTools      bool
-	RequireStructured bool
-	Stream            bool
+	Protocol                 matcher.Protocol
+	Model                    string
+	InputTokens              int64
+	ExpectedOutput           int64
+	MaxContext               int64
+	MaxOutput                int64
+	RequiredParams           []string
+	RequireTools             bool
+	RequireStructured        bool
+	Stream                   bool
+	RequiredInputModalities  []string
+	RequiredOutputModalities []string
 }
 
 func (p parsedRequest) MatchRequest(protocol matcher.Protocol) matcher.MatchRequest {
-	return matcher.MatchRequest{Protocol: protocol, LogicalModel: p.Model, RequiredParameters: p.RequiredParams, RequireTools: p.RequireTools, RequireStructured: p.RequireStructured, InputTokens: p.InputTokens, ExpectedOutput: p.ExpectedOutput, MaxContext: p.MaxContext, MaxOutput: p.MaxOutput}
+	return matcher.MatchRequest{Protocol: protocol, LogicalModel: p.Model, RequiredParameters: p.RequiredParams, RequireTools: p.RequireTools, RequireStructured: p.RequireStructured, InputTokens: p.InputTokens, ExpectedOutput: p.ExpectedOutput, MaxContext: p.MaxContext, MaxOutput: p.MaxOutput, RequiredInputModalities: p.RequiredInputModalities, RequiredOutputModalities: p.RequiredOutputModalities}
 }
 
 func parseRequest(body []byte, protocol matcher.Protocol) (parsedRequest, error) {
@@ -149,7 +151,83 @@ func parseRequest(body []byte, protocol matcher.Protocol) (parsedRequest, error)
 		request.RequireStructured = true
 		request.RequiredParams = append(request.RequiredParams, "response_format")
 	}
+	var decoded any
+	if raw, ok := payload["messages"]; ok {
+		_ = json.Unmarshal(raw, &decoded)
+		request.RequiredInputModalities = detectModalities(decoded)
+	}
+	if raw, ok := payload["input"]; ok {
+		_ = json.Unmarshal(raw, &decoded)
+		request.RequiredInputModalities = appendUnique(request.RequiredInputModalities, detectModalities(decoded)...)
+	}
+	if raw, ok := payload["modalities"]; ok {
+		var output []string
+		if json.Unmarshal(raw, &output) == nil {
+			request.RequiredOutputModalities = normalizeModalities(output)
+		}
+	}
 	return request, nil
+}
+
+func detectModalities(value any) []string {
+	result := []string{}
+	var visit func(any)
+	visit = func(node any) {
+		switch item := node.(type) {
+		case []any:
+			for _, child := range item {
+				visit(child)
+			}
+		case map[string]any:
+			if typ, ok := item["type"].(string); ok {
+				switch strings.ToLower(typ) {
+				case "text", "input_text", "output_text":
+					result = appendUnique(result, "text")
+				case "image", "image_url", "input_image":
+					result = appendUnique(result, "image")
+				case "audio", "input_audio":
+					result = appendUnique(result, "audio")
+				case "video", "input_video":
+					result = appendUnique(result, "video")
+				}
+			}
+			for key, child := range item {
+				if key == "content" || key == "input" || key == "parts" {
+					visit(child)
+				}
+			}
+		case string:
+			if strings.TrimSpace(item) != "" {
+				result = appendUnique(result, "text")
+			}
+		}
+	}
+	visit(value)
+	return result
+}
+
+func normalizeModalities(values []string) []string {
+	result := []string{}
+	for _, value := range values {
+		value = strings.ToLower(strings.TrimSpace(value))
+		if value != "" {
+			result = appendUnique(result, value)
+		}
+	}
+	return result
+}
+func appendUnique(values []string, additions ...string) []string {
+	seen := map[string]bool{}
+	for _, value := range values {
+		seen[value] = true
+	}
+	for _, value := range additions {
+		if !seen[value] {
+			seen[value] = true
+			values = append(values, value)
+		}
+	}
+	return values
 }
 
 func (p *Proxy) execute(ctx context.Context, writer http.ResponseWriter, requestID string, body []byte, request parsedRequest, ranked []matcher.RankedRoute) error {
@@ -162,16 +240,41 @@ func (p *Proxy) execute(ctx context.Context, writer http.ResponseWriter, request
 		route := ranked[current].Route
 		client := p.Catalog.Client(route.Provider)
 		if client == nil {
+			if p.Store != nil {
+				_ = p.Store.RecordProxyAttempt(ctx, requestID, attempt, route.Provider, route.UpstreamModel, "failed", "provider_not_configured", "selected provider is not configured")
+			}
 			return &proxyError{status: http.StatusBadGateway, code: "provider_not_configured", message: "selected provider is not configured"}
+		}
+		if p.Store != nil {
+			_ = p.Store.RecordProxyAttempt(ctx, requestID, attempt, route.Provider, route.UpstreamModel, "started", "", "")
 		}
 		response, err := client.Do(ctx, request.Protocol, route.UpstreamModel, body)
 		if err == nil {
 			if request.Stream || strings.Contains(strings.ToLower(response.Header.Get("Content-Type")), "text/event-stream") {
-				return p.stream(ctx, writer, requestID, response, ranked[current].ExpectedCost, route.Price)
+				streamErr := p.stream(ctx, writer, requestID, response, ranked[current].ExpectedCost, route.Price)
+				if p.Store != nil {
+					state, code, message := "succeeded", "", ""
+					if streamErr != nil {
+						state, code, message = "partial", "stream_error", sanitize(streamErr.Error())
+					}
+					_ = p.Store.RecordProxyAttempt(ctx, requestID, attempt, route.Provider, route.UpstreamModel, state, code, message)
+				}
+				return streamErr
 			}
-			return p.complete(ctx, writer, requestID, response, ranked[current].ExpectedCost, route.Price)
+			completeErr := p.complete(ctx, writer, requestID, response, ranked[current].ExpectedCost, route.Price)
+			if p.Store != nil {
+				state, code, message := "succeeded", "", ""
+				if completeErr != nil {
+					state, code, message = "failed", errorCode(completeErr), sanitize(completeErr.Error())
+				}
+				_ = p.Store.RecordProxyAttempt(ctx, requestID, attempt, route.Provider, route.UpstreamModel, state, code, message)
+			}
+			return completeErr
 		}
 		classified := classify(err)
+		if p.Store != nil {
+			_ = p.Store.RecordProxyAttempt(ctx, requestID, attempt, route.Provider, route.UpstreamModel, "failed", errorCode(err), sanitize(err.Error()))
+		}
 		decision := p.Retry.Decide(retry.Input{Policy: policy, AttemptNumber: attempt, Now: time.Now(), Error: classified, Delivery: retry.NothingSent, SameRouteAvailable: !route.Free, FallbacksRemaining: len(ranked) - current - 1})
 		if decision.Action != retry.RetrySameRoute && decision.Action != retry.FailOver {
 			return err

@@ -202,6 +202,20 @@ func TestProxyFailsOverImmediatelyFromFreeRoute(t *testing.T) {
 	if freeCalls != 1 || paidCalls != 1 {
 		t.Fatalf("free route should fail over without retry: free=%d paid=%d", freeCalls, paidCalls)
 	}
+	items, err := db.ListRequestStats(context.Background(), 10)
+	if err != nil || len(items) != 1 || items[0].Provider != "surplus" || items[0].Attempts != 2 {
+		t.Fatalf("expected durable failover metadata, got %#v, %v", items, err)
+	}
+}
+
+func TestParseRequestDetectsInputAndOutputModalities(t *testing.T) {
+	request, err := parseRequest([]byte(`{"model":"model-a","messages":[{"role":"user","content":[{"type":"text","text":"describe"},{"type":"image_url","image_url":{"url":"data:image/png;base64,abc"}},{"type":"input_audio","input_audio":{"data":"abc"}}]}],"modalities":["text"]}`), matcher.ProtocolChatCompletions)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Join(request.RequiredInputModalities, ",") != "text,image,audio" || strings.Join(request.RequiredOutputModalities, ",") != "text" {
+		t.Fatalf("unexpected modalities: %#v", request)
+	}
 }
 
 func TestProxySupportsResponsesAndAnthropicMessages(t *testing.T) {

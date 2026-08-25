@@ -19,6 +19,9 @@ type Model struct {
 	ContextLength       int64
 	MaxCompletionTokens int64
 	SupportedParameters []string
+	InputModalities     []string
+	OutputModalities    []string
+	Tags                []string
 }
 
 type Snapshot struct {
@@ -93,7 +96,7 @@ func (m *Manager) Refresh(ctx context.Context) error {
 			logical := logicalModel(batch.provider, model.ID, openRouterIDs)
 			free := model.Free || (model.PriceAvailable && model.Pricing.InputPicoUSDPerToken == 0 && model.Pricing.OutputPicoUSDPerToken == 0)
 			if _, ok := modelMap[logical]; !ok {
-				modelMap[logical] = Model{ID: logical, Name: model.Name, Free: free, ContextLength: model.ContextLength, MaxCompletionTokens: model.MaxCompletionTokens, SupportedParameters: append([]string(nil), model.SupportedParameters...)}
+				modelMap[logical] = Model{ID: logical, Name: model.Name, Free: free, ContextLength: model.ContextLength, MaxCompletionTokens: model.MaxCompletionTokens, SupportedParameters: append([]string(nil), model.SupportedParameters...), InputModalities: append([]string(nil), model.InputModalities...), OutputModalities: append([]string(nil), model.OutputModalities...), Tags: append([]string(nil), model.Tags...)}
 			} else if free {
 				merged := modelMap[logical]
 				merged.Free = true
@@ -104,7 +107,15 @@ func (m *Manager) Refresh(ctx context.Context) error {
 			for _, parameter := range model.SupportedParameters {
 				parameters[parameter] = true
 			}
-			routes = append(routes, matcher.Route{ID: batch.provider + ":" + model.ID, Provider: batch.provider, LogicalModel: logical, UpstreamModel: model.ID, Free: free, Price: model.Pricing, PriceAvailable: model.PriceAvailable, Capabilities: matcher.Capabilities{Protocols: protocols, Parameters: parameters, Tools: parameters["tools"], StructuredOutput: parameters["response_format"] || parameters["structured_outputs"], MaxContext: model.ContextLength, MaxOutput: model.MaxCompletionTokens}, Health: matcher.HealthHealthy, Trusted: true})
+			inputModalities := make(map[string]bool, len(model.InputModalities))
+			for _, modality := range model.InputModalities {
+				inputModalities[strings.ToLower(modality)] = true
+			}
+			outputModalities := make(map[string]bool, len(model.OutputModalities))
+			for _, modality := range model.OutputModalities {
+				outputModalities[strings.ToLower(modality)] = true
+			}
+			routes = append(routes, matcher.Route{ID: batch.provider + ":" + model.ID, Provider: batch.provider, LogicalModel: logical, UpstreamModel: model.ID, Free: free, Price: model.Pricing, PriceAvailable: model.PriceAvailable, Capabilities: matcher.Capabilities{Protocols: protocols, Parameters: parameters, Tools: parameters["tools"], StructuredOutput: parameters["response_format"] || parameters["structured_outputs"], MaxContext: model.ContextLength, MaxOutput: model.MaxCompletionTokens, InputModalities: inputModalities, OutputModalities: outputModalities, Tags: append([]string(nil), model.Tags...)}, Health: matcher.HealthHealthy, Trusted: true})
 		}
 	}
 	models := make([]Model, 0, len(modelMap))

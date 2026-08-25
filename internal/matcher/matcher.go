@@ -56,6 +56,9 @@ type Capabilities struct {
 	StructuredOutput bool
 	MaxContext       int64
 	MaxOutput        int64
+	InputModalities  map[string]bool
+	OutputModalities map[string]bool
+	Tags             []string
 }
 
 // Route is a fully materialized candidate. MatchEngine does not fetch or
@@ -77,20 +80,22 @@ type Route struct {
 
 // MatchRequest contains only facts needed by the matcher.
 type MatchRequest struct {
-	Protocol           Protocol
-	LogicalModel       string
-	RequiredParameters []string
-	RequireTools       bool
-	RequireStructured  bool
-	InputTokens        int64
-	ExpectedOutput     int64
-	MaxContext         int64
-	MaxOutput          int64
-	AllowStale         bool
-	AllowUntrusted     bool
-	AllowedProviders   []string
-	ExcludedProviders  []string
-	MaximumCostPicoUSD *int64
+	Protocol                 Protocol
+	LogicalModel             string
+	RequiredParameters       []string
+	RequireTools             bool
+	RequireStructured        bool
+	InputTokens              int64
+	ExpectedOutput           int64
+	MaxContext               int64
+	MaxOutput                int64
+	AllowStale               bool
+	AllowUntrusted           bool
+	AllowedProviders         []string
+	ExcludedProviders        []string
+	MaximumCostPicoUSD       *int64
+	RequiredInputModalities  []string
+	RequiredOutputModalities []string
 }
 
 type MatchInput struct {
@@ -215,6 +220,16 @@ func rejectRoute(request MatchRequest, route Route, now time.Time, allowed, excl
 	for _, parameter := range request.RequiredParameters {
 		if !route.Capabilities.Parameters[parameter] {
 			return reject("missing_capability", "route does not support parameter "+parameter)
+		}
+	}
+	for _, modality := range request.RequiredInputModalities {
+		if len(route.Capabilities.InputModalities) > 0 && !route.Capabilities.InputModalities[strings.ToLower(strings.TrimSpace(modality))] {
+			return reject("missing_modality", "route does not support input modality "+modality)
+		}
+	}
+	for _, modality := range request.RequiredOutputModalities {
+		if len(route.Capabilities.OutputModalities) > 0 && !route.Capabilities.OutputModalities[strings.ToLower(strings.TrimSpace(modality))] {
+			return reject("missing_modality", "route does not support output modality "+modality)
 		}
 	}
 	if request.MaxContext > 0 && route.Capabilities.MaxContext < request.MaxContext {

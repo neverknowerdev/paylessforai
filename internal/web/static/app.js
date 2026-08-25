@@ -71,9 +71,10 @@
     file: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 3h8l4 4v14H6z" fill="currentColor" fill-opacity=".18"/><path d="M14 3v5h4M9 12h6M9 16h6"/></svg>',
     audio: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 9h4l5-4v14l-5-4H4z" fill="currentColor" stroke="none"/><path d="M16 9a4 4 0 0 1 0 6M18.5 6.5a8 8 0 0 1 0 11"/></svg>'
   };
+  const modalityLabels = { text: 'Text', image: 'Image', video: 'Video', file: 'File', audio: 'Audio' };
   function modalityDisplay(input, output) {
     const wrapper = document.createElement('span'); wrapper.className = 'modality-display'; wrapper.setAttribute('aria-label', `Input: ${(input || []).join(', ') || 'unknown'}; output: ${(output || []).join(', ') || 'unknown'}`);
-    const group = (values) => { const container = document.createElement('span'); container.className = 'modality-group'; (values || []).forEach((value) => { const name = String(value).toLowerCase(); const icon = document.createElement('span'); icon.className = `modality-icon modality-${name}`; icon.innerHTML = modalityIcons[name] || '<span aria-hidden="true">•</span>'; icon.title = name; icon.setAttribute('aria-label', name); container.append(icon); }); return container; };
+    const group = (values) => { const container = document.createElement('span'); container.className = 'modality-group'; (values || []).forEach((value) => { const name = String(value).toLowerCase(); const label = modalityLabels[name] || name.charAt(0).toUpperCase() + name.slice(1); const icon = document.createElement('span'); icon.className = `modality-icon modality-${name}`; icon.innerHTML = modalityIcons[name] || '<span aria-hidden="true">•</span>'; icon.title = label; icon.setAttribute('aria-label', label); icon.setAttribute('data-tooltip', label); icon.setAttribute('role', 'img'); icon.tabIndex = 0; container.append(icon); }); return container; };
     wrapper.append(group(input)); const arrow = document.createElement('span'); arrow.className = 'modality-arrow'; arrow.textContent = '→'; wrapper.append(arrow, group(output)); return wrapper;
   }
 

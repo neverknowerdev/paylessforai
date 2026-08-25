@@ -37,7 +37,7 @@ func TestRequestStatsIncludeUsage(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if summary.TotalRequests != 1 || summary.SucceededRequests != 1 || summary.TotalTokens != 5 || summary.EstimatedCostPico != 7 {
+	if summary.TotalRequests != 1 || summary.SucceededRequests != 1 || summary.TotalTokens != 5 || summary.EstimatedCostPico != 7 || summary.SavedCostPico != 2 {
 		t.Fatalf("unexpected summary: %#v", summary)
 	}
 }

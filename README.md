@@ -116,6 +116,8 @@ A discount/overage is shown only when both the actual cost and a non-zero
 official catalog baseline are available; older rows created before pricing
 comparison was introduced, and models with no paid catalog price, are labeled
 accordingly.
+The Overview, Models, and Requests views also show the aggregate dollars saved
+against those official baselines; overages are not counted as savings.
 
 ## Configuration
 

@@ -102,6 +102,7 @@ type StatsSummary struct {
 	ReasoningTokens    int64 `json:"reasoning_tokens"`
 	EstimatedCostPico  int64 `json:"estimated_cost_pico_usd"`
 	ActualCostPico     int64 `json:"actual_cost_pico_usd"`
+	SavedCostPico      int64 `json:"saved_cost_pico_usd"`
 	RequestsWithActual int64 `json:"requests_with_actual_cost"`
 }
 
@@ -388,12 +389,13 @@ func (s *Store) RequestStatsSummary(ctx context.Context) (StatsSummary, error) {
 		COALESCE(SUM(u.reasoning_tokens), 0),
 		COALESCE(SUM(u.estimated_cost_pico_usd), 0),
 		COALESCE(SUM(u.actual_cost_pico_usd), 0),
+		COALESCE(SUM(CASE WHEN u.discount_pico_usd > 0 THEN u.discount_pico_usd ELSE 0 END), 0),
 		COUNT(u.actual_cost_pico_usd)
 		FROM proxy_requests r LEFT JOIN request_usage u ON u.request_id = r.id`).Scan(
 		&summary.TotalRequests, &summary.SucceededRequests, &summary.FailedRequests, &summary.PartialRequests,
 		&summary.InputTokens, &summary.OutputTokens, &summary.TotalTokens, &summary.CachedReadTokens,
 		&summary.CacheWriteTokens, &summary.ReasoningTokens, &summary.EstimatedCostPico,
-		&summary.ActualCostPico, &summary.RequestsWithActual)
+		&summary.ActualCostPico, &summary.SavedCostPico, &summary.RequestsWithActual)
 	return summary, err
 }
 

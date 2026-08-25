@@ -1,5 +1,5 @@
 (() => {
-  const state = { requests: [], models: [], summary: {}, view: 'overview' };
+  const state = { requests: [], models: [], summary: {}, view: 'overview', detailDrawer: null };
   const $ = (selector) => document.querySelector(selector);
   const $$ = (selector) => Array.from(document.querySelectorAll(selector));
   const formatNumber = (value) => new Intl.NumberFormat('en-US').format(Number(value || 0));
@@ -10,14 +10,14 @@
     const rounded = new Intl.NumberFormat('en-US', { maximumSignificantDigits: 3, useGrouping: false }).format(value);
     return `$${rounded}`;
   };
-  const formatSignedUSD = (pico) => { const value = Number(pico || 0); return `${value < 0 ? '-' : '+'}${formatUSD(Math.abs(value))}`; };
+  const formatSignedUSD = (pico) => { const value = Number(pico || 0); if (value === 0) return '$0'; return `${value < 0 ? '-' : '+'}${formatUSD(Math.abs(value))}`; };
   const discountPercent = (bps) => `${Math.round(Number(bps || 0) / 100)}%`;
   const discountUnavailableLabel = (request) => {
     if (request.official_cost_pico_usd == null || Number(request.official_cost_pico_usd) <= 0) return 'no official price';
     if (request.actual_cost_pico_usd == null) return 'no actual price';
     return 'not available';
   };
-  const discountLabel = (request) => request.discount_pico_usd == null ? `— · ${discountUnavailableLabel(request)}` : `${formatSignedUSD(request.discount_pico_usd)} · ${discountPercent(request.discount_percent_bps)} ${Number(request.discount_percent_bps || 0) >= 0 ? 'saved' : 'overage'}`;
+  const discountLabel = (request) => request.discount_pico_usd == null ? `— · ${discountUnavailableLabel(request)}` : Number(request.discount_pico_usd) === 0 ? '$0' : `${formatSignedUSD(request.discount_pico_usd)} · ${discountPercent(request.discount_percent_bps)} ${Number(request.discount_percent_bps || 0) >= 0 ? 'saved' : 'overage'}`;
   const shortID = (value) => value ? `${value.slice(0, 8)}…${value.slice(-4)}` : '—';
   const protocolName = (value) => ({ chat_completions: 'Chat Completions', responses: 'Responses', anthropic_messages: 'Anthropic Messages' }[value] || value || '—');
   const providerName = (value) => value === 'surplus' ? 'Surplus Intelligence' : value === 'openrouter' ? 'OpenRouter' : value || 'Unknown provider';
@@ -55,6 +55,8 @@
       setText('#metric-total', formatNumber(s.total_requests));
       setText('#metric-tokens', formatNumber(s.total_tokens));
       setText('#metric-cost', formatUSD(s.actual_cost_pico_usd || s.estimated_cost_pico_usd));
+      setText('#metric-saved', formatUSD(s.saved_cost_pico_usd));
+      setText('#models-saved', formatUSD(s.saved_cost_pico_usd));
       const success = s.total_requests ? Math.round((s.succeeded_requests / s.total_requests) * 100) : 0;
       setText('#metric-success', s.total_requests ? `${success}%` : '—');
       setText('#metric-success-note', s.total_requests ? `${formatNumber(s.succeeded_requests)} succeeded · ${formatNumber(s.failed_requests)} failed` : 'Waiting for traffic');
@@ -80,7 +82,7 @@
 
   function renderRequestSummary() {
     const container = $('#request-summary'); if (!container) return; container.replaceChildren();
-    const s = state.summary || {}; const items = [['TOTAL', formatNumber(s.total_requests)], ['TOKENS', formatNumber(s.total_tokens)], ['ESTIMATED', formatUSD(s.estimated_cost_pico_usd)], ['ACTUAL', formatUSD(s.actual_cost_pico_usd)]];
+    const s = state.summary || {}; const items = [['TOTAL', formatNumber(s.total_requests)], ['TOKENS', formatNumber(s.total_tokens)], ['ESTIMATED', formatUSD(s.estimated_cost_pico_usd)], ['ACTUAL', formatUSD(s.actual_cost_pico_usd)], ['SAVED', formatUSD(s.saved_cost_pico_usd)]];
     items.forEach(([label, value]) => { const item = document.createElement('div'); item.className = 'summary-item'; const title = document.createElement('span'); title.textContent = label; const number = document.createElement('strong'); number.textContent = value; item.append(title, number); container.append(item); });
   }
 
@@ -89,7 +91,10 @@
     return state.requests.filter((request) => (filter === 'all' || request.state === filter) && (!search || `${request.id} ${request.model} ${request.provider} ${request.protocol}`.toLowerCase().includes(search)));
   }
   function renderRequestTable() {
-    const body = $('#requests-table-body'); const empty = $('#requests-empty'); if (!body) return; body.replaceChildren();
+    const body = $('#requests-table-body'); const empty = $('#requests-empty'); if (!body) return;
+    const drawer = state.detailDrawer || $('#request-detail');
+    if (drawer) { state.detailDrawer = drawer; drawer.hidden = true; }
+    body.replaceChildren();
     filteredRequests().forEach((request) => {
       const row = document.createElement('tr'); row.className = 'data-row'; row.dataset.requestId = request.id;
       const id = appendTextCell(row, ''); const idStrong = document.createElement('strong'); idStrong.textContent = shortID(request.id); const idSmall = document.createElement('small'); idSmall.textContent = dateValue(request.received_at); id.append(idStrong, idSmall);
@@ -98,14 +103,16 @@
       appendTextCell(row, `${formatNumber(request.attempts)} attempt${request.attempts === 1 ? '' : 's'}`);
       appendTextCell(row, `${formatNumber(request.input_tokens)} in · ${formatNumber(request.output_tokens)} out`);
       const cost = appendTextCell(row, ''); const costStrong = document.createElement('strong'); costStrong.textContent = formatUSD(requestCost(request)); const costSmall = document.createElement('small'); costSmall.textContent = request.actual_cost_pico_usd != null ? 'actual' : 'estimated'; cost.append(costStrong, costSmall);
-      const discount = appendTextCell(row, ''); const discountStrong = document.createElement('strong'); discountStrong.textContent = request.discount_pico_usd == null ? '—' : formatSignedUSD(request.discount_pico_usd); const discountSmall = document.createElement('small'); discountSmall.textContent = request.discount_pico_usd == null ? discountUnavailableLabel(request) : `${discountPercent(request.discount_percent_bps)} ${Number(request.discount_percent_bps || 0) >= 0 ? 'saved' : 'overage'}`; discount.append(discountStrong, discountSmall);
+      const discount = appendTextCell(row, ''); const discountStrong = document.createElement('strong'); discountStrong.textContent = request.discount_pico_usd == null ? '—' : Number(request.discount_pico_usd) === 0 ? '$0' : formatSignedUSD(request.discount_pico_usd); const discountSmall = document.createElement('small'); discountSmall.textContent = request.discount_pico_usd == null ? discountUnavailableLabel(request) : Number(request.discount_pico_usd) === 0 ? '' : `${discountPercent(request.discount_percent_bps)} ${Number(request.discount_percent_bps || 0) >= 0 ? 'saved' : 'overage'}`; discount.append(discountStrong, discountSmall);
       const status = document.createElement('td'); status.append(stateBadge(request.state)); row.append(status); appendTextCell(row, dateValue(request.completed_at)); body.append(row);
     });
     empty.hidden = filteredRequests().length > 0;
   }
 
   function showRequestDetail(id) {
-    const request = state.requests.find((item) => item.id === id); const drawer = $('#request-detail'); if (!request || !drawer) return;
+    const request = state.requests.find((item) => item.id === id); const body = $('#requests-table-body'); const drawer = state.detailDrawer || $('#request-detail'); if (!request || !body || !drawer) return;
+    body.querySelector('.request-detail-row')?.remove();
+    state.detailDrawer = drawer;
     drawer.hidden = false; drawer.replaceChildren(); const heading = document.createElement('h4'); heading.textContent = `Request ${shortID(request.id)}`; drawer.append(heading);
     const grid = document.createElement('div'); grid.className = 'detail-grid'; const values = [['Model', request.model], ['Provider', providerName(request.provider)], ['Upstream model', request.upstream_model || '—'], ['Attempts', formatNumber(request.attempts)], ['Protocol', protocolName(request.protocol)], ['State', request.state], ['Input tokens', formatNumber(request.input_tokens)], ['Output tokens', formatNumber(request.output_tokens)], ['Cached read', formatNumber(request.cached_read_tokens)], ['Cache write', formatNumber(request.cache_write_tokens)], ['Reasoning', formatNumber(request.reasoning_tokens)], ['Estimated route cost', formatUSD(request.estimated_cost_pico_usd)], ['Official cost', request.official_cost_pico_usd ? formatUSD(request.official_cost_pico_usd) : 'Not available'], ['Actual cost', request.actual_cost_pico_usd != null ? formatUSD(request.actual_cost_pico_usd) : 'Not reported'], ['Discount', discountLabel(request)], ['Received', dateValue(request.received_at)], ['Completed', dateValue(request.completed_at)]];
     values.forEach(([label, value]) => { const cell = document.createElement('div'); const name = document.createElement('span'); name.textContent = label; const data = document.createElement('strong'); data.textContent = value; cell.append(name, data); grid.append(cell); });
@@ -129,6 +136,9 @@
     });
     if (!request.attempt_details?.length) { const emptyAttempts = document.createElement('p'); emptyAttempts.className = 'attempt-empty'; emptyAttempts.textContent = 'No provider attempts were recorded for this legacy request.'; attempts.append(emptyAttempts); }
     drawer.append(attempts);
+    const selectedRow = body.querySelector(`tr[data-request-id="${CSS.escape(id)}"]`);
+    if (!selectedRow) { drawer.hidden = true; return; }
+    const detailRow = document.createElement('tr'); detailRow.className = 'request-detail-row'; const detailCell = document.createElement('td'); detailCell.colSpan = 9; detailCell.append(drawer); detailRow.append(detailCell); selectedRow.after(detailRow);
   }
 
   async function loadModels() {
@@ -136,7 +146,7 @@
   }
   function filteredModels() { const search = ($('#models-search')?.value || '').trim().toLowerCase(); const provider = $('#models-provider-filter')?.value || 'all'; return state.models.filter((model) => (provider === 'all' || model.provider === provider) && (!search || `${model.model} ${model.upstream_model} ${model.provider} ${(model.tags || []).join(' ')} ${(model.input_modalities || []).join(' ')} ${(model.output_modalities || []).join(' ')}`.toLowerCase().includes(search))); }
   function renderModels() {
-    const body = $('#models-table-body'); const empty = $('#models-empty'); if (!body) return; const models = filteredModels(); body.replaceChildren(); setText('#catalog-count', `${formatNumber(models.length)} route${models.length === 1 ? '' : 's'}`);
+    const body = $('#models-table-body'); const empty = $('#models-empty'); if (!body) return; const models = filteredModels(); body.replaceChildren(); setText('#catalog-count', `${formatNumber(models.length)} route${models.length === 1 ? '' : 's'}`); setText('#catalog-free-count', `${formatNumber(models.filter((model) => model.free).length)}`); setText('#models-saved', formatUSD(state.summary?.saved_cost_pico_usd));
     models.forEach((model) => { const row = document.createElement('tr'); const route = appendTextCell(row, ''); const strong = document.createElement('strong'); strong.textContent = model.model; const small = document.createElement('small'); small.textContent = model.upstream_model === model.model ? 'canonical upstream ID' : model.upstream_model; route.append(strong, small); const provider = appendTextCell(row, ''); provider.append(providerBadge(model.provider)); const modalities = appendTextCell(row, ''); modalities.textContent = `${(model.input_modalities || []).join(' + ') || '—'} → ${(model.output_modalities || []).join(' + ') || '—'}`; modalities.className = 'modality-cell'; const tags = appendTextCell(row, (model.tags || []).join(' · ') || '—'); tags.className = 'tag-cell'; const pricing = appendTextCell(row, `${formatUSD(model.pricing?.input)} / ${formatUSD(model.pricing?.output)}`); pricing.title = 'Input / output per token'; const context = appendTextCell(row, model.context_length ? `${formatCompact(model.context_length)} tokens` : '—'); context.title = model.context_length ? `${formatNumber(model.context_length)} tokens` : ''; const status = document.createElement('td'); if (model.free) { const badge = document.createElement('span'); badge.className = 'badge free'; badge.textContent = 'FREE'; status.append(badge, document.createTextNode(' ')); } const health = document.createElement('span'); health.className = `state-badge ${model.health === 'healthy' ? 'succeeded' : 'partial'}`; health.textContent = model.health || 'unknown'; status.append(health); row.append(status); body.append(row); }); empty.hidden = models.length > 0;
   }
   function renderRouteSummary() { const container = $('#route-summary'); if (!container) return; container.replaceChildren(); const counts = {}; state.models.forEach((model) => { counts[model.provider] = (counts[model.provider] || 0) + 1; }); Object.entries(counts).forEach(([provider, count]) => { const row = document.createElement('div'); row.className = 'route-row'; const dot = document.createElement('span'); dot.className = `provider-dot ${provider === 'surplus' ? 'surplus' : ''}`; row.append(dot); const main = document.createElement('span'); main.className = 'route-main'; const strong = document.createElement('strong'); strong.textContent = providerName(provider); const small = document.createElement('small'); small.textContent = `${count} discovered route${count === 1 ? '' : 's'}`; main.append(strong, small); row.append(main); const badge = document.createElement('span'); badge.className = 'badge provider'; badge.textContent = `${count}`; row.append(badge); container.append(row); }); if (!Object.keys(counts).length) { const empty = document.createElement('div'); empty.className = 'empty-state'; empty.textContent = 'Add a provider credential to discover routes.'; container.append(empty); } }

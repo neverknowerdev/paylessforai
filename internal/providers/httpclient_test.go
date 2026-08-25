@@ -18,19 +18,22 @@ func (f roundTripFunc) RoundTrip(request *http.Request) (*http.Response, error) 
 func TestDiscoverAndParsePricing(t *testing.T) {
 	client := NewHTTPClient("openrouter", "https://provider.invalid/v1", "key")
 	client.Client = &http.Client{Transport: roundTripFunc(func(r *http.Request) (*http.Response, error) {
+		if strings.HasSuffix(r.URL.Path, "/endpoints") {
+			return &http.Response{StatusCode: http.StatusOK, Body: io.NopCloser(strings.NewReader(`{"data":{"endpoints":[{"pricing":{"prompt":"0.000001","completion":"0.000002","discount":0.5}}]}}`)), Header: make(http.Header), Request: r}, nil
+		}
 		if r.URL.Path != "/v1/models" {
 			t.Fatalf("unexpected path %s", r.URL.Path)
 		}
 		if r.URL.Query().Get("output_modalities") != "all" {
 			t.Fatalf("expected complete OpenRouter catalog query, got %q", r.URL.RawQuery)
 		}
-		return &http.Response{StatusCode: http.StatusOK, Body: io.NopCloser(strings.NewReader(`{"data":[{"id":"model-a","name":"Model A","context_length":1000,"pricing":{"prompt":"0.000001","completion":"0.000002","cacheRead":"0.0000002","cacheWrite":"0.0000005","reasoning":"0.000003","request":"0.00001"},"supported_parameters":["tools"],"architecture":{"input_modalities":["text","image"],"output_modalities":["text"]},"supported_features":["streaming","tools"]}]}`)), Header: make(http.Header), Request: r}, nil
+		return &http.Response{StatusCode: http.StatusOK, Body: io.NopCloser(strings.NewReader(`{"data":[{"id":"author/model-a","name":"Model A","context_length":1000,"pricing":{"prompt":"0.000001","completion":"0.000002","cacheRead":"0.0000002","cacheWrite":"0.0000005","reasoning":"0.000003","request":"0.00001"},"supported_parameters":["tools"],"architecture":{"input_modalities":["text","image"],"output_modalities":["text"]},"supported_features":["streaming","tools"]}]}`)), Header: make(http.Header), Request: r}, nil
 	})}
 	models, err := client.Discover(context.Background())
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(models) != 1 || !models[0].PriceAvailable || models[0].Pricing.InputPicoUSDPerToken != 1_000_000 || models[0].Pricing.CachedReadPicoUSDPerToken != 200_000 || models[0].Pricing.FixedPicoUSD != 10_000_000 {
+	if len(models) != 1 || !models[0].PriceAvailable || models[0].Pricing.InputPicoUSDPerToken != 1_000_000 || models[0].Pricing.CachedReadPicoUSDPerToken != 200_000 || models[0].Pricing.FixedPicoUSD != 10_000_000 || models[0].OfficialPricing.InputPicoUSDPerToken != 2_000_000 || models[0].OfficialPricing.OutputPicoUSDPerToken != 4_000_000 {
 		t.Fatalf("unexpected models: %#v", models)
 	}
 	if len(models[0].InputModalities) != 2 || models[0].InputModalities[1] != "image" || len(models[0].Tags) != 2 {

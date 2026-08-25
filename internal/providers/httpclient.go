@@ -65,6 +65,9 @@ func (c *HTTPClient) Discover(ctx context.Context) ([]Model, error) {
 		if c.Provider == "surplus" {
 			applySurplusMarketPricing(ctx, c, models)
 		}
+		if c.Provider == "openrouter" {
+			enrichOpenRouterDiscounts(ctx, c, models)
+		}
 		return models, nil
 	}
 	return nil, fmt.Errorf("discover %s models: %s", c.Provider, strings.Join(failures, "; "))
@@ -139,9 +142,9 @@ func (c *HTTPClient) discoverPath(ctx context.Context, path string) ([]Model, er
 	for _, item := range payload.Data {
 		input, inputOK := firstPrice(item.Pricing, "prompt", "input")
 		output, outputOK := firstPrice(item.Pricing, "completion", "output")
-		cachedRead, _ := firstPrice(item.Pricing, "cache_read", "cacheRead", "cache_read_input")
-		cacheWrite, _ := firstPrice(item.Pricing, "cache_write", "cacheWrite", "cache_creation_input")
-		reasoning, _ := firstPrice(item.Pricing, "reasoning", "thinking")
+		cachedRead, _ := firstPrice(item.Pricing, "cache_read", "cacheRead", "cache_read_input", "input_cache_read")
+		cacheWrite, _ := firstPrice(item.Pricing, "cache_write", "cacheWrite", "cache_creation_input", "input_cache_write")
+		reasoning, _ := firstPrice(item.Pricing, "reasoning", "thinking", "internal_reasoning")
 		fixed, _ := firstPrice(item.Pricing, "request", "fixed", "per_request")
 		free := isFreeModel(c.Provider, item.ID, item.Name, item.Description, input, output, inputOK && outputOK && !hasNonTokenCharge(item.Pricing))
 		if free {

@@ -89,12 +89,13 @@ code { display: inline-block; max-width: 100%; overflow: hidden; padding: 10px 1
 .metric-card strong { display: block; margin: 18px 0 8px; color: var(--ink); font-size: 27px; letter-spacing: -.06em; }
 .metric-card small { display: block; color: var(--faint); font-size: 10px; }
 .metric-card small + small { margin-top: 7px; }
-.spend-metric { min-height: 128px; }
-.spend-metric-layout { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 18px; align-items: end; }
+.spend-metric { min-height: 128px; padding: 24px 30px 20px; container-type: inline-size; }
+.spend-metric-layout { display: grid; grid-template-columns: minmax(0, 1.1fr) minmax(0, .9fr); gap: 18px; align-items: start; }
 .spend-metric-layout strong { margin-top: 12px; }
 .saved-value { min-width: 0; }
 .saved-value strong { color: #d9f994; }
 .saved-percent { display: inline-flex !important; width: fit-content; margin-top: 8px !important; padding: 4px 8px; border: 1px solid #c7f36a55; border-radius: 999px; color: #d9f994 !important; background: #c7f36a14; font-size: 10px !important; font-weight: 800; letter-spacing: 0 !important; line-height: 1.1; white-space: nowrap; }
+@container (max-width: 600px) { .spend-metric-layout { gap: 12px; }.spend-metric-layout strong { font-size: 27px; } }
 .metric-card.accent-blue { border-top: 2px solid var(--blue); }.metric-card.accent-lime { border-top: 2px solid var(--lime); }.metric-card.accent-green { border-top: 2px solid #9dd65d; }.metric-card.accent-peach { border-top: 2px solid var(--peach); }
 .stats-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 12px; margin-bottom: 16px; }.stats-grid .metric-card { min-height: 115px; }.stats-heading { padding: 20px 22px; border-bottom: 1px solid #222c45; }.stats-heading .card-note { margin: 0; }
 .two-column { grid-template-columns: 1.3fr .7fr; }

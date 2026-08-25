@@ -1,12 +1,9 @@
-package controllers
+package controlplane
 
-import (
-	"net/http"
-)
+import "net/http"
 
 func (s *Server) registerModelRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("/api/models", s.handleCatalogModels)
-	mux.HandleFunc("/v1/models", s.handlePublicModels)
 }
 
 func (s *Server) handleCatalogModels(w http.ResponseWriter, r *http.Request) {
@@ -40,21 +37,4 @@ func (s *Server) handleCatalogModels(w http.ResponseWriter, r *http.Request) {
 		})
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"data": data})
-}
-
-func (s *Server) handlePublicModels(w http.ResponseWriter, r *http.Request) {
-	if r.Method != http.MethodGet {
-		writeError(w, http.StatusMethodNotAllowed, "method_not_allowed", "models endpoint only accepts GET")
-		return
-	}
-	if s.catalog == nil {
-		writeJSON(w, http.StatusOK, map[string]any{"object": "list", "data": []any{}})
-		return
-	}
-	models := s.catalog.Snapshot().Models
-	data := make([]map[string]any, 0, len(models))
-	for _, model := range models {
-		data = append(data, map[string]any{"id": model.ID, "object": "model", "owned_by": "paylessforai", "name": model.Name, "free": model.Free, "context_length": model.ContextLength, "max_completion_tokens": model.MaxCompletionTokens, "supported_parameters": model.SupportedParameters})
-	}
-	writeJSON(w, http.StatusOK, map[string]any{"object": "list", "data": data})
 }

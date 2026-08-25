@@ -1,4 +1,4 @@
-package controllers
+package controlplane
 
 import (
 	"context"
@@ -10,6 +10,7 @@ import (
 	"github.com/neverknowerdev/paylessforai/internal/secrets"
 	"github.com/neverknowerdev/paylessforai/internal/store"
 	"github.com/neverknowerdev/paylessforai/internal/web"
+	"github.com/neverknowerdev/paylessforai/server/gateway"
 )
 
 type Server struct {
@@ -45,9 +46,11 @@ func NewWithDeps(addr string, readHeaderTimeout, idleTimeout time.Duration, db *
 	server.registerStatsRoutes(mux)
 	server.registerKeyRoutes(mux)
 	server.registerProviderRoutes(mux)
-	mux.Handle("/", ui)
 	server.registerModelRoutes(mux)
-	server.registerProxyRoutes(mux)
+	mux.Handle("/", ui)
+	public := gateway.NewHandler(catalogManager, proxyHandler)
+	mux.Handle("/v1/", public)
+	mux.Handle("/anthropic/v1/messages", public)
 	server.httpServer = &http.Server{Addr: addr, Handler: withRequestID(mux), ReadHeaderTimeout: readHeaderTimeout, IdleTimeout: idleTimeout}
 	return server, nil
 }

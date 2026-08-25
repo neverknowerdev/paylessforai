@@ -36,7 +36,9 @@ jobs:
         run: GOCACHE="$RUNNER_TEMP/go-cache" go vet ./...
 
       - name: Verify a static build
-        run: CGO_ENABLED=0 GOCACHE="$RUNNER_TEMP/go-cache" go build ./...
+        run: |
+          CGO_ENABLED=0 GOCACHE="$RUNNER_TEMP/go-cache" go build -o "$RUNNER_TEMP/paylessforai-server" ./cmd/paylessforai-server
+          CGO_ENABLED=0 GOCACHE="$RUNNER_TEMP/go-cache" go build -o "$RUNNER_TEMP/paylessforai-app" ./cmd/paylessforai-app
 
       - name: Check diff formatting
         run: git diff --check

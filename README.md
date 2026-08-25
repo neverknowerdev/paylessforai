@@ -1,12 +1,15 @@
 # PayLessForAI
 
-PayLessForAI is a local LLM proxy that exposes OpenAI- and Anthropic-compatible
+PayLessForAI is an LLM gateway that exposes OpenAI- and Anthropic-compatible
 endpoints, discovers models and prices from multiple providers, and routes each
 request to the cheapest healthy compatible route.
 
-It is designed to run as a single Go binary. The web UI, static assets, and
-SQLite migrations are embedded in the binary; no database or web server needs
-to be installed separately.
+It ships as two Go binaries. The hosted `paylessforai-server` owns provider
+credentials, model/pricing discovery, routing, retries, statistics, and the
+embedded administration UI. The client `paylessforai-app` runs on a user's
+machine and provides a localhost URL for IDEs; it forwards requests to the
+hosted server and contains no provider or routing logic. Both binaries have no
+runtime dependencies beyond the operating system.
 
 ## v1 capabilities
 
@@ -23,15 +26,15 @@ to be installed separately.
 - Embedded UI for the base URL, keys, provider credentials, and recent request
   statistics.
 
-## Quick start
+## Quick start: hosted server
 
 PayLessForAI currently requires Go 1.26 to build:
 
 ```sh
 git clone https://github.com/neverknowerdev/paylessforai.git
 cd paylessforai
-CGO_ENABLED=0 go build -o paylessforai ./cmd/paylessforai
-./paylessforai
+CGO_ENABLED=0 go build -o paylessforai-server ./cmd/paylessforai-server
+./paylessforai-server
 ```
 
 The default listener is `127.0.0.1:9472`. Open
@@ -39,10 +42,26 @@ The default listener is `127.0.0.1:9472`. Open
 local client key. The default data directory is the operating-system user
 configuration directory under `paylessforai`; override it with `-data-dir`.
 
-The UI is intentionally local-only by default. Provider credentials are stored
+The hosted UI is intentionally local-only by default. Provider credentials are stored
 encrypted in SQLite, and the generated `master.key` in the data directory is
 required to decrypt them. Back up that file if you need to move the installation
 to another machine.
+
+## Install the client app on an IDE machine
+
+Create a client key in the hosted UI, then build and run the local adapter on
+the machine where your IDE runs:
+
+```sh
+CGO_ENABLED=0 go build -o paylessforai-app ./cmd/paylessforai-app
+PAYLESS_SERVER_URL=https://gateway.example.com \
+PAYLESS_SERVER_API_KEY=plai_... \
+./paylessforai-app
+```
+
+The app listens on `127.0.0.1:9473` by default. Override it with `-listen`, or
+pass `-server-url` and `-server-api-key` instead of environment variables.
+Opening `http://127.0.0.1:9473/` forwards to the hosted UI.
 
 ## Configure an IDE or API client
 
@@ -50,16 +69,16 @@ After creating a client key in the UI, configure an OpenAI-compatible client
 with:
 
 ```text
-Base URL: http://127.0.0.1:9472/v1
+Base URL: http://127.0.0.1:9473/v1
 API key:  <the local PayLessForAI client key>
 ```
 
-Anthropic-compatible clients should use `http://127.0.0.1:9472` as their base
+Anthropic-compatible clients should use `http://127.0.0.1:9473` as their base
 URL, send the local key in `x-api-key`, and call `/v1/messages` (the
 `/anthropic/v1/messages` alias is also available).
 
-The local key authenticates the client to PayLessForAI. It is separate from
-the OpenRouter or Surplus API keys configured in the UI.
+The client app forwards the configured hosted client key. It is separate from
+the OpenRouter or Surplus API keys configured in the hosted UI.
 
 ## HTTP API
 
@@ -123,7 +142,7 @@ Provider API keys may also be supplied at process startup with:
 ```sh
 PAYLESS_OPENROUTER_API_KEY=... \
 PAYLESS_SURPLUS_API_KEY=... \
-./paylessforai
+./paylessforai-server
 ```
 
 For normal use, adding credentials through the UI is preferred because they are
@@ -137,7 +156,8 @@ Run the Go checks from the repository root:
 go test ./...
 go test -race ./...
 go vet ./...
-CGO_ENABLED=0 go build ./...
+CGO_ENABLED=0 go build ./cmd/paylessforai-server
+CGO_ENABLED=0 go build ./cmd/paylessforai-app
 ```
 
 The browser suite starts the real binary and two deterministic mock providers;

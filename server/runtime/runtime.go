@@ -1,4 +1,9 @@
-package main
+// Package runtime contains the hosted PayLessForAI server lifecycle.
+//
+// Keeping startup and dependency wiring here means the server binary is a
+// very small entrypoint, while tests and future launchers can reuse the same
+// lifecycle without duplicating provider setup.
+package runtime
 
 import (
 	"context"
@@ -14,36 +19,36 @@ import (
 
 	"github.com/neverknowerdev/paylessforai/internal/catalog"
 	"github.com/neverknowerdev/paylessforai/internal/config"
-	"github.com/neverknowerdev/paylessforai/internal/controllers"
 	"github.com/neverknowerdev/paylessforai/internal/providers"
 	"github.com/neverknowerdev/paylessforai/internal/proxy"
 	"github.com/neverknowerdev/paylessforai/internal/secrets"
 	"github.com/neverknowerdev/paylessforai/internal/store"
+	"github.com/neverknowerdev/paylessforai/server/controlplane"
 )
 
-func main() {
-	if err := run(context.Background(), os.Args[1:]); err != nil {
-		slog.Error("paylessforai stopped", "error", err)
-		os.Exit(1)
-	}
-}
-
-func run(parent context.Context, args []string) error {
+// Run starts the hosted server and blocks until it exits or receives a
+// termination signal. args are command-line arguments for the server config.
+func Run(parent context.Context, args []string) error {
 	c, err := config.Parse(args)
 	if err != nil {
 		return err
 	}
-	s, err := store.Open(parent, filepath.Join(c.DataDir, "paylessforai.db"))
+
+	db, err := store.Open(parent, filepath.Join(c.DataDir, "paylessforai.db"))
 	if err != nil {
 		return err
 	}
-	defer s.Close()
+	defer db.Close()
+
 	secretBox, err := secrets.LoadOrCreate(filepath.Join(c.DataDir, "master.key"))
 	if err != nil {
 		return err
 	}
-	providerBases := map[string]string{"openrouter": c.OpenRouterBaseURL, "surplus": c.SurplusBaseURL}
-	clients := loadProviderClients(c, s, secretBox)
+	providerBases := map[string]string{
+		"openrouter": c.OpenRouterBaseURL,
+		"surplus":    c.SurplusBaseURL,
+	}
+	clients := loadProviderClients(c, db, secretBox)
 	catalogManager := catalog.New(clients)
 	appContext, cancel := context.WithCancel(parent)
 	defer cancel()
@@ -54,18 +59,28 @@ func run(parent context.Context, args []string) error {
 		go refreshCatalogPeriodically(appContext, catalogManager, c.RefreshInterval)
 	}
 	reloadProviders := func() error {
-		catalogManager.SetClients(loadProviderClients(c, s, secretBox))
+		catalogManager.SetClients(loadProviderClients(c, db, secretBox))
 		return catalogManager.Refresh(appContext)
 	}
-	proxyHandler := proxy.New(catalogManager, s)
-	server, err := controllers.NewWithDeps(c.ListenAddr, c.ReadHeaderTimeout, c.IdleTimeout, s, catalogManager, proxyHandler, controllers.CredentialDeps{Box: secretBox, ProviderBases: providerBases, Reload: reloadProviders})
+	proxyHandler := proxy.New(catalogManager, db)
+	server, err := controlplane.NewWithDeps(
+		c.ListenAddr,
+		c.ReadHeaderTimeout,
+		c.IdleTimeout,
+		db,
+		catalogManager,
+		proxyHandler,
+		controlplane.CredentialDeps{Box: secretBox, ProviderBases: providerBases, Reload: reloadProviders},
+	)
 	if err != nil {
-		return fmt.Errorf("create HTTP server: %w", err)
+		return fmt.Errorf("create hosted HTTP server: %w", err)
 	}
+
 	serverErr := make(chan error, 1)
 	go func() { serverErr <- server.ListenAndServe() }()
 	signals := make(chan os.Signal, 1)
 	signal.Notify(signals, syscall.SIGINT, syscall.SIGTERM)
+	defer signal.Stop(signals)
 	select {
 	case err := <-serverErr:
 		if errors.Is(err, http.ErrServerClosed) || errors.Is(err, context.Canceled) || errors.Is(err, os.ErrClosed) || errors.Is(err, syscall.EINVAL) {

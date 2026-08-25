@@ -49,25 +49,37 @@ type RequestUsage struct {
 	RawUsageJSON      string
 }
 
+type AttemptStat struct {
+	Number        int64  `json:"number"`
+	Provider      string `json:"provider"`
+	UpstreamModel string `json:"upstream_model"`
+	State         string `json:"state"`
+	StartedAt     string `json:"started_at"`
+	CompletedAt   string `json:"completed_at,omitempty"`
+	ErrorClass    string `json:"error_class,omitempty"`
+	ErrorMessage  string `json:"error_message,omitempty"`
+}
+
 type RequestStat struct {
-	ID                string  `json:"id"`
-	Protocol          string  `json:"protocol"`
-	Model             string  `json:"model"`
-	State             string  `json:"state"`
-	ReceivedAt        string  `json:"received_at"`
-	CompletedAt       *string `json:"completed_at,omitempty"`
-	ErrorCode         *string `json:"error_code,omitempty"`
-	InputTokens       int64   `json:"input_tokens"`
-	OutputTokens      int64   `json:"output_tokens"`
-	TotalTokens       int64   `json:"total_tokens"`
-	CachedReadTokens  int64   `json:"cached_read_tokens"`
-	CacheWriteTokens  int64   `json:"cache_write_tokens"`
-	ReasoningTokens   int64   `json:"reasoning_tokens"`
-	EstimatedCostPico int64   `json:"estimated_cost_pico_usd"`
-	ActualCostPico    *int64  `json:"actual_cost_pico_usd,omitempty"`
-	Provider          string  `json:"provider,omitempty"`
-	UpstreamModel     string  `json:"upstream_model,omitempty"`
-	Attempts          int64   `json:"attempts"`
+	ID                string        `json:"id"`
+	Protocol          string        `json:"protocol"`
+	Model             string        `json:"model"`
+	State             string        `json:"state"`
+	ReceivedAt        string        `json:"received_at"`
+	CompletedAt       *string       `json:"completed_at,omitempty"`
+	ErrorCode         *string       `json:"error_code,omitempty"`
+	InputTokens       int64         `json:"input_tokens"`
+	OutputTokens      int64         `json:"output_tokens"`
+	TotalTokens       int64         `json:"total_tokens"`
+	CachedReadTokens  int64         `json:"cached_read_tokens"`
+	CacheWriteTokens  int64         `json:"cache_write_tokens"`
+	ReasoningTokens   int64         `json:"reasoning_tokens"`
+	EstimatedCostPico int64         `json:"estimated_cost_pico_usd"`
+	ActualCostPico    *int64        `json:"actual_cost_pico_usd,omitempty"`
+	Provider          string        `json:"provider,omitempty"`
+	UpstreamModel     string        `json:"upstream_model,omitempty"`
+	Attempts          int64         `json:"attempts"`
+	AttemptDetails    []AttemptStat `json:"attempt_details,omitempty"`
 }
 
 type StatsSummary struct {
@@ -286,7 +298,6 @@ func (s *Store) ListRequestStats(ctx context.Context, limit int) ([]RequestStat,
 	if err != nil {
 		return nil, err
 	}
-	defer rows.Close()
 	result := make([]RequestStat, 0)
 	for rows.Next() {
 		var item RequestStat
@@ -311,7 +322,35 @@ func (s *Store) ListRequestStats(ctx context.Context, limit int) ([]RequestStat,
 		}
 		result = append(result, item)
 	}
-	return result, rows.Err()
+	if err := rows.Err(); err != nil {
+		rows.Close()
+		return nil, err
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+	for index := range result {
+		attemptRows, err := s.db.QueryContext(ctx, `SELECT attempt_number, COALESCE(provider, ''), COALESCE(upstream_model, ''), state, started_at, COALESCE(completed_at, ''), COALESCE(error_class, ''), COALESCE(error_message, '') FROM proxy_attempts WHERE request_id = ? ORDER BY attempt_number`, result[index].ID)
+		if err != nil {
+			return nil, err
+		}
+		for attemptRows.Next() {
+			var attempt AttemptStat
+			if err := attemptRows.Scan(&attempt.Number, &attempt.Provider, &attempt.UpstreamModel, &attempt.State, &attempt.StartedAt, &attempt.CompletedAt, &attempt.ErrorClass, &attempt.ErrorMessage); err != nil {
+				attemptRows.Close()
+				return nil, err
+			}
+			result[index].AttemptDetails = append(result[index].AttemptDetails, attempt)
+		}
+		if err := attemptRows.Err(); err != nil {
+			attemptRows.Close()
+			return nil, err
+		}
+		if err := attemptRows.Close(); err != nil {
+			return nil, err
+		}
+	}
+	return result, nil
 }
 
 func (s *Store) RequestStatsSummary(ctx context.Context) (StatsSummary, error) {

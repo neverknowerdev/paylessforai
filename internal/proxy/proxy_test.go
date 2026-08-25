@@ -203,7 +203,7 @@ func TestProxyFailsOverImmediatelyFromFreeRoute(t *testing.T) {
 		t.Fatalf("free route should fail over without retry: free=%d paid=%d", freeCalls, paidCalls)
 	}
 	items, err := db.ListRequestStats(context.Background(), 10)
-	if err != nil || len(items) != 1 || items[0].Provider != "surplus" || items[0].Attempts != 2 {
+	if err != nil || len(items) != 1 || items[0].Provider != "surplus" || items[0].Attempts != 2 || len(items[0].AttemptDetails) != 2 || items[0].AttemptDetails[0].State != "failed" || items[0].AttemptDetails[1].Provider != "surplus" {
 		t.Fatalf("expected durable failover metadata, got %#v, %v", items, err)
 	}
 }

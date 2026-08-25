@@ -2,7 +2,10 @@ package controlplane
 
 import (
 	"context"
+	"crypto/sha256"
+	"crypto/subtle"
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"strings"
 	"time"
@@ -76,6 +79,14 @@ func (s *Server) createProviderCredential(w http.ResponseWriter, r *http.Request
 		writeError(w, http.StatusServiceUnavailable, "provider_registry_unavailable", "provider registry is unavailable")
 		return
 	}
+	if duplicate, err := s.findDuplicateProviderCredential(r.Context(), input.APIKey); err != nil {
+		writeError(w, http.StatusInternalServerError, "credential_check_failed", "could not check existing provider credentials")
+		return
+	} else if duplicate != nil {
+		message := fmt.Sprintf("this API key is already configured for %s (%s)", duplicate.Provider, duplicate.Label)
+		writeError(w, http.StatusConflict, "duplicate_provider_credential", message)
+		return
+	}
 	client, _, err := s.credentials.Registry.Resolve(input.Provider, input.BaseURL, input.APIKey)
 	if err != nil {
 		writeError(w, http.StatusBadRequest, "unsupported_provider", err.Error())
@@ -132,7 +143,26 @@ func (s *Server) createProviderCredential(w http.ResponseWriter, r *http.Request
 			return
 		}
 	}
-	writeJSON(w, http.StatusCreated, map[string]any{"data": item, "models_discovered": len(discovered), "models_verified": len(verifiedManual)})
+	writeJSON(w, http.StatusCreated, map[string]any{"data": item, "models_discovered": len(discovered), "models_verified": len(verifiedManual), "models_found": len(discovered) + len(verifiedManual)})
+}
+
+func (s *Server) findDuplicateProviderCredential(ctx context.Context, apiKey string) (*store.ProviderCredential, error) {
+	credentials, err := s.db.ListProviderCredentials(ctx)
+	if err != nil {
+		return nil, err
+	}
+	keyDigest := sha256.Sum256([]byte(apiKey))
+	for index := range credentials {
+		secret, err := s.credentials.Box.Open(credentials[index].Ciphertext, credentials[index].Nonce)
+		if err != nil {
+			continue
+		}
+		candidateDigest := sha256.Sum256([]byte(secret))
+		if subtle.ConstantTimeCompare(keyDigest[:], candidateDigest[:]) == 1 {
+			return &credentials[index], nil
+		}
+	}
+	return nil, nil
 }
 
 func (s *Server) handleProviderCredential(w http.ResponseWriter, r *http.Request) {

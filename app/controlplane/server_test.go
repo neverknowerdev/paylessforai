@@ -182,9 +182,14 @@ func TestProviderCredentialManagementAPI(t *testing.T) {
 		t.Fatalf("unexpected credential list: %d %s", list.Code, list.Body.String())
 	}
 	custom := httptest.NewRecorder()
-	server.httpServer.Handler.ServeHTTP(custom, httptest.NewRequest(http.MethodPost, "/api/providers/credentials", strings.NewReader(`{"provider":"local-llm","label":"local","base_url":"http://custom.invalid/v1","api_key":"secret-value"}`)))
+	server.httpServer.Handler.ServeHTTP(custom, httptest.NewRequest(http.MethodPost, "/api/providers/credentials", strings.NewReader(`{"provider":"local-llm","label":"local","base_url":"http://custom.invalid/v1","api_key":"different-secret"}`)))
 	if custom.Code != http.StatusCreated || !strings.Contains(custom.Body.String(), `"provider":"local-llm"`) || !strings.Contains(custom.Body.String(), `"base_url":"http://custom.invalid/v1"`) {
 		t.Fatalf("unexpected custom credential response: %d %s", custom.Code, custom.Body.String())
+	}
+	duplicate := httptest.NewRecorder()
+	server.httpServer.Handler.ServeHTTP(duplicate, httptest.NewRequest(http.MethodPost, "/api/providers/credentials", strings.NewReader(`{"provider":"openrouter","label":"duplicate","api_key":"secret-value"}`)))
+	if duplicate.Code != http.StatusConflict || !strings.Contains(duplicate.Body.String(), `"code":"duplicate_provider_credential"`) {
+		t.Fatalf("expected duplicate credential rejection: %d %s", duplicate.Code, duplicate.Body.String())
 	}
 }
 

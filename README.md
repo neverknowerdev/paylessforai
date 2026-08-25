@@ -72,6 +72,10 @@ manual model is checked with a minimal inference request before it is persisted;
 discovery and verification failures remain visible in the dialog instead of
 silently closing it.
 
+An API key can only be configured once: new credentials are compared against
+all existing encrypted provider credentials and duplicates are rejected before
+any upstream request is made.
+
 ## Configure an IDE or API client
 
 After creating a client key in the UI, configure an OpenAI-compatible client

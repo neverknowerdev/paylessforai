@@ -28,13 +28,24 @@ test('configures providers, creates a client key, and routes an OpenAI request',
   await page.locator('#provider-label').fill('mock-openrouter');
   await page.locator('#provider-key').fill('mock-key');
   await page.getByRole('button', { name: 'Verify & save' }).click();
+  await expect(page.locator('#provider-feedback')).toContainText('Found 1 model');
   await expect(page.locator('#provider-list')).toContainText('openrouter');
+  await expect(page.locator('#provider-modal')).toBeHidden();
+
+  await page.getByRole('button', { name: 'Add provider' }).click();
+  await page.locator('#provider-type').selectOption('openrouter');
+  await page.locator('#provider-label').fill('duplicate-openrouter');
+  await page.locator('#provider-key').fill('mock-key');
+  await page.getByRole('button', { name: 'Verify & save' }).click();
+  await expect(page.locator('#provider-feedback')).toContainText('already configured');
+  await page.getByRole('button', { name: 'Cancel' }).click();
 
   await page.getByRole('button', { name: 'Add provider' }).click();
   await page.locator('#provider-type').selectOption('surplus');
   await page.locator('#provider-label').fill('mock-surplus');
-  await page.locator('#provider-key').fill('mock-key');
+  await page.locator('#provider-key').fill('surplus-key');
   await page.getByRole('button', { name: 'Verify & save' }).click();
+  await expect(page.locator('#provider-feedback')).toContainText('Found 1 model');
   await expect(page.locator('#provider-list')).toContainText('surplus');
 
   await page.getByRole('button', { name: 'Create API key' }).click();
@@ -105,7 +116,7 @@ test('keeps provider verification errors visible and verifies manual models befo
   await page.locator('#provider-name').fill('manual-mock');
   await page.locator('#provider-base-url').fill('http://127.0.0.1:19475/manual/v1');
   await page.locator('#provider-label').fill('Manual test');
-  await page.locator('#provider-key').fill('mock-key');
+  await page.locator('#provider-key').fill('manual-key');
   await page.getByRole('button', { name: 'Verify & save' }).click();
   await expect(page.locator('#provider-feedback')).toContainText('no models');
   await expect(page.locator('#manual-model-fields')).toBeVisible();

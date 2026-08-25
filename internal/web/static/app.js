@@ -226,7 +226,8 @@
       const number = document.createElement('span'); number.className = 'attempt-number'; number.textContent = `#${attempt.number}`;
       const main = document.createElement('span'); main.className = 'attempt-main';
       const title = document.createElement('strong'); title.textContent = `${providerName(attempt.provider)} · ${attempt.upstream_model || '—'}`;
-      const detail = document.createElement('small'); detail.textContent = attempt.error_class ? `${attempt.state} · ${attempt.error_class}: ${attempt.error_message || 'Provider error'}` : `${attempt.state} · ${dateValue(attempt.completed_at || attempt.started_at)}`;
+      const attemptDuration = formatDuration(attempt.duration_ms);
+      const detail = document.createElement('small'); detail.textContent = attempt.error_class ? `${attempt.state} · ${attemptDuration} · ${attempt.error_class}: ${attempt.error_message || 'Provider error'}` : `${attempt.state} · ${attemptDuration} · ${dateValue(attempt.completed_at || attempt.started_at)}`;
       main.append(title, detail);
       row.append(number, main, stateBadge(attempt.state));
       if (attempt.raw_error) {

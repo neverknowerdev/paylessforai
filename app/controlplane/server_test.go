@@ -10,6 +10,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/neverknowerdev/paylessforai/internal/providers"
 	"github.com/neverknowerdev/paylessforai/internal/secrets"
 	"github.com/neverknowerdev/paylessforai/internal/store"
 )
@@ -149,7 +150,7 @@ func TestProviderCredentialManagementAPI(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	server, err := NewWithDeps("127.0.0.1:0", time.Second, time.Second, db, nil, nil, CredentialDeps{Box: box, ProviderBases: map[string]string{"openrouter": "https://openrouter.invalid/v1"}})
+	server, err := NewWithDeps("127.0.0.1:0", time.Second, time.Second, db, nil, nil, CredentialDeps{Box: box, Registry: providers.Builtin(map[string]string{"openrouter": "https://openrouter.invalid/v1"})})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -162,6 +163,11 @@ func TestProviderCredentialManagementAPI(t *testing.T) {
 	server.httpServer.Handler.ServeHTTP(list, httptest.NewRequest(http.MethodGet, "/api/providers/credentials", nil))
 	if list.Code != http.StatusOK || !strings.Contains(list.Body.String(), `"provider":"openrouter"`) {
 		t.Fatalf("unexpected credential list: %d %s", list.Code, list.Body.String())
+	}
+	custom := httptest.NewRecorder()
+	server.httpServer.Handler.ServeHTTP(custom, httptest.NewRequest(http.MethodPost, "/api/providers/credentials", strings.NewReader(`{"provider":"local-llm","label":"local","base_url":"http://127.0.0.1:9999/v1","api_key":"secret-value"}`)))
+	if custom.Code != http.StatusCreated || !strings.Contains(custom.Body.String(), `"provider":"local-llm"`) || !strings.Contains(custom.Body.String(), `"base_url":"http://127.0.0.1:9999/v1"`) {
+		t.Fatalf("unexpected custom credential response: %d %s", custom.Code, custom.Body.String())
 	}
 }
 

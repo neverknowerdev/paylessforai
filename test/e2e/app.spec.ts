@@ -10,17 +10,21 @@ test('configures providers, creates a client key, and routes an OpenAI request',
   });
   await page.goto('/');
   await expect(page.getByRole('heading', { name: 'PayLessForAI' })).toBeVisible();
+  const emptyStatus = await (await request.get('/api/status')).json();
+  expect(emptyStatus.model_count).toBe(0);
+  const providerDefinitions = await (await request.get('/api/providers')).json();
+  expect(providerDefinitions.data.map((item: { name: string }) => item.name)).toEqual(expect.arrayContaining(['openrouter', 'surplus']));
 
   await page.getByRole('link', { name: 'Access & keys' }).click();
   await page.getByRole('button', { name: 'Add provider' }).click();
-  await page.locator('#provider-name').selectOption('openrouter');
+  await page.locator('#provider-name').fill('openrouter');
   await page.locator('#provider-label').fill('mock-openrouter');
   await page.locator('#provider-key').fill('mock-key');
   await page.getByRole('button', { name: 'Save credential' }).click();
   await expect(page.locator('#provider-list')).toContainText('openrouter');
 
   await page.getByRole('button', { name: 'Add provider' }).click();
-  await page.locator('#provider-name').selectOption('surplus');
+  await page.locator('#provider-name').fill('surplus');
   await page.locator('#provider-label').fill('mock-surplus');
   await page.locator('#provider-key').fill('mock-key');
   await page.getByRole('button', { name: 'Save credential' }).click();
@@ -33,6 +37,7 @@ test('configures providers, creates a client key, and routes an OpenAI request',
   const secretText = await page.locator('#new-key').textContent();
   const secret = secretText?.match(/plai_[0-9a-f]+/)?.[0];
   expect(secret).toBeTruthy();
+  await page.locator('#key-modal').getByRole('button', { name: 'Close' }).click();
 
   const response = await request.post('/v1/chat/completions', {
     headers: { Authorization: `Bearer ${secret}` },
@@ -45,13 +50,15 @@ test('configures providers, creates a client key, and routes an OpenAI request',
   expect(openRouterRequests.data.some((item: { path: string; body: string }) => item.path.endsWith('/chat/completions') && item.body.includes('model-a:free'))).toBeTruthy();
   expect(surplusRequests.data.some((item: { path: string; body: string }) => item.path.endsWith('/chat/completions') && item.body.includes('model-a'))).toBeTruthy();
   await page.getByRole('link', { name: 'Models' }).click();
-  await expect(page.locator('table')).toContainText('Modalities');
-  await expect(page.locator('table')).toContainText('text + image');
-  await expect(page.locator('table')).toContainText('free-tier');
+  await expect(page.locator('[data-view-panel="models"] table')).toContainText('Modalities');
+  await expect(page.locator('[data-view-panel="models"] table')).toContainText('free-tier');
+  await expect(page.locator('#models-table-body .modality-icon[aria-label="Text"]')).toHaveCount(2);
+  await expect(page.locator('#models-table-body .modality-icon[aria-label="Image"]')).toHaveCount(1);
   await page.getByRole('link', { name: 'Requests' }).click();
-  await expect(page.locator('table')).toContainText('Provider');
-  await expect(page.locator('table')).toContainText('Attempts');
-  await expect(page.locator('table')).toContainText('Surplus Intelligence');
+  await page.locator('#refresh-button').click();
+  await expect(page.locator('[data-view-panel="requests"] table')).toContainText('Provider');
+  await expect(page.locator('[data-view-panel="requests"] table')).toContainText('Attempts');
+  await expect(page.locator('[data-view-panel="requests"] table')).toContainText('Surplus Intelligence');
   await expect(page.locator('#status')).toContainText('Ready');
 });
 

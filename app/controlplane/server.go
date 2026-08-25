@@ -7,6 +7,7 @@ import (
 
 	"github.com/neverknowerdev/paylessforai/app/gateway"
 	"github.com/neverknowerdev/paylessforai/internal/catalog"
+	"github.com/neverknowerdev/paylessforai/internal/providers"
 	proxyservice "github.com/neverknowerdev/paylessforai/internal/proxy"
 	"github.com/neverknowerdev/paylessforai/internal/secrets"
 	"github.com/neverknowerdev/paylessforai/internal/store"
@@ -22,9 +23,9 @@ type Server struct {
 }
 
 type CredentialDeps struct {
-	Box           *secrets.Box
-	ProviderBases map[string]string
-	Reload        func() error
+	Box      *secrets.Box
+	Registry *providers.Registry
+	Reload   func() error
 }
 
 func New(addr string, readHeaderTimeout, idleTimeout time.Duration, db *store.Store) (*Server, error) {

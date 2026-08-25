@@ -45,11 +45,8 @@ func Run(parent context.Context, args []string) error {
 	if err != nil {
 		return err
 	}
-	providerBases := map[string]string{
-		"openrouter": c.OpenRouterBaseURL,
-		"surplus":    c.SurplusBaseURL,
-	}
-	clients := loadProviderClients(c, db, secretBox)
+	registry := providers.Builtin(c.ProviderBaseURLs)
+	clients := loadProviderClients(registry, db, secretBox)
 	catalogManager := catalog.New(clients)
 	appContext, cancel := context.WithCancel(parent)
 	defer cancel()
@@ -60,7 +57,7 @@ func Run(parent context.Context, args []string) error {
 		go refreshCatalogPeriodically(appContext, catalogManager, c.RefreshInterval)
 	}
 	reloadProviders := func() error {
-		catalogManager.SetClients(loadProviderClients(c, db, secretBox))
+		catalogManager.SetClients(loadProviderClients(registry, db, secretBox))
 		return catalogManager.Refresh(appContext)
 	}
 	proxyHandler := proxy.New(catalogManager, db)
@@ -71,7 +68,7 @@ func Run(parent context.Context, args []string) error {
 		db,
 		catalogManager,
 		proxyHandler,
-		controlplane.CredentialDeps{Box: secretBox, ProviderBases: providerBases, Reload: reloadProviders},
+		controlplane.CredentialDeps{Box: secretBox, Registry: registry, Reload: reloadProviders},
 	)
 	if err != nil {
 		return fmt.Errorf("create app HTTP server: %w", err)
@@ -117,9 +114,9 @@ func refreshCatalogPeriodically(ctx context.Context, manager *catalog.Manager, i
 	}
 }
 
-func loadProviderClients(c config.Config, dataStore *store.Store, box *secrets.Box) []providers.Client {
-	clients := make([]providers.Client, 0, 4)
-	configured := make(map[string]bool, 2)
+func loadProviderClients(registry *providers.Registry, dataStore *store.Store, box *secrets.Box) []providers.Client {
+	clients := make([]providers.Client, 0)
+	configured := make(map[string]bool)
 	stored, err := dataStore.ListProviderCredentials(context.Background())
 	if err == nil {
 		for _, credential := range stored {
@@ -131,20 +128,13 @@ func loadProviderClients(c config.Config, dataStore *store.Store, box *secrets.B
 			if err != nil {
 				continue
 			}
-			baseURL := c.OpenRouterBaseURL
-			if credential.Provider == "surplus" {
-				baseURL = c.SurplusBaseURL
+			client, _, err := registry.Resolve(provider, credential.BaseURL, secret)
+			if err != nil {
+				continue
 			}
-			clients = append(clients, providers.NewHTTPClient(provider, baseURL, secret))
+			clients = append(clients, client)
 			configured[provider] = true
 		}
-	}
-	if c.OpenRouterAPIKey != "" && !configured["openrouter"] {
-		clients = append(clients, providers.NewHTTPClient("openrouter", c.OpenRouterBaseURL, c.OpenRouterAPIKey))
-		configured["openrouter"] = true
-	}
-	if c.SurplusAPIKey != "" && !configured["surplus"] {
-		clients = append(clients, providers.NewHTTPClient("surplus", c.SurplusBaseURL, c.SurplusAPIKey))
 	}
 	return clients
 }

@@ -140,23 +140,20 @@ Useful command-line flags include:
 -data-dir                 Database and master-key directory
 -listen                   HTTP address (default: 127.0.0.1:9472)
 -refresh-interval         Catalog refresh interval (default: 5m)
--openrouter-base-url      OpenRouter API base URL
--surplus-base-url         Surplus API base URL
+-provider-base-url        Provider endpoint override (repeatable: name=url)
+-openrouter-base-url      OpenRouter endpoint override (compatibility alias)
+-surplus-base-url         Surplus endpoint override (compatibility alias)
 -read-header-timeout      HTTP request-header timeout
 -idle-timeout             HTTP keep-alive timeout
 -shutdown-timeout        Graceful shutdown timeout
 ```
 
-Provider API keys may also be supplied at process startup with:
-
-```sh
-PAYLESS_OPENROUTER_API_KEY=... \
-PAYLESS_SURPLUS_API_KEY=... \
-./paylessforai-app
-```
-
-For normal use, adding credentials through the UI is preferred because they are
-stored encrypted and can be removed or refreshed without restarting the binary.
+The app intentionally starts without provider credentials. Add one or more
+provider credentials through the Access & keys UI or the
+`POST /api/providers/credentials` API; keys are encrypted locally and can be
+removed or refreshed without restarting the binary. Built-in providers use
+their default endpoints. OpenAI-compatible providers not built into this
+binary can be added by supplying `provider`, `base_url`, and `api_key`.
 
 ## Development and tests
 
@@ -169,8 +166,9 @@ go vet ./...
 CGO_ENABLED=0 go build ./cmd/paylessforai-app
 ```
 
-The browser suite starts the real binary and two deterministic mock providers;
-it never uses real provider tokens:
+The browser suite starts the real binary and deterministic mock providers. It
+starts with no provider credentials, then adds credentials through the same
+credential API used by the UI; it never uses real provider tokens:
 
 ```sh
 cd test/e2e

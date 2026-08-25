@@ -33,12 +33,12 @@ func TestProviderCredentialLifecycle(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer s.Close()
-	credential := ProviderCredential{ID: "credential-1", Provider: "openrouter", Label: "main", Ciphertext: []byte("ciphertext"), Nonce: []byte("nonce"), Enabled: true}
+	credential := ProviderCredential{ID: "credential-1", Provider: "openrouter", Label: "main", BaseURL: "https://openrouter.example/v1", Ciphertext: []byte("ciphertext"), Nonce: []byte("nonce"), Enabled: true}
 	if err := s.UpsertProviderCredential(context.Background(), credential); err != nil {
 		t.Fatal(err)
 	}
 	items, err := s.ListProviderCredentials(context.Background())
-	if err != nil || len(items) != 1 || string(items[0].Ciphertext) != "ciphertext" {
+	if err != nil || len(items) != 1 || string(items[0].Ciphertext) != "ciphertext" || items[0].BaseURL != credential.BaseURL {
 		t.Fatalf("unexpected credentials: %#v %v", items, err)
 	}
 	if err := s.DeleteProviderCredential(context.Background(), credential.ID); err != nil {

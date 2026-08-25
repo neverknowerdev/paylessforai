@@ -10,8 +10,25 @@ import (
 )
 
 func (s *Server) registerProviderRoutes(mux *http.ServeMux) {
+	mux.HandleFunc("/api/providers", s.handleProviders)
 	mux.HandleFunc("/api/providers/credentials", s.handleProviderCredentials)
 	mux.HandleFunc("/api/providers/credentials/", s.handleProviderCredential)
+}
+
+func (s *Server) handleProviders(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		writeError(w, http.StatusMethodNotAllowed, "method_not_allowed", "providers endpoint only accepts GET")
+		return
+	}
+	if s.credentials.Registry == nil {
+		writeJSON(w, http.StatusOK, map[string]any{"data": []any{}})
+		return
+	}
+	data := make([]map[string]string, 0)
+	for _, definition := range s.credentials.Registry.Definitions() {
+		data = append(data, map[string]string{"name": definition.Name, "display_name": definition.DisplayName, "default_base_url": definition.DefaultBaseURL})
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"data": data})
 }
 
 func (s *Server) handleProviderCredentials(w http.ResponseWriter, r *http.Request) {
@@ -43,14 +60,20 @@ func (s *Server) createProviderCredential(w http.ResponseWriter, r *http.Request
 		Provider string `json:"provider"`
 		Label    string `json:"label"`
 		APIKey   string `json:"api_key"`
+		BaseURL  string `json:"base_url"`
 	}
 	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 4096)).Decode(&input); err != nil || strings.TrimSpace(input.Provider) == "" || strings.TrimSpace(input.APIKey) == "" {
 		writeError(w, http.StatusBadRequest, "invalid_request", "provider, label, and api_key are required")
 		return
 	}
 	input.Provider = strings.ToLower(strings.TrimSpace(input.Provider))
-	if _, ok := s.credentials.ProviderBases[input.Provider]; !ok {
-		writeError(w, http.StatusBadRequest, "unsupported_provider", "provider is not configured")
+	input.BaseURL = strings.TrimRight(strings.TrimSpace(input.BaseURL), "/")
+	if s.credentials.Registry == nil {
+		writeError(w, http.StatusServiceUnavailable, "provider_registry_unavailable", "provider registry is unavailable")
+		return
+	}
+	if _, _, err := s.credentials.Registry.Resolve(input.Provider, input.BaseURL, "validation-only"); err != nil {
+		writeError(w, http.StatusBadRequest, "unsupported_provider", err.Error())
 		return
 	}
 	ciphertext, nonce, err := s.credentials.Box.Seal(input.APIKey)
@@ -58,7 +81,7 @@ func (s *Server) createProviderCredential(w http.ResponseWriter, r *http.Request
 		writeError(w, http.StatusInternalServerError, "credential_encrypt_failed", "could not encrypt provider credential")
 		return
 	}
-	item := store.ProviderCredential{ID: ids.New(), Provider: input.Provider, Label: input.Label, Ciphertext: ciphertext, Nonce: nonce, Enabled: true}
+	item := store.ProviderCredential{ID: ids.New(), Provider: input.Provider, Label: input.Label, BaseURL: input.BaseURL, Ciphertext: ciphertext, Nonce: nonce, Enabled: true}
 	if err := s.db.UpsertProviderCredential(r.Context(), item); err != nil {
 		writeError(w, http.StatusInternalServerError, "credential_store_failed", "could not store provider credential")
 		return

@@ -13,10 +13,20 @@ func TestParseAndValidate(t *testing.T) {
 }
 
 func TestValidateRejectsInvalidValues(t *testing.T) {
-	tests := []Config{{DataDir: "", ListenAddr: "127.0.0.1:1"}, {DataDir: "/tmp", ListenAddr: "bad"}, {DataDir: "/tmp", ListenAddr: "127.0.0.1:1", ReadHeaderTimeout: -1}, {DataDir: "/tmp", ListenAddr: "127.0.0.1:1", OpenRouterBaseURL: "", SurplusBaseURL: ""}}
+	tests := []Config{{DataDir: "", ListenAddr: "127.0.0.1:1"}, {DataDir: "/tmp", ListenAddr: "bad"}, {DataDir: "/tmp", ListenAddr: "127.0.0.1:1", ReadHeaderTimeout: -1}}
 	for _, test := range tests {
 		if err := test.Validate(); err == nil {
 			t.Fatalf("expected error for %#v", test)
 		}
+	}
+}
+
+func TestParseProviderBaseURLOverride(t *testing.T) {
+	c, err := Parse([]string{"-data-dir", "/tmp/payless-test", "-listen", "127.0.0.1:1234", "-provider-base-url", "local=http://127.0.0.1:9999/v1"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if c.ProviderBaseURLs["local"] != "http://127.0.0.1:9999/v1" {
+		t.Fatalf("unexpected provider base URLs: %#v", c.ProviderBaseURLs)
 	}
 }

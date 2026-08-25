@@ -181,6 +181,3 @@ The same checks run in separate GitHub Actions workflows:
 
 - [Unit tests](.github/workflows/unit-tests.yml)
 - [Browser E2E](.github/workflows/e2e.yml)
-
-See the [v1 implementation plan](docs/implementation-plan.md) for provider
-discovery details, design decisions, and the remaining roadmap.

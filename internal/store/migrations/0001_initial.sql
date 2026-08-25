@@ -8,6 +8,7 @@ CREATE TABLE IF NOT EXISTS provider_credentials (
     id TEXT PRIMARY KEY,
     provider TEXT NOT NULL,
     label TEXT NOT NULL,
+    base_url TEXT NOT NULL DEFAULT '',
     ciphertext BLOB NOT NULL,
     nonce BLOB NOT NULL,
     enabled INTEGER NOT NULL DEFAULT 1,
@@ -77,6 +78,10 @@ CREATE TABLE IF NOT EXISTS proxy_requests (
     state TEXT NOT NULL,
     received_at TEXT NOT NULL,
     completed_at TEXT,
+    selected_provider TEXT,
+    selected_upstream_model TEXT,
+    attempt_count INTEGER NOT NULL DEFAULT 0,
+    duration_ms INTEGER,
     error_code TEXT,
     error_message TEXT
 );
@@ -94,6 +99,8 @@ CREATE TABLE IF NOT EXISTS proxy_attempts (
     http_status INTEGER,
     error_class TEXT,
     error_message TEXT,
+    error_raw TEXT,
+    duration_ms INTEGER,
     delivery_state TEXT NOT NULL DEFAULT 'nothing_sent'
 );
 
@@ -106,6 +113,9 @@ CREATE TABLE IF NOT EXISTS request_usage (
     cache_write_tokens INTEGER NOT NULL DEFAULT 0,
     reasoning_tokens INTEGER NOT NULL DEFAULT 0,
     estimated_cost_pico_usd INTEGER NOT NULL DEFAULT 0,
+    official_cost_pico_usd INTEGER NOT NULL DEFAULT 0,
+    discount_pico_usd INTEGER,
+    discount_percent_bps INTEGER,
     actual_cost_pico_usd INTEGER,
     raw_usage_json TEXT NOT NULL DEFAULT '{}'
 );

@@ -17,7 +17,7 @@ func TestOpenMigratesFreshDatabase(t *testing.T) {
 	if err := s.DB().QueryRow(`SELECT count(*) FROM schema_migrations`).Scan(&count); err != nil {
 		t.Fatal(err)
 	}
-	if count != 7 {
+	if count != 1 {
 		t.Fatalf("got %d migrations", count)
 	}
 	var table string
@@ -40,7 +40,7 @@ func TestMigrateIsIdempotent(t *testing.T) {
 	if err := s.DB().QueryRow(`SELECT count(*) FROM schema_migrations`).Scan(&count); err != nil {
 		t.Fatal(err)
 	}
-	if count != 7 {
+	if count != 1 {
 		t.Fatalf("got %d migrations", count)
 	}
 }

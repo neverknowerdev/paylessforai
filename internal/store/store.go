@@ -102,8 +102,10 @@ type StatsSummary struct {
 	CacheWriteTokens   int64  `json:"cache_write_tokens"`
 	ReasoningTokens    int64  `json:"reasoning_tokens"`
 	EstimatedCostPico  int64  `json:"estimated_cost_pico_usd"`
+	OfficialCostPico   int64  `json:"official_cost_pico_usd"`
 	ActualCostPico     int64  `json:"actual_cost_pico_usd"`
 	SavedCostPico      int64  `json:"saved_cost_pico_usd"`
+	SavedPercentBPS    *int64 `json:"saved_percent_bps,omitempty"`
 	RequestsWithActual int64  `json:"requests_with_actual_cost"`
 	TotalAttempts      int64  `json:"total_attempts"`
 	RetriedRequests    int64  `json:"retried_requests"`
@@ -442,6 +444,7 @@ func (s *Store) RequestStatsSummary(ctx context.Context) (StatsSummary, error) {
 		COALESCE(SUM(u.cache_write_tokens), 0),
 		COALESCE(SUM(u.reasoning_tokens), 0),
 		COALESCE(SUM(u.estimated_cost_pico_usd), 0),
+		COALESCE(SUM(u.official_cost_pico_usd), 0),
 		COALESCE(SUM(u.actual_cost_pico_usd), 0),
 		COALESCE(SUM(CASE WHEN u.discount_pico_usd > 0 THEN u.discount_pico_usd ELSE 0 END), 0),
 		COUNT(u.actual_cost_pico_usd),
@@ -452,8 +455,12 @@ func (s *Store) RequestStatsSummary(ctx context.Context) (StatsSummary, error) {
 		&summary.TotalRequests, &summary.SucceededRequests, &summary.FailedRequests, &summary.PartialRequests,
 		&summary.InputTokens, &summary.OutputTokens, &summary.TotalTokens, &summary.CachedReadTokens,
 		&summary.CacheWriteTokens, &summary.ReasoningTokens, &summary.EstimatedCostPico,
-		&summary.ActualCostPico, &summary.SavedCostPico, &summary.RequestsWithActual,
+		&summary.OfficialCostPico, &summary.ActualCostPico, &summary.SavedCostPico, &summary.RequestsWithActual,
 		&summary.TotalAttempts, &summary.RetriedRequests, &summary.FastestMS, &summary.SlowestMS, &summary.AverageMS, &summary.RequestsWithTime)
+	if err == nil && summary.OfficialCostPico > 0 {
+		value := summary.SavedCostPico * 10000 / summary.OfficialCostPico
+		summary.SavedPercentBPS = &value
+	}
 	return summary, err
 }
 

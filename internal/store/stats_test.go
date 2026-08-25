@@ -37,7 +37,7 @@ func TestRequestStatsIncludeUsage(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if summary.TotalRequests != 1 || summary.SucceededRequests != 1 || summary.TotalAttempts != 2 || summary.RetriedRequests != 1 || summary.RequestsWithTime != 1 || summary.FastestMS == nil || summary.TotalTokens != 5 || summary.EstimatedCostPico != 7 || summary.SavedCostPico != 2 {
+	if summary.TotalRequests != 1 || summary.SucceededRequests != 1 || summary.TotalAttempts != 2 || summary.RetriedRequests != 1 || summary.RequestsWithTime != 1 || summary.FastestMS == nil || summary.TotalTokens != 5 || summary.EstimatedCostPico != 7 || summary.OfficialCostPico != 10 || summary.SavedCostPico != 2 || summary.SavedPercentBPS == nil || *summary.SavedPercentBPS != 2000 {
 		t.Fatalf("unexpected summary: %#v", summary)
 	}
 }

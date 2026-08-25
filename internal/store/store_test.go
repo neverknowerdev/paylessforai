@@ -17,12 +17,14 @@ func TestOpenMigratesFreshDatabase(t *testing.T) {
 	if err := s.DB().QueryRow(`SELECT count(*) FROM schema_migrations`).Scan(&count); err != nil {
 		t.Fatal(err)
 	}
-	if count != 1 {
+	if count != 10 {
 		t.Fatalf("got %d migrations", count)
 	}
-	var table string
-	if err := s.DB().QueryRow(`SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'proxy_requests'`).Scan(&table); err != nil {
-		t.Fatal(err)
+	for _, table := range []string{"settings", "provider_credentials", "client_api_keys", "catalog_refreshes", "models", "model_routes", "provider_health", "proxy_requests", "proxy_attempts", "request_usage"} {
+		var found string
+		if err := s.DB().QueryRow(`SELECT name FROM sqlite_master WHERE type = 'table' AND name = ?`, table).Scan(&found); err != nil {
+			t.Fatalf("table %s: %v", table, err)
+		}
 	}
 }
 
@@ -40,7 +42,7 @@ func TestMigrateIsIdempotent(t *testing.T) {
 	if err := s.DB().QueryRow(`SELECT count(*) FROM schema_migrations`).Scan(&count); err != nil {
 		t.Fatal(err)
 	}
-	if count != 1 {
+	if count != 10 {
 		t.Fatalf("got %d migrations", count)
 	}
 }

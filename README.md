@@ -112,6 +112,10 @@ Estimated cost uses fixed-point USD arithmetic and catalog prices. After a
 request completes, provider-reported cost is authoritative when present;
 otherwise PayLessForAI calculates an actual estimate from token, cache, and
 reasoning usage. Request statistics are persisted in SQLite and shown in the UI.
+A discount/overage is shown only when both the actual cost and a non-zero
+official catalog baseline are available; older rows created before pricing
+comparison was introduced, and models with no paid catalog price, are labeled
+accordingly.
 
 ## Configuration
 

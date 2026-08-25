@@ -79,7 +79,7 @@ type RequestStat struct {
 	CacheWriteTokens  int64         `json:"cache_write_tokens"`
 	ReasoningTokens   int64         `json:"reasoning_tokens"`
 	EstimatedCostPico int64         `json:"estimated_cost_pico_usd"`
-	OfficialCostPico  int64         `json:"official_cost_pico_usd"`
+	OfficialCostPico  *int64        `json:"official_cost_pico_usd,omitempty"`
 	ActualCostPico    *int64        `json:"actual_cost_pico_usd,omitempty"`
 	DiscountPico      *int64        `json:"discount_pico_usd,omitempty"`
 	DiscountBPS       *int64        `json:"discount_percent_bps,omitempty"`
@@ -328,7 +328,9 @@ func (s *Store) ListRequestStats(ctx context.Context, limit int) ([]RequestStat,
 		item.InputTokens, item.OutputTokens, item.TotalTokens = input.Int64, output.Int64, total.Int64
 		item.CachedReadTokens, item.CacheWriteTokens, item.ReasoningTokens = cachedRead.Int64, cacheWrite.Int64, reasoning.Int64
 		item.EstimatedCostPico = estimated.Int64
-		item.OfficialCostPico = official.Int64
+		if official.Valid {
+			item.OfficialCostPico = &official.Int64
+		}
 		if actual.Valid {
 			item.ActualCostPico = &actual.Int64
 		}

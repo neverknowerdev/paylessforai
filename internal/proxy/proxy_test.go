@@ -120,7 +120,7 @@ func TestProxySelectsCheapestRouteAndPersistsUsage(t *testing.T) {
 		t.Fatalf("expected usage-derived actual cost 3, got %d", actualCost)
 	}
 	items, err := db.ListRequestStats(context.Background(), 10)
-	if err != nil || len(items) != 1 || items[0].OfficialCostPico != 30 || items[0].DiscountPico == nil || *items[0].DiscountPico != 27 {
+	if err != nil || len(items) != 1 || items[0].OfficialCostPico == nil || *items[0].OfficialCostPico != 30 || items[0].DiscountPico == nil || *items[0].DiscountPico != 27 {
 		t.Fatalf("expected official cost and discount, got %#v, %v", items, err)
 	}
 }

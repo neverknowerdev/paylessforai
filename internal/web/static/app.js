@@ -4,10 +4,20 @@
   const $$ = (selector) => Array.from(document.querySelectorAll(selector));
   const formatNumber = (value) => new Intl.NumberFormat('en-US').format(Number(value || 0));
   const formatCompact = (value) => new Intl.NumberFormat('en-US', { notation: 'compact', maximumFractionDigits: 1 }).format(Number(value || 0));
-  const formatUSD = (pico) => `$${(Number(pico || 0) / 1e12).toFixed(8)}`;
+  const formatUSD = (pico) => {
+    const value = Number(pico || 0) / 1e12;
+    if (!Number.isFinite(value)) return '—';
+    const rounded = new Intl.NumberFormat('en-US', { maximumSignificantDigits: 3, useGrouping: false }).format(value);
+    return `$${rounded}`;
+  };
   const formatSignedUSD = (pico) => { const value = Number(pico || 0); return `${value < 0 ? '-' : '+'}${formatUSD(Math.abs(value))}`; };
-  const discountPercent = (bps) => `${(Number(bps || 0) / 100).toFixed(Number(bps || 0) % 100 === 0 ? 0 : 2)}%`;
-  const discountLabel = (request) => request.discount_pico_usd == null ? '—' : `${formatSignedUSD(request.discount_pico_usd)} · ${discountPercent(request.discount_percent_bps)} ${Number(request.discount_percent_bps || 0) >= 0 ? 'saved' : 'overage'}`;
+  const discountPercent = (bps) => `${Math.round(Number(bps || 0) / 100)}%`;
+  const discountUnavailableLabel = (request) => {
+    if (request.official_cost_pico_usd == null || Number(request.official_cost_pico_usd) <= 0) return 'no official price';
+    if (request.actual_cost_pico_usd == null) return 'no actual price';
+    return 'not available';
+  };
+  const discountLabel = (request) => request.discount_pico_usd == null ? `— · ${discountUnavailableLabel(request)}` : `${formatSignedUSD(request.discount_pico_usd)} · ${discountPercent(request.discount_percent_bps)} ${Number(request.discount_percent_bps || 0) >= 0 ? 'saved' : 'overage'}`;
   const shortID = (value) => value ? `${value.slice(0, 8)}…${value.slice(-4)}` : '—';
   const protocolName = (value) => ({ chat_completions: 'Chat Completions', responses: 'Responses', anthropic_messages: 'Anthropic Messages' }[value] || value || '—');
   const providerName = (value) => value === 'surplus' ? 'Surplus Intelligence' : value === 'openrouter' ? 'OpenRouter' : value || 'Unknown provider';
@@ -88,7 +98,7 @@
       appendTextCell(row, `${formatNumber(request.attempts)} attempt${request.attempts === 1 ? '' : 's'}`);
       appendTextCell(row, `${formatNumber(request.input_tokens)} in · ${formatNumber(request.output_tokens)} out`);
       const cost = appendTextCell(row, ''); const costStrong = document.createElement('strong'); costStrong.textContent = formatUSD(requestCost(request)); const costSmall = document.createElement('small'); costSmall.textContent = request.actual_cost_pico_usd != null ? 'actual' : 'estimated'; cost.append(costStrong, costSmall);
-      const discount = appendTextCell(row, ''); const discountStrong = document.createElement('strong'); discountStrong.textContent = request.discount_pico_usd == null ? '—' : formatSignedUSD(request.discount_pico_usd); const discountSmall = document.createElement('small'); discountSmall.textContent = request.discount_pico_usd == null ? 'no baseline' : `${discountPercent(request.discount_percent_bps)} ${Number(request.discount_percent_bps || 0) >= 0 ? 'saved' : 'overage'}`; discount.append(discountStrong, discountSmall);
+      const discount = appendTextCell(row, ''); const discountStrong = document.createElement('strong'); discountStrong.textContent = request.discount_pico_usd == null ? '—' : formatSignedUSD(request.discount_pico_usd); const discountSmall = document.createElement('small'); discountSmall.textContent = request.discount_pico_usd == null ? discountUnavailableLabel(request) : `${discountPercent(request.discount_percent_bps)} ${Number(request.discount_percent_bps || 0) >= 0 ? 'saved' : 'overage'}`; discount.append(discountStrong, discountSmall);
       const status = document.createElement('td'); status.append(stateBadge(request.state)); row.append(status); appendTextCell(row, dateValue(request.completed_at)); body.append(row);
     });
     empty.hidden = filteredRequests().length > 0;

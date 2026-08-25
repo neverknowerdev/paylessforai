@@ -131,7 +131,10 @@
 
   function renderRequestSummary() {
     const container = $('#request-summary'); if (!container) return; container.replaceChildren();
-    const s = state.summary || {}; const items = [['TOTAL', formatNumber(s.total_requests)], ['TOKENS', null], ['ESTIMATED', formatUSD(s.estimated_cost_pico_usd)], ['ACTUAL', formatUSD(s.actual_cost_pico_usd)], ['SAVED', formatUSD(s.saved_cost_pico_usd)]];
+    const s = state.summary || {}; const items = [['TOTAL', formatNumber(s.total_requests)]];
+    const tokenTotal = Number(s.input_tokens || 0) + Number(s.output_tokens || 0) + Number(s.total_tokens || 0) + Number(s.cached_read_tokens || 0) + Number(s.reasoning_tokens || 0);
+    if (tokenTotal > 0) items.push(['TOKENS', null]);
+    items.push(['ESTIMATED', formatUSD(s.estimated_cost_pico_usd)], ['ACTUAL', formatUSD(s.actual_cost_pico_usd)], ['SAVED', formatUSD(s.saved_cost_pico_usd)]);
     items.forEach(([label, value]) => { const item = document.createElement('div'); item.className = 'summary-item'; const title = document.createElement('span'); title.textContent = label; const number = document.createElement('strong'); if (label === 'TOKENS') number.append(tokenBreakdown(s.input_tokens, s.output_tokens, s.total_tokens, s.cached_read_tokens, s.reasoning_tokens)); else number.textContent = value; item.append(title, number); container.append(item); });
   }
 

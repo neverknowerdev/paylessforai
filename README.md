@@ -103,11 +103,12 @@ loopback unless those endpoints are protected by an external access layer.
 
 ## Routing and pricing
 
-At startup and on the configured refresh interval, PayLessForAI fetches provider
-model metadata and pricing. OpenRouter uses `/models/user` when an API key is
-available and `/models` otherwise; Surplus uses its model catalog. Matching is
-based on the requested logical model, protocol, capabilities, limits, health,
-and current price.
+At startup, after a provider credential is added, and on the configured refresh
+interval, PayLessForAI fetches provider model metadata and pricing. Discovery
+tries the provider's common catalog paths (`/models`, `/v1/models`, and
+`/api/v1/models`, plus OpenRouter's `/models/user` when applicable) until one
+responds with a usable catalog. Matching is based on the requested logical model,
+protocol, capabilities, limits, health, and current price.
 
 For a model available through more than one route:
 

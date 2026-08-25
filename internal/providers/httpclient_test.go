@@ -18,8 +18,11 @@ func (f roundTripFunc) RoundTrip(request *http.Request) (*http.Response, error) 
 func TestDiscoverAndParsePricing(t *testing.T) {
 	client := NewHTTPClient("openrouter", "https://provider.invalid/v1", "key")
 	client.Client = &http.Client{Transport: roundTripFunc(func(r *http.Request) (*http.Response, error) {
-		if r.URL.Path != "/v1/models/user" {
+		if r.URL.Path != "/v1/models" {
 			t.Fatalf("unexpected path %s", r.URL.Path)
+		}
+		if r.URL.Query().Get("output_modalities") != "all" {
+			t.Fatalf("expected complete OpenRouter catalog query, got %q", r.URL.RawQuery)
 		}
 		return &http.Response{StatusCode: http.StatusOK, Body: io.NopCloser(strings.NewReader(`{"data":[{"id":"model-a","name":"Model A","context_length":1000,"pricing":{"prompt":"0.000001","completion":"0.000002","cacheRead":"0.0000002","cacheWrite":"0.0000005","reasoning":"0.000003","request":"0.00001"},"supported_parameters":["tools"],"architecture":{"input_modalities":["text","image"],"output_modalities":["text"]},"supported_features":["streaming","tools"]}]}`)), Header: make(http.Header), Request: r}, nil
 	})}
@@ -32,6 +35,29 @@ func TestDiscoverAndParsePricing(t *testing.T) {
 	}
 	if len(models[0].InputModalities) != 2 || models[0].InputModalities[1] != "image" || len(models[0].Tags) != 2 {
 		t.Fatalf("unexpected model metadata: %#v", models[0])
+	}
+}
+
+func TestDiscoverFallsBackAcrossKnownModelEndpoints(t *testing.T) {
+	client := NewHTTPClient("custom", "https://provider.invalid", "key")
+	var paths []string
+	client.Client = &http.Client{Transport: roundTripFunc(func(r *http.Request) (*http.Response, error) {
+		paths = append(paths, r.URL.Path)
+		if r.URL.Path == "/models" {
+			return &http.Response{StatusCode: http.StatusNotFound, Body: io.NopCloser(strings.NewReader(`{"error":{"message":"not found"}}`)), Header: make(http.Header), Request: r}, nil
+		}
+		if r.URL.Path == "/v1/models" {
+			return &http.Response{StatusCode: http.StatusOK, Body: io.NopCloser(strings.NewReader(`{"data":[{"id":"fallback-model","pricing":{"prompt":"0.000001","completion":"0.000002"}}]}`)), Header: make(http.Header), Request: r}, nil
+		}
+		t.Fatalf("unexpected path %s", r.URL.Path)
+		return nil, nil
+	})}
+	models, err := client.Discover(context.Background())
+	if err != nil || len(models) != 1 || models[0].ID != "fallback-model" {
+		t.Fatalf("unexpected fallback discovery: %#v, %v", models, err)
+	}
+	if strings.Join(paths, ",") != "/models,/v1/models" {
+		t.Fatalf("unexpected endpoint attempts: %v", paths)
 	}
 }
 

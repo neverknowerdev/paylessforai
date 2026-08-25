@@ -17,14 +17,21 @@ test('configures providers, creates a client key, and routes an OpenAI request',
 
   await page.getByRole('link', { name: 'Access & keys' }).click();
   await page.getByRole('button', { name: 'Add provider' }).click();
-  await page.locator('#provider-name').fill('openrouter');
+  await expect(page.locator('#provider-type')).toHaveValue('openrouter');
+  await expect(page.locator('#custom-provider-fields')).toBeHidden();
+  await page.locator('#provider-type').selectOption('custom');
+  await expect(page.locator('#custom-provider-fields')).toBeVisible();
+  await expect(page.locator('#provider-name')).toHaveAttribute('required', '');
+  await expect(page.locator('#provider-base-url')).toHaveAttribute('required', '');
+  await page.locator('#provider-type').selectOption('openrouter');
+  await expect(page.locator('#custom-provider-fields')).toBeHidden();
   await page.locator('#provider-label').fill('mock-openrouter');
   await page.locator('#provider-key').fill('mock-key');
   await page.getByRole('button', { name: 'Save credential' }).click();
   await expect(page.locator('#provider-list')).toContainText('openrouter');
 
   await page.getByRole('button', { name: 'Add provider' }).click();
-  await page.locator('#provider-name').fill('surplus');
+  await page.locator('#provider-type').selectOption('surplus');
   await page.locator('#provider-label').fill('mock-surplus');
   await page.locator('#provider-key').fill('mock-key');
   await page.getByRole('button', { name: 'Save credential' }).click();

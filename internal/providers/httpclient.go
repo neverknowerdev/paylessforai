@@ -30,10 +30,52 @@ func NewHTTPClient(provider, baseURL, apiKey string) *HTTPClient {
 func (c *HTTPClient) Name() string { return c.Provider }
 
 func (c *HTTPClient) Discover(ctx context.Context) ([]Model, error) {
-	path := "/models"
-	if c.Provider == "openrouter" && c.APIKey != "" {
-		path = "/models/user"
+	var failures []string
+	for _, path := range c.modelPaths() {
+		models, err := c.discoverPath(ctx, path)
+		if err != nil {
+			failures = append(failures, path+": "+err.Error())
+			continue
+		}
+		if c.Provider == "surplus" {
+			applySurplusMarketPricing(ctx, c, models)
+		}
+		return models, nil
 	}
+	return nil, fmt.Errorf("discover %s models: %s", c.Provider, strings.Join(failures, "; "))
+}
+
+func (c *HTTPClient) modelPaths() []string {
+	paths := make([]string, 0, 5)
+	// The public catalog is the complete model list. OpenRouter's user-scoped
+	// catalog is a useful fallback for installations where the public list is
+	// unavailable, but it can be filtered by account preferences and therefore
+	// must not be preferred when building our catalog.
+	modelsPath := "/models"
+	if c.Provider == "openrouter" {
+		// OpenRouter defaults this endpoint to text-output models; explicitly
+		// request every output modality so audio, image, and other routes are
+		// not silently omitted from the catalog.
+		modelsPath += "?output_modalities=all"
+	}
+	paths = append(paths, modelsPath)
+	if c.Provider == "openrouter" && c.APIKey != "" {
+		paths = append(paths, "/models/user?output_modalities=all")
+	}
+	paths = append(paths, "/v1/models", "/api/v1/models", "/api/models")
+	seen := make(map[string]struct{}, len(paths))
+	result := make([]string, 0, len(paths))
+	for _, path := range paths {
+		if _, ok := seen[path]; ok {
+			continue
+		}
+		seen[path] = struct{}{}
+		result = append(result, path)
+	}
+	return result
+}
+
+func (c *HTTPClient) discoverPath(ctx context.Context, path string) ([]Model, error) {
 	request, err := http.NewRequestWithContext(ctx, http.MethodGet, c.BaseURL+path, nil)
 	if err != nil {
 		return nil, err
@@ -95,9 +137,6 @@ func (c *HTTPClient) Discover(ctx context.Context) ([]Model, error) {
 		tags := append(append([]string(nil), item.SupportedFeatures...), item.Tags...)
 		pricing := matcher.Price{InputPicoUSDPerToken: input, OutputPicoUSDPerToken: output, CachedReadPicoUSDPerToken: cachedRead, CacheWritePicoUSDPerToken: cacheWrite, ReasoningPicoUSDPerToken: reasoning, FixedPicoUSD: fixed, ObservedAt: time.Now().UTC()}
 		models = append(models, Model{ID: item.ID, Name: item.Name, Free: free, ContextLength: item.ContextLength, MaxCompletionTokens: item.MaxCompletionTokens, Pricing: pricing, PriceAvailable: inputOK && outputOK, OfficialPricing: pricing, OfficialPriceAvailable: inputOK && outputOK, SupportedParameters: item.SupportedParameters, InputModalities: normalizeTags(inputModalities), OutputModalities: normalizeTags(outputModalities), Tags: normalizeTags(tags)})
-	}
-	if c.Provider == "surplus" {
-		applySurplusMarketPricing(ctx, c, models)
 	}
 	return models, nil
 }

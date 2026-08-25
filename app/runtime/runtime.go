@@ -1,6 +1,6 @@
-// Package runtime contains the hosted PayLessForAI server lifecycle.
+// Package runtime contains the local PayLessForAI app lifecycle.
 //
-// Keeping startup and dependency wiring here means the server binary is a
+// Keeping startup and dependency wiring here means the app binary is a
 // very small entrypoint, while tests and future launchers can reuse the same
 // lifecycle without duplicating provider setup.
 package runtime
@@ -17,17 +17,17 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/neverknowerdev/paylessforai/app/controlplane"
 	"github.com/neverknowerdev/paylessforai/internal/catalog"
 	"github.com/neverknowerdev/paylessforai/internal/config"
 	"github.com/neverknowerdev/paylessforai/internal/providers"
 	"github.com/neverknowerdev/paylessforai/internal/proxy"
 	"github.com/neverknowerdev/paylessforai/internal/secrets"
 	"github.com/neverknowerdev/paylessforai/internal/store"
-	"github.com/neverknowerdev/paylessforai/server/controlplane"
 )
 
-// Run starts the hosted server and blocks until it exits or receives a
-// termination signal. args are command-line arguments for the server config.
+// Run starts the local app and blocks until it exits or receives a termination
+// signal. args are command-line arguments for the app config.
 func Run(parent context.Context, args []string) error {
 	c, err := config.Parse(args)
 	if err != nil {
@@ -73,7 +73,7 @@ func Run(parent context.Context, args []string) error {
 		controlplane.CredentialDeps{Box: secretBox, ProviderBases: providerBases, Reload: reloadProviders},
 	)
 	if err != nil {
-		return fmt.Errorf("create hosted HTTP server: %w", err)
+		return fmt.Errorf("create app HTTP server: %w", err)
 	}
 
 	serverErr := make(chan error, 1)

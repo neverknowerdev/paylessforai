@@ -5,12 +5,12 @@ import (
 	"net/http"
 	"time"
 
+	"github.com/neverknowerdev/paylessforai/app/gateway"
 	"github.com/neverknowerdev/paylessforai/internal/catalog"
 	proxyservice "github.com/neverknowerdev/paylessforai/internal/proxy"
 	"github.com/neverknowerdev/paylessforai/internal/secrets"
 	"github.com/neverknowerdev/paylessforai/internal/store"
 	"github.com/neverknowerdev/paylessforai/internal/web"
-	"github.com/neverknowerdev/paylessforai/server/gateway"
 )
 
 type Server struct {

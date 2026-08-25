@@ -7,9 +7,8 @@ Last updated: 2026-08-25
 
 The repository now contains the first working vertical slice:
 
-- Two deployable Go binaries: hosted server and client-side localhost app.
-- Hosted server entrypoint with embedded UI and embedded SQLite migrations.
-- Client app reverse proxy with no provider credentials or routing state.
+- One deployable Go binary: the local `paylessforai-app`.
+- Local app entrypoint with embedded UI and embedded SQLite migrations.
 - Pure deterministic `MatchEngine` and `RetryEngine` with decision-focused tests.
 - OpenRouter and Surplus HTTP catalog/inference client foundations.
 - Catalog snapshots with same-model OpenRouter/Surplus alias merging.
@@ -22,7 +21,7 @@ The repository now contains the first working vertical slice:
 - Provider-specific fixed-point pricing for input/output, request, cache, and reasoning components; provider-reported response cost is authoritative with usage-based fallback.
 - Fault-injection tests for retry/failover and the no-failover-after-stream-bytes invariant.
 
-Still pending from this plan: durable provider-health/circuit persistence, richer statistics visualizations, provider-specific translation/parameter compatibility, and release packaging for both binaries.
+Still pending from this plan: durable provider-health/circuit persistence, richer statistics visualizations, provider-specific translation/parameter compatibility, hosted server deployment, and release packaging.
 
 ## 1. Objective
 
@@ -30,7 +29,7 @@ PayLessForAI is a local LLM proxy that exposes OpenAI- and Anthropic-compatible 
 
 The first release must:
 
-- Run as two dependency-free Go binaries: a hosted server and a client app.
+- Run as one dependency-free Go binary on the user's machine.
 - Embed the web UI, static assets, and database migrations.
 - Use an embedded SQLite database.
 - Support OpenRouter and Surplus Intelligence.
@@ -140,39 +139,31 @@ References:
 
 ## 4. High-level architecture
 
-PayLessForAI is split into a hosted data/control plane and a thin client
-adapter:
+PayLessForAI v1 is a local modular monolith. A hosted server is deliberately
+deferred until the local product is stable:
 
 ```text
 IDE / local API client
         |
         v
-cmd/paylessforai-app       (client machine, localhost:9473)
-app/localproxy             (auth injection + streaming reverse proxy)
-        | HTTPS
-        v
-cmd/paylessforai-server    (hosted machine, default :9472)
-server/controlplane        (UI and management API)
-server/gateway             (public models and inference handlers)
-server/runtime             (startup, catalog refresh, provider wiring)
+cmd/paylessforai-app       (local machine, localhost:9472)
+app/controlplane            (UI and management API)
+app/gateway                 (public models and inference handlers)
+app/runtime                 (startup, catalog refresh, provider wiring)
 internal/{catalog,matcher,proxy,retry,store,...}
 ```
 
-The hosted server is the only component that stores provider credentials,
-refreshes catalogs/prices, selects routes, retries/fails over, and records
-usage. The client app forwards `/`, `/api/*`, `/v1/*`, and health requests to
-the hosted server. It may inject a hosted client key when the IDE does not
-provide one, but it never sees provider keys.
+The app stores provider credentials locally, refreshes catalogs/prices, selects
+routes, retries/fails over, and records usage. A future hosted deployment can
+reuse these packages, but is not part of the current binary.
 
 Repository layout:
 
 ```text
-cmd/paylessforai-server/      hosted server CLI
-cmd/paylessforai-app/         client-machine CLI
-server/controlplane/          hosted UI and management handlers
-server/gateway/               hosted public models and inference handlers
-server/runtime/               hosted startup and graceful shutdown
-app/localproxy/               client reverse proxy and forwarding policy
+cmd/paylessforai-app/         local app CLI
+app/controlplane/             local UI and management handlers
+app/gateway/                  local public models and inference handlers
+app/runtime/                  local startup and graceful shutdown
 internal/config/              validated runtime configuration
 internal/protocol/openai/     Chat Completions and Responses wire handling
 internal/protocol/anthropic/  Messages wire handling

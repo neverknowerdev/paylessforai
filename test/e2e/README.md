@@ -1,6 +1,6 @@
 # Browser E2E tests
 
-These tests run the real PayLessForAI hosted-server binary, two deterministic mock provider
+These tests run the real PayLessForAI app binary, two deterministic mock provider
 processes, and Playwright. They do not use real provider credentials or spend
 LLM tokens.
 

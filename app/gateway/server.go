@@ -14,7 +14,7 @@ import (
 
 // NewHandler builds the public models and inference handler. Authentication,
 // routing, retries, usage recording, and provider failover remain in the
-// shared proxy service used by the hosted server.
+// shared proxy service used by the local app.
 func NewHandler(catalogManager *catalog.Manager, proxyHandler *proxyservice.Proxy) http.Handler {
 	mux := http.NewServeMux()
 	mux.HandleFunc("/v1/models", func(w http.ResponseWriter, r *http.Request) {

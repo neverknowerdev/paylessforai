@@ -242,7 +242,7 @@ func (p *Proxy) execute(ctx context.Context, writer http.ResponseWriter, request
 		client := p.Catalog.Client(route.Provider)
 		if client == nil {
 			if p.Store != nil {
-				_ = p.Store.RecordProxyAttempt(ctx, requestID, attempt, route.Provider, route.UpstreamModel, "failed", "provider_not_configured", "selected provider is not configured")
+				_ = p.Store.RecordProxyAttempt(ctx, requestID, attempt, route.Provider, route.UpstreamModel, "failed", "provider_not_configured", "Selected provider is not configured.", "selected provider is not configured")
 			}
 			return &proxyError{status: http.StatusBadGateway, code: "provider_not_configured", message: "selected provider is not configured"}
 		}
@@ -255,26 +255,28 @@ func (p *Proxy) execute(ctx context.Context, writer http.ResponseWriter, request
 				streamErr := p.stream(ctx, writer, requestID, response, ranked[current].ExpectedCost, officialExpectedCost, route.Price, officialPrice)
 				if p.Store != nil {
 					state, code, message := "succeeded", "", ""
+					raw := ""
 					if streamErr != nil {
-						state, code, message = "partial", "stream_error", sanitize(streamErr.Error())
+						state, code, message, raw = "partial", "stream_error", humanErrorMessage(streamErr), sanitize(streamErr.Error())
 					}
-					_ = p.Store.RecordProxyAttempt(ctx, requestID, attempt, route.Provider, route.UpstreamModel, state, code, message)
+					_ = p.Store.RecordProxyAttempt(ctx, requestID, attempt, route.Provider, route.UpstreamModel, state, code, message, raw)
 				}
 				return streamErr
 			}
 			completeErr := p.complete(ctx, writer, requestID, response, ranked[current].ExpectedCost, officialExpectedCost, route.Price, officialPrice)
 			if p.Store != nil {
 				state, code, message := "succeeded", "", ""
+				raw := ""
 				if completeErr != nil {
-					state, code, message = "failed", errorCode(completeErr), sanitize(completeErr.Error())
+					state, code, message, raw = "failed", errorCode(completeErr), humanErrorMessage(completeErr), sanitize(completeErr.Error())
 				}
-				_ = p.Store.RecordProxyAttempt(ctx, requestID, attempt, route.Provider, route.UpstreamModel, state, code, message)
+				_ = p.Store.RecordProxyAttempt(ctx, requestID, attempt, route.Provider, route.UpstreamModel, state, code, message, raw)
 			}
 			return completeErr
 		}
 		classified := classify(err)
 		if p.Store != nil {
-			_ = p.Store.RecordProxyAttempt(ctx, requestID, attempt, route.Provider, route.UpstreamModel, "failed", errorCode(err), sanitize(err.Error()))
+			_ = p.Store.RecordProxyAttempt(ctx, requestID, attempt, route.Provider, route.UpstreamModel, "failed", errorCode(err), humanErrorMessage(err), rawErrorMessage(err))
 		}
 		decision := p.Retry.Decide(retry.Input{Policy: policy, AttemptNumber: attempt, Now: time.Now(), Error: classified, Delivery: retry.NothingSent, SameRouteAvailable: !route.Free, FallbacksRemaining: len(ranked) - current - 1})
 		if decision.Action != retry.RetrySameRoute && decision.Action != retry.FailOver {
@@ -425,6 +427,57 @@ func officialPricing(ranked []matcher.RankedRoute) (matcher.Price, int64) {
 		return ranked[0].Route.Price, ranked[0].ExpectedCost
 	}
 	return matcher.Price{}, 0
+}
+
+func humanErrorMessage(err error) string {
+	var upstream *providers.UpstreamError
+	if errors.As(err, &upstream) {
+		if message := parseProviderError(upstream.Message); message != "" {
+			return message
+		}
+		return sanitize(upstream.Message)
+	}
+	return sanitize(err.Error())
+}
+
+func rawErrorMessage(err error) string {
+	var upstream *providers.UpstreamError
+	if errors.As(err, &upstream) {
+		return sanitize(upstream.Message)
+	}
+	return sanitize(err.Error())
+}
+
+func parseProviderError(raw string) string {
+	var value any
+	if json.Unmarshal([]byte(raw), &value) != nil {
+		return strings.TrimSpace(raw)
+	}
+	var visit func(any) string
+	visit = func(node any) string {
+		object, ok := node.(map[string]any)
+		if !ok {
+			return ""
+		}
+		if metadata, ok := object["metadata"].(map[string]any); ok {
+			if detail, ok := metadata["raw"].(string); ok && strings.TrimSpace(detail) != "" {
+				return strings.TrimSpace(detail)
+			}
+		}
+		if nested, ok := object["error"]; ok {
+			if detail := visit(nested); detail != "" {
+				return detail
+			}
+		}
+		if message, ok := object["message"].(string); ok && strings.TrimSpace(message) != "" {
+			return strings.TrimSpace(message)
+		}
+		return ""
+	}
+	if message := visit(value); message != "" {
+		return message
+	}
+	return strings.TrimSpace(raw)
 }
 
 func classify(err error) retry.ClassifiedError {

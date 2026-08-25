@@ -101,7 +101,22 @@
     values.forEach(([label, value]) => { const cell = document.createElement('div'); const name = document.createElement('span'); name.textContent = label; const data = document.createElement('strong'); data.textContent = value; cell.append(name, data); grid.append(cell); });
     if (request.error_code) { const error = document.createElement('p'); error.className = 'modal-note'; error.textContent = `Terminal error: ${request.error_code}`; drawer.append(error); } drawer.append(grid);
     const attempts = document.createElement('div'); attempts.className = 'attempt-list'; const attemptsHeading = document.createElement('h5'); attemptsHeading.textContent = `Routing attempts (${formatNumber(request.attempts)})`; attempts.append(attemptsHeading);
-    (request.attempt_details || []).forEach((attempt) => { const row = document.createElement('div'); row.className = 'attempt-row'; const number = document.createElement('span'); number.className = 'attempt-number'; number.textContent = `#${attempt.number}`; const main = document.createElement('span'); main.className = 'attempt-main'; const title = document.createElement('strong'); title.textContent = `${providerName(attempt.provider)} · ${attempt.upstream_model || '—'}`; const detail = document.createElement('small'); detail.textContent = attempt.error_class ? `${attempt.state} · ${attempt.error_class}: ${attempt.error_message || 'provider error'}` : `${attempt.state} · ${dateValue(attempt.completed_at || attempt.started_at)}`; main.append(title, detail); row.append(number, main, stateBadge(attempt.state)); attempts.append(row); });
+    (request.attempt_details || []).forEach((attempt) => {
+      const row = document.createElement('div'); row.className = 'attempt-row';
+      const number = document.createElement('span'); number.className = 'attempt-number'; number.textContent = `#${attempt.number}`;
+      const main = document.createElement('span'); main.className = 'attempt-main';
+      const title = document.createElement('strong'); title.textContent = `${providerName(attempt.provider)} · ${attempt.upstream_model || '—'}`;
+      const detail = document.createElement('small'); detail.textContent = attempt.error_class ? `${attempt.state} · ${attempt.error_class}: ${attempt.error_message || 'Provider error'}` : `${attempt.state} · ${dateValue(attempt.completed_at || attempt.started_at)}`;
+      main.append(title, detail);
+      row.append(number, main, stateBadge(attempt.state));
+      if (attempt.raw_error) {
+        const rawToggle = document.createElement('button'); rawToggle.type = 'button'; rawToggle.className = 'raw-error-toggle'; rawToggle.textContent = 'Show raw';
+        const raw = document.createElement('pre'); raw.className = 'raw-error'; raw.hidden = true; raw.textContent = attempt.raw_error;
+        rawToggle.addEventListener('click', () => { raw.hidden = !raw.hidden; rawToggle.textContent = raw.hidden ? 'Show raw' : 'Hide raw'; });
+        main.append(rawToggle, raw);
+      }
+      attempts.append(row);
+    });
     if (!request.attempt_details?.length) { const emptyAttempts = document.createElement('p'); emptyAttempts.className = 'attempt-empty'; emptyAttempts.textContent = 'No provider attempts were recorded for this legacy request.'; attempts.append(emptyAttempts); }
     drawer.append(attempts);
   }

@@ -61,6 +61,7 @@ type AttemptStat struct {
 	CompletedAt   string `json:"completed_at,omitempty"`
 	ErrorClass    string `json:"error_class,omitempty"`
 	ErrorMessage  string `json:"error_message,omitempty"`
+	RawError      string `json:"raw_error,omitempty"`
 }
 
 type RequestStat struct {
@@ -274,7 +275,7 @@ func (s *Store) CompleteProxyRequest(ctx context.Context, id, state, errorCode, 
 
 // RecordProxyAttempt records both the route actually contacted and the durable
 // attempt count used by the request UI and postmortem diagnostics.
-func (s *Store) RecordProxyAttempt(ctx context.Context, requestID string, attempt int, provider, upstream, state, errorClass, errorMessage string) error {
+func (s *Store) RecordProxyAttempt(ctx context.Context, requestID string, attempt int, provider, upstream, state, errorClass, errorMessage string, rawError ...string) error {
 	if attempt < 1 {
 		return fmt.Errorf("attempt number must be positive")
 	}
@@ -282,7 +283,11 @@ func (s *Store) RecordProxyAttempt(ctx context.Context, requestID string, attemp
 	if _, err := s.db.ExecContext(ctx, `UPDATE proxy_requests SET selected_provider = ?, selected_upstream_model = ?, attempt_count = CASE WHEN attempt_count < ? THEN ? ELSE attempt_count END WHERE id = ?`, provider, upstream, attempt, attempt, requestID); err != nil {
 		return err
 	}
-	_, err := s.db.ExecContext(ctx, `INSERT INTO proxy_attempts(id, request_id, attempt_number, route_id, provider, upstream_model, state, started_at, completed_at, error_class, error_message) VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, NULLIF(?, ''), NULLIF(?, '')) ON CONFLICT(id) DO UPDATE SET provider=excluded.provider, upstream_model=excluded.upstream_model, state=excluded.state, completed_at=excluded.completed_at, error_class=excluded.error_class, error_message=excluded.error_message`, requestID+":"+fmt.Sprint(attempt), requestID, attempt, provider+":"+upstream, provider, upstream, state, now, now, errorClass, errorMessage)
+	raw := ""
+	if len(rawError) > 0 {
+		raw = rawError[0]
+	}
+	_, err := s.db.ExecContext(ctx, `INSERT INTO proxy_attempts(id, request_id, attempt_number, route_id, provider, upstream_model, state, started_at, completed_at, error_class, error_message, error_raw) VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, NULLIF(?, ''), NULLIF(?, ''), NULLIF(?, '')) ON CONFLICT(id) DO UPDATE SET provider=excluded.provider, upstream_model=excluded.upstream_model, state=excluded.state, completed_at=excluded.completed_at, error_class=excluded.error_class, error_message=excluded.error_message, error_raw=excluded.error_raw`, requestID+":"+fmt.Sprint(attempt), requestID, attempt, provider+":"+upstream, provider, upstream, state, now, now, errorClass, errorMessage, raw)
 	return err
 }
 
@@ -343,13 +348,13 @@ func (s *Store) ListRequestStats(ctx context.Context, limit int) ([]RequestStat,
 		return nil, err
 	}
 	for index := range result {
-		attemptRows, err := s.db.QueryContext(ctx, `SELECT attempt_number, COALESCE(provider, ''), COALESCE(upstream_model, ''), state, started_at, COALESCE(completed_at, ''), COALESCE(error_class, ''), COALESCE(error_message, '') FROM proxy_attempts WHERE request_id = ? ORDER BY attempt_number`, result[index].ID)
+		attemptRows, err := s.db.QueryContext(ctx, `SELECT attempt_number, COALESCE(provider, ''), COALESCE(upstream_model, ''), state, started_at, COALESCE(completed_at, ''), COALESCE(error_class, ''), COALESCE(error_message, ''), COALESCE(error_raw, '') FROM proxy_attempts WHERE request_id = ? ORDER BY attempt_number`, result[index].ID)
 		if err != nil {
 			return nil, err
 		}
 		for attemptRows.Next() {
 			var attempt AttemptStat
-			if err := attemptRows.Scan(&attempt.Number, &attempt.Provider, &attempt.UpstreamModel, &attempt.State, &attempt.StartedAt, &attempt.CompletedAt, &attempt.ErrorClass, &attempt.ErrorMessage); err != nil {
+			if err := attemptRows.Scan(&attempt.Number, &attempt.Provider, &attempt.UpstreamModel, &attempt.State, &attempt.StartedAt, &attempt.CompletedAt, &attempt.ErrorClass, &attempt.ErrorMessage, &attempt.RawError); err != nil {
 				attemptRows.Close()
 				return nil, err
 			}

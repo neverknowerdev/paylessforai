@@ -212,6 +212,16 @@ func TestProxyFailsOverImmediatelyFromFreeRoute(t *testing.T) {
 	}
 }
 
+func TestHumanErrorMessageExtractsNestedProviderDetail(t *testing.T) {
+	err := &providers.UpstreamError{Provider: "openrouter", Message: `{"error":{"message":"Provider returned error","metadata":{"raw":"temporarily rate-limited upstream"}}}`}
+	if got := humanErrorMessage(err); got != "temporarily rate-limited upstream" {
+		t.Fatalf("got %q", got)
+	}
+	if got := rawErrorMessage(err); got == "temporarily rate-limited upstream" || !strings.Contains(got, `"metadata"`) {
+		t.Fatalf("raw error was not preserved: %q", got)
+	}
+}
+
 func TestParseRequestDetectsInputAndOutputModalities(t *testing.T) {
 	request, err := parseRequest([]byte(`{"model":"model-a","messages":[{"role":"user","content":[{"type":"text","text":"describe"},{"type":"image_url","image_url":{"url":"data:image/png;base64,abc"}},{"type":"input_audio","input_audio":{"data":"abc"}}]}],"modalities":["text"]}`), matcher.ProtocolChatCompletions)
 	if err != nil {

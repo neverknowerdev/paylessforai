@@ -14,6 +14,7 @@ import (
 	"os"
 	"os/signal"
 	"path/filepath"
+	"strings"
 	"syscall"
 	"time"
 
@@ -118,10 +119,12 @@ func refreshCatalogPeriodically(ctx context.Context, manager *catalog.Manager, i
 
 func loadProviderClients(c config.Config, dataStore *store.Store, box *secrets.Box) []providers.Client {
 	clients := make([]providers.Client, 0, 4)
+	configured := make(map[string]bool, 2)
 	stored, err := dataStore.ListProviderCredentials(context.Background())
 	if err == nil {
 		for _, credential := range stored {
-			if !credential.Enabled {
+			provider := strings.ToLower(strings.TrimSpace(credential.Provider))
+			if !credential.Enabled || configured[provider] {
 				continue
 			}
 			secret, err := box.Open(credential.Ciphertext, credential.Nonce)
@@ -132,13 +135,15 @@ func loadProviderClients(c config.Config, dataStore *store.Store, box *secrets.B
 			if credential.Provider == "surplus" {
 				baseURL = c.SurplusBaseURL
 			}
-			clients = append(clients, providers.NewHTTPClient(credential.Provider, baseURL, secret))
+			clients = append(clients, providers.NewHTTPClient(provider, baseURL, secret))
+			configured[provider] = true
 		}
 	}
-	if c.OpenRouterAPIKey != "" {
+	if c.OpenRouterAPIKey != "" && !configured["openrouter"] {
 		clients = append(clients, providers.NewHTTPClient("openrouter", c.OpenRouterBaseURL, c.OpenRouterAPIKey))
+		configured["openrouter"] = true
 	}
-	if c.SurplusAPIKey != "" {
+	if c.SurplusAPIKey != "" && !configured["surplus"] {
 		clients = append(clients, providers.NewHTTPClient("surplus", c.SurplusBaseURL, c.SurplusAPIKey))
 	}
 	return clients

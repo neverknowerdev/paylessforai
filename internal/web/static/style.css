@@ -87,7 +87,8 @@ code { display: inline-block; max-width: 100%; overflow: hidden; padding: 10px 1
 .overview-metrics { grid-template-columns: repeat(3, 1fr); }
 .metric-card { min-height: 128px; padding: 19px 20px; }
 .metric-card strong { display: block; margin: 18px 0 8px; color: var(--ink); font-size: 27px; letter-spacing: -.06em; }
-.metric-card small { color: var(--faint); font-size: 10px; }
+.metric-card small { display: block; color: var(--faint); font-size: 10px; }
+.metric-card small + small { margin-top: 7px; }
 .metric-card.accent-blue { border-top: 2px solid var(--blue); }.metric-card.accent-lime { border-top: 2px solid var(--lime); }.metric-card.accent-green { border-top: 2px solid #9dd65d; }.metric-card.accent-peach { border-top: 2px solid var(--peach); }
 .stats-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 12px; margin-bottom: 16px; }.stats-grid .metric-card { min-height: 115px; }.stats-heading { padding: 20px 22px; border-bottom: 1px solid #222c45; }.stats-heading .card-note { margin: 0; }
 .two-column { grid-template-columns: 1.3fr .7fr; }

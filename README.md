@@ -118,6 +118,9 @@ comparison was introduced, and models with no paid catalog price, are labeled
 accordingly.
 The Overview, Models, and Requests views also show the aggregate dollars saved
 against those official baselines; overages are not counted as savings.
+The Models table displays catalog input/output prices per 1M tokens for
+readability; routing and request accounting continue to use the provider's
+per-token prices internally.
 
 ## Configuration
 

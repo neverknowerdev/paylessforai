@@ -64,7 +64,7 @@ func (r *ProviderCredentialsRepository) MarkLimited(ctx context.Context, provide
 	}
 	now := time.Now().UTC().Format(time.RFC3339Nano)
 	limited := "limited"
-	reasonValue := nullableString(&reason)
+	reasonValue := nullableString(pointerIfNonEmpty(reason))
 	nextValue := nullableString(n)
 	lastChecked := nullableString(&now)
 	setter := &bobmodels.ProviderCredentialSetter{SubscriptionStatus: &limited, NextAvailableAt: &nextValue, StatusReason: &reasonValue, LastError: &reasonValue, LastCheckedAt: &lastChecked, UpdatedAt: &now}

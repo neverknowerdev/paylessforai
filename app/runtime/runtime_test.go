@@ -5,14 +5,15 @@ import (
 	"path/filepath"
 	"testing"
 
+	dbpkg "github.com/neverknowerdev/paylessforai/internal/db"
+	"github.com/neverknowerdev/paylessforai/internal/db/models"
 	"github.com/neverknowerdev/paylessforai/internal/ids"
 	"github.com/neverknowerdev/paylessforai/internal/providers"
 	"github.com/neverknowerdev/paylessforai/internal/secrets"
-	"github.com/neverknowerdev/paylessforai/internal/store"
 )
 
 func TestLoadProviderClientsPrefersOneStoredCredentialPerProvider(t *testing.T) {
-	db, err := store.Open(context.Background(), filepath.Join(t.TempDir(), "payless.db"))
+	db, err := dbpkg.Open(context.Background(), filepath.Join(t.TempDir(), "payless.db"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -25,7 +26,7 @@ func TestLoadProviderClientsPrefersOneStoredCredentialPerProvider(t *testing.T) 
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := db.UpsertProviderCredential(context.Background(), store.ProviderCredential{
+	if err := db.UpsertProviderCredential(context.Background(), models.ProviderCredential{
 		ID: ids.New(), Provider: "openrouter", Label: "stored", Ciphertext: ciphertext, Nonce: nonce, Enabled: true,
 	}); err != nil {
 		t.Fatal(err)
@@ -38,7 +39,7 @@ func TestLoadProviderClientsPrefersOneStoredCredentialPerProvider(t *testing.T) 
 }
 
 func TestLoadProviderClientsDoesNotUseEnvironmentKeys(t *testing.T) {
-	db, err := store.Open(context.Background(), filepath.Join(t.TempDir(), "payless.db"))
+	db, err := dbpkg.Open(context.Background(), filepath.Join(t.TempDir(), "payless.db"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -54,7 +55,7 @@ func TestLoadProviderClientsDoesNotUseEnvironmentKeys(t *testing.T) {
 }
 
 func TestLoadProviderClientsSupportsCustomProviderEndpoint(t *testing.T) {
-	db, err := store.Open(context.Background(), filepath.Join(t.TempDir(), "payless.db"))
+	db, err := dbpkg.Open(context.Background(), filepath.Join(t.TempDir(), "payless.db"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -67,7 +68,7 @@ func TestLoadProviderClientsSupportsCustomProviderEndpoint(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := db.UpsertProviderCredential(context.Background(), store.ProviderCredential{ID: ids.New(), Provider: "local-llm", Label: "local", BaseURL: "http://127.0.0.1:9999/v1", Ciphertext: ciphertext, Nonce: nonce, Enabled: true}); err != nil {
+	if err := db.UpsertProviderCredential(context.Background(), models.ProviderCredential{ID: ids.New(), Provider: "local-llm", Label: "local", BaseURL: "http://127.0.0.1:9999/v1", Ciphertext: ciphertext, Nonce: nonce, Enabled: true}); err != nil {
 		t.Fatal(err)
 	}
 	clients := loadProviderClients(providers.Builtin(nil), db, box)

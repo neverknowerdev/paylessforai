@@ -10,6 +10,20 @@ func (s *Server) registerStatsRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("/api/stats/summary", s.handleStatsSummary)
 	mux.HandleFunc("/api/stats/models", s.handleStatsModels)
 	mux.HandleFunc("/api/stats/providers", s.handleStatsProviders)
+	mux.HandleFunc("/api/stats/subscriptions", s.handleStatsSubscriptions)
+}
+
+func (s *Server) handleStatsSubscriptions(w http.ResponseWriter, r *http.Request) {
+	if s.db == nil || r.Method != http.MethodGet {
+		writeError(w, http.StatusMethodNotAllowed, "method_not_allowed", "subscription statistics only accepts GET")
+		return
+	}
+	items, err := s.db.SubscriptionPricing(r.Context())
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "subscription_stats_failed", "could not load subscription pricing")
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"data": items})
 }
 
 func (s *Server) handleStatsModels(w http.ResponseWriter, r *http.Request) {

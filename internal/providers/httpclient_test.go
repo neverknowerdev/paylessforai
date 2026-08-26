@@ -2,6 +2,7 @@ package providers
 
 import (
 	"context"
+	"errors"
 	"io"
 	"net/http"
 	"strings"
@@ -198,5 +199,17 @@ func TestDoRewritesModelAndClassifiesErrors(t *testing.T) {
 	upstreamErr, ok := err.(*UpstreamError)
 	if !ok || upstreamErr.Class != retry.ErrorRateLimit {
 		t.Fatalf("unexpected error: %#v", err)
+	}
+}
+
+func TestDoClassifiesQuotaAndResetHeader(t *testing.T) {
+	client := NewHTTPClient("openrouter", "https://provider.invalid/v1", "key")
+	client.Client = &http.Client{Transport: roundTripFunc(func(r *http.Request) (*http.Response, error) {
+		return &http.Response{StatusCode: http.StatusTooManyRequests, Body: io.NopCloser(strings.NewReader(`{"error":{"message":"monthly usage quota exceeded"}}`)), Header: http.Header{"X-Ratelimit-Reset": []string{"4102444800"}}, Request: r}, nil
+	})}
+	_, err := client.Do(context.Background(), matcher.ProtocolChatCompletions, "upstream", []byte(`{"model":"logical","messages":[]}`))
+	var upstream *UpstreamError
+	if !errors.As(err, &upstream) || upstream.Class != retry.ErrorQuotaExhausted || upstream.NextAvailableAt == nil {
+		t.Fatalf("unexpected quota error: %#v", err)
 	}
 }

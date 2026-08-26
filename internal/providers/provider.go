@@ -3,6 +3,7 @@ package providers
 import (
 	"context"
 	"net/http"
+	"time"
 
 	"github.com/neverknowerdev/paylessforai/internal/matcher"
 	"github.com/neverknowerdev/paylessforai/internal/retry"
@@ -52,11 +53,12 @@ type Client interface {
 }
 
 type UpstreamError struct {
-	Provider   string
-	StatusCode int
-	Class      retry.ErrorClass
-	Message    string
-	RetryAfter *int
+	Provider        string
+	StatusCode      int
+	Class           retry.ErrorClass
+	Message         string
+	RetryAfter      *int
+	NextAvailableAt *time.Time
 }
 
 func (e *UpstreamError) Error() string { return e.Provider + " upstream error: " + e.Message }

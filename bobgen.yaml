@@ -1,0 +1,18 @@
+plugins_preset: none
+type_system: database/sql
+no_tests: true
+no_back_referencing: true
+plugins:
+  dbinfo:
+    disabled: false
+    destination: internal/db/bob/dbinfo
+    pkgname: dbinfo
+  models:
+    disabled: false
+    destination: internal/db/bob/models
+    pkgname: models
+sql:
+  dialect: sqlite
+  driver: modernc.org/sqlite
+  pattern: internal/db/migrations/*.sql
+  shared_schema: main

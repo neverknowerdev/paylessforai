@@ -96,3 +96,12 @@ func TestRetryBackoffCaps(t *testing.T) {
 		}
 	}
 }
+
+func TestQuotaExhaustionBlocksCredentialAndFailsOverImmediately(t *testing.T) {
+	input := baseInput(ErrorQuotaExhausted)
+	input.FallbacksRemaining = 1
+	decision := New().Decide(input)
+	if decision.Action != FailOver || decision.HealthEffect != BlockCredential || decision.Delay != 0 {
+		t.Fatalf("unexpected quota decision: %#v", decision)
+	}
+}

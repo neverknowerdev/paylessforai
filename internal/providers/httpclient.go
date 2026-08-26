@@ -77,9 +77,13 @@ func (c *HTTPClient) addHeaders(request *http.Request) {
 func (c *HTTPClient) readUpstreamError(response *http.Response) error {
 	body, _ := io.ReadAll(io.LimitReader(response.Body, 32<<10))
 	class := retry.ErrorUnknown
+	lower := strings.ToLower(string(body))
+	quota := strings.Contains(lower, "quota") || strings.Contains(lower, "usage limit") || strings.Contains(lower, "billing cycle") || strings.Contains(lower, "5-hour") || strings.Contains(lower, "5 hour") || strings.Contains(lower, "monthly limit") || strings.Contains(lower, "weekly limit") || strings.Contains(lower, "resource_exhausted")
 	switch {
 	case response.StatusCode == http.StatusBadRequest:
 		class = retry.ErrorInvalidRequest
+	case quota:
+		class = retry.ErrorQuotaExhausted
 	case response.StatusCode == http.StatusUnauthorized || response.StatusCode == http.StatusForbidden:
 		class = retry.ErrorAuthentication
 	case response.StatusCode == http.StatusPaymentRequired:
@@ -97,7 +101,28 @@ func (c *HTTPClient) readUpstreamError(response *http.Response) error {
 	if message == "" {
 		message = response.Status
 	}
-	return &UpstreamError{Provider: c.Provider, StatusCode: response.StatusCode, Class: class, Message: message, RetryAfter: retryAfterSeconds(response)}
+	var next *time.Time
+	if reset := response.Header.Get("X-RateLimit-Reset"); reset != "" {
+		if unix, err := strconv.ParseInt(strings.TrimSpace(reset), 10, 64); err == nil && unix > 0 {
+			value := time.Unix(unix, 0).UTC()
+			next = &value
+		}
+	}
+	if next == nil {
+		if reset := response.Header.Get("RateLimit-Reset"); reset != "" {
+			if seconds, err := strconv.Atoi(strings.TrimSpace(reset)); err == nil && seconds >= 0 {
+				value := time.Now().UTC().Add(time.Duration(seconds) * time.Second)
+				next = &value
+			}
+		}
+	}
+	if next == nil && class == retry.ErrorQuotaExhausted {
+		if seconds := retryAfterSeconds(response); seconds != nil {
+			value := time.Now().UTC().Add(time.Duration(*seconds) * time.Second)
+			next = &value
+		}
+	}
+	return &UpstreamError{Provider: c.Provider, StatusCode: response.StatusCode, Class: class, Message: message, RetryAfter: retryAfterSeconds(response), NextAvailableAt: next}
 }
 
 func rewriteModel(body []byte, model string) ([]byte, error) {

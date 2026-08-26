@@ -11,6 +11,7 @@ const (
 	ErrorPayment           ErrorClass = "payment_required"
 	ErrorModelNotFound     ErrorClass = "model_not_found"
 	ErrorRateLimit         ErrorClass = "rate_limit"
+	ErrorQuotaExhausted    ErrorClass = "quota_exhausted"
 	ErrorTimeout           ErrorClass = "timeout"
 	ErrorTransport         ErrorClass = "transport"
 	ErrorServer            ErrorClass = "server"
@@ -45,13 +46,15 @@ const (
 	BackoffRoute      HealthEffect = "backoff_route"
 	BackoffCredential HealthEffect = "backoff_credential"
 	MarkRouteStale    HealthEffect = "mark_route_stale"
+	BlockCredential   HealthEffect = "block_credential"
 )
 
 type ClassifiedError struct {
-	Class       ErrorClass
-	HTTPStatus  int
-	RetryAfter  *time.Duration
-	Description string
+	Class           ErrorClass
+	HTTPStatus      int
+	RetryAfter      *time.Duration
+	Description     string
+	NextAvailableAt *time.Time
 }
 
 type Policy struct {
@@ -97,6 +100,12 @@ func (Engine) Decide(input Input) Decision {
 	}
 	if input.Error.Class == ErrorInvalidRequest {
 		return Decision{Action: TerminalError, HealthEffect: NoHealthChange, Reason: "request validation errors are terminal"}
+	}
+	if input.Error.Class == ErrorQuotaExhausted {
+		if input.FallbacksRemaining > 0 {
+			return Decision{Action: FailOver, HealthEffect: BlockCredential, Reason: "provider quota is exhausted until its reset"}
+		}
+		return Decision{Action: TerminalError, HealthEffect: BlockCredential, Reason: "provider quota is exhausted"}
 	}
 	policy := normalizePolicy(input.Policy)
 	if input.AttemptNumber < 1 || input.AttemptNumber >= policy.MaximumAttempts {

@@ -465,10 +465,10 @@ func MigrateDatabase(ctx context.Context, database *sql.DB, dialect SQLDialect) 
 		}
 		contents := migration.contents
 		if dialect == PostgresDialect {
-			// SQLite's BLOB affinity is represented by BYTEA in PostgreSQL.
-			// Keep the migration bytes/checksum unchanged while adapting the
-			// one dialect-specific type at execution time.
+			// Adapt SQLite's type affinities to PostgreSQL without changing the
+			// migration bytes/checksums stored in schema_migrations.
 			contents = strings.ReplaceAll(contents, " BLOB ", " BYTEA ")
+			contents = strings.ReplaceAll(contents, " INTEGER ", " BIGINT ")
 		}
 		if _, err = tx.ExecContext(ctx, contents); err != nil {
 			tx.Rollback()

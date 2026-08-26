@@ -1,13 +1,8 @@
-package store
+package repositories
 
 import "context"
 
 type ModelsRepository struct{ db DBTX }
-type ModelRecord struct {
-	ID, DisplayName                string
-	ContextLength, MaxOutputTokens int64
-	MetadataJSON, ObservedAt       string
-}
 
 func (r *ModelsRepository) Upsert(ctx context.Context, m ModelRecord) error {
 	_, err := r.db.ExecContext(ctx, `INSERT INTO models(id,display_name,context_length,max_output_tokens,metadata_json,observed_at) VALUES(?,?,?,?,?,?) ON CONFLICT(id) DO UPDATE SET display_name=excluded.display_name,context_length=excluded.context_length,max_output_tokens=excluded.max_output_tokens,metadata_json=excluded.metadata_json,observed_at=excluded.observed_at`, m.ID, m.DisplayName, m.ContextLength, m.MaxOutputTokens, m.MetadataJSON, m.ObservedAt)

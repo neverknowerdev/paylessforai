@@ -12,10 +12,10 @@ import (
 	"testing"
 
 	"github.com/neverknowerdev/paylessforai/internal/catalog"
+	"github.com/neverknowerdev/paylessforai/internal/db"
 	"github.com/neverknowerdev/paylessforai/internal/matcher"
 	"github.com/neverknowerdev/paylessforai/internal/providers"
 	"github.com/neverknowerdev/paylessforai/internal/retry"
-	"github.com/neverknowerdev/paylessforai/internal/store"
 )
 
 type fakeProvider struct {
@@ -65,9 +65,9 @@ func successResponse(body string) *http.Response {
 	return &http.Response{StatusCode: http.StatusOK, Header: http.Header{"Content-Type": []string{"application/json"}}, Body: io.NopCloser(strings.NewReader(body))}
 }
 
-func testProxy(t *testing.T, clients ...providers.Client) (*Proxy, *store.Store, string) {
+func testProxy(t *testing.T, clients ...providers.Client) (*Proxy, *db.Store, string) {
 	t.Helper()
-	db, err := store.Open(context.Background(), filepath.Join(t.TempDir(), "payless.db"))
+	db, err := db.Open(context.Background(), filepath.Join(t.TempDir(), "payless.db"))
 	if err != nil {
 		t.Fatal(err)
 	}

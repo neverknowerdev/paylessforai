@@ -12,9 +12,9 @@ import (
 	"strings"
 	"time"
 
+	"github.com/neverknowerdev/paylessforai/internal/db/models"
 	"github.com/neverknowerdev/paylessforai/internal/ids"
 	"github.com/neverknowerdev/paylessforai/internal/providers"
-	"github.com/neverknowerdev/paylessforai/internal/store"
 )
 
 func (s *Server) registerProviderRoutes(mux *http.ServeMux) {
@@ -155,7 +155,7 @@ func (s *Server) createProviderCredential(w http.ResponseWriter, r *http.Request
 		writeError(w, http.StatusInternalServerError, "credential_encrypt_failed", "could not encrypt provider credential")
 		return
 	}
-	item := store.ProviderCredential{ID: ids.New(), Provider: input.Provider, Label: input.Label, BaseURL: input.BaseURL, Ciphertext: ciphertext, Nonce: nonce, Enabled: true, ManualModelsJSON: string(manualJSON), AccessMode: input.AccessMode, SubscriptionFeePicoUSD: feePico}
+	item := models.ProviderCredential{ID: ids.New(), Provider: input.Provider, Label: input.Label, BaseURL: input.BaseURL, Ciphertext: ciphertext, Nonce: nonce, Enabled: true, ManualModelsJSON: string(manualJSON), AccessMode: input.AccessMode, SubscriptionFeePicoUSD: feePico}
 	if input.SubscriptionCycleStart != "" {
 		item.SubscriptionCycleStart = &input.SubscriptionCycleStart
 	}
@@ -176,7 +176,7 @@ func (s *Server) createProviderCredential(w http.ResponseWriter, r *http.Request
 	writeJSON(w, http.StatusCreated, map[string]any{"data": item, "models_discovered": len(discovered), "models_verified": len(verifiedManual), "models_found": len(discovered) + len(verifiedManual)})
 }
 
-func (s *Server) findDuplicateProviderCredential(ctx context.Context, apiKey string) (*store.ProviderCredential, error) {
+func (s *Server) findDuplicateProviderCredential(ctx context.Context, apiKey string) (*models.ProviderCredential, error) {
 	credentials, err := s.db.ListProviderCredentials(ctx)
 	if err != nil {
 		return nil, err

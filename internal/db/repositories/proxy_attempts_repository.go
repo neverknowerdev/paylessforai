@@ -1,11 +1,12 @@
-package store
+package repositories
 
 import (
 	"context"
 	"database/sql"
 	"fmt"
-	"github.com/neverknowerdev/paylessforai/internal/retry"
 	"time"
+
+	"github.com/neverknowerdev/paylessforai/internal/retry"
 )
 
 type ProxyAttemptsRepository struct{ db DBTX }
@@ -34,9 +35,6 @@ func (r *ProxyAttemptsRepository) Record(ctx context.Context, requestID string, 
 	disp := "included"
 	if errorClass == string(retry.ErrorRateLimit) || errorClass == string(retry.ErrorQuotaExhausted) {
 		disp = "excluded_limit"
-	}
-	if _, err := r.db.ExecContext(ctx, `UPDATE proxy_requests SET selected_provider=?,selected_upstream_model=?,attempt_count=CASE WHEN attempt_count<? THEN ? ELSE attempt_count END WHERE id=?`, provider, upstream, attempt, attempt, requestID); err != nil {
-		return err
 	}
 	_, err := r.db.ExecContext(ctx, `INSERT INTO proxy_attempts(id,request_id,attempt_number,route_id,provider,upstream_model,state,started_at,completed_at,duration_ms,error_class,error_message,error_raw,stats_disposition) VALUES(?,?,?,?,?,?,?, ?,NULLIF(?,''),?,NULLIF(?,''),NULLIF(?,''),NULLIF(?,''),?) ON CONFLICT(id) DO UPDATE SET provider=excluded.provider,upstream_model=excluded.upstream_model,state=excluded.state,completed_at=excluded.completed_at,duration_ms=COALESCE(excluded.duration_ms,proxy_attempts.duration_ms),error_class=excluded.error_class,error_message=excluded.error_message,error_raw=excluded.error_raw,stats_disposition=excluded.stats_disposition`, requestID+":"+fmt.Sprint(attempt), requestID, attempt, provider+":"+upstream, provider, upstream, state, now.Format(time.RFC3339Nano), now.Format(time.RFC3339Nano), duration, errorClass, errorMessage, raw, disp)
 	return err

@@ -22,10 +22,10 @@ import (
 	"github.com/neverknowerdev/paylessforai/app/controlplane"
 	"github.com/neverknowerdev/paylessforai/internal/catalog"
 	"github.com/neverknowerdev/paylessforai/internal/config"
+	"github.com/neverknowerdev/paylessforai/internal/db"
 	"github.com/neverknowerdev/paylessforai/internal/providers"
 	"github.com/neverknowerdev/paylessforai/internal/proxy"
 	"github.com/neverknowerdev/paylessforai/internal/secrets"
-	"github.com/neverknowerdev/paylessforai/internal/store"
 )
 
 // Run starts the local app and blocks until it exits or receives a termination
@@ -36,7 +36,7 @@ func Run(parent context.Context, args []string) error {
 		return err
 	}
 
-	db, err := store.Open(parent, filepath.Join(c.DataDir, "paylessforai.db"))
+	db, err := db.Open(parent, filepath.Join(c.DataDir, "paylessforai.db"))
 	if err != nil {
 		return err
 	}
@@ -128,7 +128,7 @@ func refreshCatalogPeriodically(ctx context.Context, manager *catalog.Manager, i
 	}
 }
 
-func loadProviderClients(registry *providers.Registry, dataStore *store.Store, box *secrets.Box) []providers.Client {
+func loadProviderClients(registry *providers.Registry, dataStore *db.Store, box *secrets.Box) []providers.Client {
 	clients := make([]providers.Client, 0)
 	configured := make(map[string]bool)
 	stored, err := dataStore.ListProviderCredentials(context.Background())

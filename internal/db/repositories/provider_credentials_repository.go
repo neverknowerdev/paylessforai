@@ -1,9 +1,7 @@
-package store
+package repositories
 
 import (
 	"context"
-	"database/sql"
-	"github.com/neverknowerdev/paylessforai/internal/subscription"
 	"time"
 )
 
@@ -57,34 +55,4 @@ func (r *ProviderCredentialsRepository) MarkLimited(ctx context.Context, provide
 func (r *ProviderCredentialsRepository) ClearExpired(ctx context.Context, now time.Time) error {
 	_, err := r.db.ExecContext(ctx, `UPDATE provider_credentials SET subscription_status='available',next_available_at=NULL,status_reason=NULL WHERE subscription_status='limited' AND next_available_at IS NOT NULL AND next_available_at<=?`, now.UTC().Format(time.RFC3339Nano))
 	return err
-}
-func (r *ProviderCredentialsRepository) Usage(ctx context.Context) ([]subscription.UsageRow, error) {
-	rows, err := r.db.QueryContext(ctx, `SELECT c.provider,c.label,c.subscription_fee_pico_usd,c.subscription_cycle_start,c.subscription_cycle_end,r.received_at,COALESCE(u.input_tokens,0),COALESCE(u.output_tokens,0) FROM provider_credentials c JOIN proxy_requests r ON r.selected_provider=c.provider LEFT JOIN request_usage u ON u.request_id=r.id WHERE c.access_mode='subscription' AND c.subscription_fee_pico_usd IS NOT NULL AND r.state='succeeded' ORDER BY r.received_at`)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-	out := []subscription.UsageRow{}
-	for rows.Next() {
-		var p, l, at string
-		var fee int64
-		var start, end sql.NullString
-		var in, outTokens int64
-		if err := rows.Scan(&p, &l, &fee, &start, &end, &at, &in, &outTokens); err != nil {
-			return nil, err
-		}
-		when, e := time.Parse(time.RFC3339Nano, at)
-		if e != nil {
-			continue
-		}
-		u := subscription.UsageRow{Provider: p, Label: l, FeePicoUSD: fee, At: when, InputTokens: in, OutputTokens: outTokens}
-		if start.Valid {
-			u.CycleStart, _ = time.Parse(time.RFC3339Nano, start.String)
-		}
-		if end.Valid {
-			u.CycleEnd, _ = time.Parse(time.RFC3339Nano, end.String)
-		}
-		out = append(out, u)
-	}
-	return out, rows.Err()
 }

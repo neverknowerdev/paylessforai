@@ -11,10 +11,11 @@ import (
 	"testing"
 	"time"
 
+	dbpkg "github.com/neverknowerdev/paylessforai/internal/db"
+	"github.com/neverknowerdev/paylessforai/internal/db/models"
 	"github.com/neverknowerdev/paylessforai/internal/matcher"
 	"github.com/neverknowerdev/paylessforai/internal/providers"
 	"github.com/neverknowerdev/paylessforai/internal/secrets"
-	"github.com/neverknowerdev/paylessforai/internal/store"
 )
 
 type credentialTestClient struct{ provider string }
@@ -30,7 +31,7 @@ func (c credentialTestClient) Do(context.Context, matcher.Protocol, string, []by
 
 func testServer(t *testing.T) (*Server, func()) {
 	t.Helper()
-	db, err := store.Open(context.Background(), filepath.Join(t.TempDir(), "payless.db"))
+	db, err := dbpkg.Open(context.Background(), filepath.Join(t.TempDir(), "payless.db"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -88,7 +89,7 @@ func TestServerModelsShape(t *testing.T) {
 }
 
 func TestRequestStatsAPI(t *testing.T) {
-	db, err := store.Open(context.Background(), filepath.Join(t.TempDir(), "payless.db"))
+	db, err := dbpkg.Open(context.Background(), filepath.Join(t.TempDir(), "payless.db"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -99,7 +100,7 @@ func TestRequestStatsAPI(t *testing.T) {
 	if err := db.RecordProxyAttempt(context.Background(), "request-1", 1, "surplus", "model-a", "succeeded", "", ""); err != nil {
 		t.Fatal(err)
 	}
-	if err := db.RecordUsage(context.Background(), store.RequestUsage{RequestID: "request-1", TotalTokens: 5, EstimatedCostPico: 7}); err != nil {
+	if err := db.RecordUsage(context.Background(), models.RequestUsage{RequestID: "request-1", TotalTokens: 5, EstimatedCostPico: 7}); err != nil {
 		t.Fatal(err)
 	}
 	server, err := New("127.0.0.1:0", time.Second, time.Second, db)
@@ -154,7 +155,7 @@ func TestClientKeyManagementAPI(t *testing.T) {
 }
 
 func TestProviderCredentialManagementAPI(t *testing.T) {
-	db, err := store.Open(context.Background(), filepath.Join(t.TempDir(), "payless.db"))
+	db, err := dbpkg.Open(context.Background(), filepath.Join(t.TempDir(), "payless.db"))
 	if err != nil {
 		t.Fatal(err)
 	}

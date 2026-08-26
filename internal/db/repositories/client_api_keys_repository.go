@@ -1,4 +1,4 @@
-package store
+package repositories
 
 import (
 	"context"
@@ -6,9 +6,10 @@ import (
 	"crypto/sha256"
 	"database/sql"
 	"encoding/hex"
-	"github.com/neverknowerdev/paylessforai/internal/ids"
 	"strings"
 	"time"
+
+	"github.com/neverknowerdev/paylessforai/internal/ids"
 )
 
 type ClientAPIKeysRepository struct{ db DBTX }

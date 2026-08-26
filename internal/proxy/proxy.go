@@ -12,11 +12,12 @@ import (
 	"time"
 
 	"github.com/neverknowerdev/paylessforai/internal/catalog"
+	"github.com/neverknowerdev/paylessforai/internal/db"
+	"github.com/neverknowerdev/paylessforai/internal/db/models"
 	"github.com/neverknowerdev/paylessforai/internal/ids"
 	"github.com/neverknowerdev/paylessforai/internal/matcher"
 	"github.com/neverknowerdev/paylessforai/internal/providers"
 	"github.com/neverknowerdev/paylessforai/internal/retry"
-	"github.com/neverknowerdev/paylessforai/internal/store"
 	"github.com/neverknowerdev/paylessforai/internal/usage"
 )
 
@@ -24,13 +25,13 @@ const defaultMaximumBody = 32 << 20
 
 type Proxy struct {
 	Catalog          *catalog.Manager
-	Store            *store.Store
+	Store            *db.Store
 	Retry            retry.Engine
 	MaximumBody      int64
 	RequireClientKey bool
 }
 
-func New(catalogManager *catalog.Manager, dataStore *store.Store) *Proxy {
+func New(catalogManager *catalog.Manager, dataStore *db.Store) *Proxy {
 	return &Proxy{Catalog: catalogManager, Store: dataStore, Retry: retry.New(), MaximumBody: defaultMaximumBody, RequireClientKey: true}
 }
 
@@ -399,7 +400,7 @@ func observeSSE(line []byte, stats *usage.Stats) {
 	stats.Raw = observed.Raw
 }
 
-func persistUsage(ctx context.Context, dataStore *store.Store, requestID string, stats usage.Stats, expectedCost, officialExpectedCost int64, price, officialPrice matcher.Price) {
+func persistUsage(ctx context.Context, dataStore *db.Store, requestID string, stats usage.Stats, expectedCost, officialExpectedCost int64, price, officialPrice matcher.Price) {
 	if dataStore == nil {
 		return
 	}
@@ -434,7 +435,7 @@ func persistUsage(ctx context.Context, dataStore *store.Store, requestID string,
 		discountPico, discountBPS = &difference, &bps
 	}
 	raw, _ := json.Marshal(stats.Raw)
-	_ = dataStore.RecordUsage(ctx, store.RequestUsage{RequestID: requestID, InputTokens: stats.InputTokens, OutputTokens: stats.OutputTokens, TotalTokens: stats.TotalTokens, CachedReadTokens: stats.CachedReadTokens, CacheWriteTokens: stats.CacheWriteTokens, ReasoningTokens: stats.ReasoningTokens, EstimatedCostPico: expectedCost, OfficialCostPico: officialCost, ActualCostPico: actualCost, DiscountPico: discountPico, DiscountBPS: discountBPS, RawUsageJSON: string(raw)})
+	_ = dataStore.RecordUsage(ctx, models.RequestUsage{RequestID: requestID, InputTokens: stats.InputTokens, OutputTokens: stats.OutputTokens, TotalTokens: stats.TotalTokens, CachedReadTokens: stats.CachedReadTokens, CacheWriteTokens: stats.CacheWriteTokens, ReasoningTokens: stats.ReasoningTokens, EstimatedCostPico: expectedCost, OfficialCostPico: officialCost, ActualCostPico: actualCost, DiscountPico: discountPico, DiscountBPS: discountBPS, RawUsageJSON: string(raw)})
 }
 
 func officialPricing(ranked []matcher.RankedRoute) (matcher.Price, int64) {

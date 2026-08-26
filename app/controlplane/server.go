@@ -7,16 +7,16 @@ import (
 
 	"github.com/neverknowerdev/paylessforai/app/gateway"
 	"github.com/neverknowerdev/paylessforai/internal/catalog"
+	"github.com/neverknowerdev/paylessforai/internal/db"
 	"github.com/neverknowerdev/paylessforai/internal/providers"
 	proxyservice "github.com/neverknowerdev/paylessforai/internal/proxy"
 	"github.com/neverknowerdev/paylessforai/internal/secrets"
-	"github.com/neverknowerdev/paylessforai/internal/store"
 	"github.com/neverknowerdev/paylessforai/internal/web"
 )
 
 type Server struct {
 	httpServer  *http.Server
-	db          *store.Store
+	db          *db.Store
 	catalog     *catalog.Manager
 	proxy       *proxyservice.Proxy
 	credentials CredentialDeps
@@ -28,11 +28,11 @@ type CredentialDeps struct {
 	Reload   func() error
 }
 
-func New(addr string, readHeaderTimeout, idleTimeout time.Duration, db *store.Store) (*Server, error) {
+func New(addr string, readHeaderTimeout, idleTimeout time.Duration, db *db.Store) (*Server, error) {
 	return NewWithDeps(addr, readHeaderTimeout, idleTimeout, db, nil, nil)
 }
 
-func NewWithDeps(addr string, readHeaderTimeout, idleTimeout time.Duration, db *store.Store, catalogManager *catalog.Manager, proxyHandler *proxyservice.Proxy, credentialConfig ...CredentialDeps) (*Server, error) {
+func NewWithDeps(addr string, readHeaderTimeout, idleTimeout time.Duration, db *db.Store, catalogManager *catalog.Manager, proxyHandler *proxyservice.Proxy, credentialConfig ...CredentialDeps) (*Server, error) {
 	credentials := CredentialDeps{}
 	if len(credentialConfig) > 0 {
 		credentials = credentialConfig[0]

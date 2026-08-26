@@ -1,13 +1,15 @@
-package store
+package repositories
 
 import (
 	"context"
 	"database/sql"
+	"strings"
+
+	"github.com/neverknowerdev/paylessforai/internal/db/models"
 )
 
 // Repositories groups one repository per persisted table. Repositories own
-// SQL for their table; Store remains the compatibility facade used by the
-// HTTP/runtime packages.
+// SQL for their table; Store exposes the application-facing database facade.
 type Repositories struct {
 	Settings            *SettingsRepository
 	ProviderCredentials *ProviderCredentialsRepository
@@ -21,7 +23,7 @@ type Repositories struct {
 	RequestUsage        *RequestUsageRepository
 }
 
-func newRepositories(db DBTX) *Repositories {
+func New(db DBTX) *Repositories {
 	return &Repositories{
 		Settings:            &SettingsRepository{db: db},
 		ProviderCredentials: &ProviderCredentialsRepository{db: db},
@@ -36,8 +38,32 @@ func newRepositories(db DBTX) *Repositories {
 	}
 }
 
+// Model aliases keep repository signatures readable while model ownership
+// remains in the db/models package.
+type ClientKey = models.ClientKey
+type ProviderCredential = models.ProviderCredential
+type RequestUsage = models.RequestUsage
+type CatalogRefresh = models.CatalogRefresh
+type ModelRecord = models.ModelRecord
+type ModelRouteRecord = models.ModelRouteRecord
+type ProviderHealthRecord = models.ProviderHealthRecord
+
 type DBTX interface {
 	ExecContext(context.Context, string, ...any) (sql.Result, error)
 	QueryContext(context.Context, string, ...any) (*sql.Rows, error)
 	QueryRowContext(context.Context, string, ...any) *sql.Row
+}
+
+func boolInt(value bool) int {
+	if value {
+		return 1
+	}
+	return 0
+}
+
+func NULLString(value string) any {
+	if strings.TrimSpace(value) == "" {
+		return nil
+	}
+	return value
 }

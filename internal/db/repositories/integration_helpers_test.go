@@ -3,17 +3,17 @@ package repositories_test
 import (
 	"context"
 	"database/sql"
-	"os"
+	"path/filepath"
 	"testing"
 	"time"
 
-	_ "github.com/lib/pq"
 	"github.com/neverknowerdev/paylessforai/internal/db"
 	bobmodels "github.com/neverknowerdev/paylessforai/internal/db/bob/models"
 	"github.com/neverknowerdev/paylessforai/internal/db/repositories"
 	"github.com/stephenafamo/bob"
 	"github.com/stephenafamo/bob/dialect/sqlite"
 	"github.com/stephenafamo/bob/dialect/sqlite/dm"
+	_ "modernc.org/sqlite"
 )
 
 type integrationDB struct {
@@ -24,24 +24,23 @@ type integrationDB struct {
 
 func newIntegrationDB(t *testing.T) *integrationDB {
 	t.Helper()
-	dsn := os.Getenv("POSTGRES_TEST_DSN")
-	if dsn == "" {
-		t.Skip("POSTGRES_TEST_DSN is not set")
-	}
 	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
 	t.Cleanup(cancel)
-	database, err := sql.Open("postgres", dsn)
+	database, err := sql.Open("sqlite", filepath.Join(t.TempDir(), "integration.db"))
 	if err != nil {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { database.Close() })
+	if _, err := database.ExecContext(ctx, "PRAGMA foreign_keys = ON"); err != nil {
+		t.Fatal(err)
+	}
 	if err := database.PingContext(ctx); err != nil {
 		t.Fatal(err)
 	}
-	if err := db.MigrateDatabase(ctx, database, db.PostgresDialect); err != nil {
+	if err := db.MigrateDatabase(ctx, database, db.SQLiteDialect); err != nil {
 		t.Fatalf("apply project migrations: %v", err)
 	}
-	return &integrationDB{ctx: ctx, db: database, repos: repositories.New(db.NewPostgresORM(database))}
+	return &integrationDB{ctx: ctx, db: database, repos: repositories.New(db.NewORM(database))}
 }
 
 func (i *integrationDB) reset(t *testing.T) {

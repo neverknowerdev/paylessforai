@@ -11,25 +11,10 @@ permissions:
   contents: read
 
 jobs:
-  postgres:
-    name: PostgreSQL repository integration tests
+  sqlite:
+    name: SQLite repository integration tests
     runs-on: ubuntu-latest
     timeout-minutes: 15
-
-    services:
-      postgres:
-        image: postgres:16
-        env:
-          POSTGRES_USER: paylessforai
-          POSTGRES_PASSWORD: paylessforai
-          POSTGRES_DB: paylessforai
-        ports:
-          - 5432:5432
-        options: >-
-          --health-cmd "pg_isready -U paylessforai -d paylessforai"
-          --health-interval 10s
-          --health-timeout 5s
-          --health-retries 5
 
     steps:
       - name: Check out source
@@ -47,7 +32,5 @@ jobs:
           PATH="$RUNNER_TEMP/bin:$PATH" GOCACHE="$RUNNER_TEMP/go-cache" go generate ./internal/db
           git diff --exit-code -- internal/db/bob
 
-      - name: Run PostgreSQL repository integration tests
-        env:
-          POSTGRES_TEST_DSN: postgres://paylessforai:paylessforai@localhost:5432/paylessforai?sslmode=disable
+      - name: Run SQLite repository integration tests
         run: GOCACHE="$RUNNER_TEMP/go-cache" go test ./internal/db/repositories -run Integration -count=1

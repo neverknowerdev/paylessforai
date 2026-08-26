@@ -17,6 +17,7 @@ import (
 	"database/sql"
 
 	"github.com/neverknowerdev/paylessforai/internal/db/models"
+	"github.com/neverknowerdev/paylessforai/internal/db/queries"
 	"github.com/neverknowerdev/paylessforai/internal/db/repositories"
 	"github.com/neverknowerdev/paylessforai/internal/subscription"
 	_ "modernc.org/sqlite"
@@ -117,7 +118,7 @@ func (s *Store) ClearExpiredProviderLimits(ctx context.Context, now time.Time) e
 }
 
 func (s *Store) SubscriptionUsage(ctx context.Context) ([]subscription.UsageRow, error) {
-	return s.subscriptionUsage(ctx)
+	return queries.SubscriptionUsage(ctx, s.db)
 }
 
 func (s *Store) SubscriptionPricing(ctx context.Context) ([]subscription.Pricing, error) {

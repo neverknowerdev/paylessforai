@@ -6,6 +6,7 @@ import (
 	"strings"
 
 	"github.com/neverknowerdev/paylessforai/internal/db/models"
+	"github.com/stephenafamo/bob"
 )
 
 // Repositories groups one repository per persisted table. Repositories own
@@ -24,12 +25,16 @@ type Repositories struct {
 }
 
 func New(db DBTX) *Repositories {
+	var bobExec bob.Executor
+	if provider, ok := db.(interface{ BobExecutor() bob.Executor }); ok {
+		bobExec = provider.BobExecutor()
+	}
 	return &Repositories{
 		Settings:            &SettingsRepository{db: db},
 		ProviderCredentials: &ProviderCredentialsRepository{db: db},
 		ClientAPIKeys:       &ClientAPIKeysRepository{db: db},
 		CatalogRefreshes:    &CatalogRefreshesRepository{db: db},
-		Models:              &ModelsRepository{db: db},
+		Models:              &ModelsRepository{db: db, bob: bobExec},
 		ModelRoutes:         &ModelRoutesRepository{db: db},
 		ProviderHealth:      &ProviderHealthRepository{db: db},
 		ProxyRequests:       &ProxyRequestsRepository{db: db},

@@ -41,6 +41,12 @@ jobs:
           go-version-file: go.mod
           cache: true
 
+      - name: Verify Bob generated models
+        run: |
+          GOBIN="$RUNNER_TEMP/bin" go install github.com/stephenafamo/bob/gen/bobgen-sql@v0.50.0
+          PATH="$RUNNER_TEMP/bin:$PATH" GOCACHE="$RUNNER_TEMP/go-cache" go generate ./internal/db
+          git diff --exit-code -- internal/db/bob
+
       - name: Run PostgreSQL repository integration tests
         env:
           POSTGRES_TEST_DSN: postgres://paylessforai:paylessforai@localhost:5432/paylessforai?sslmode=disable

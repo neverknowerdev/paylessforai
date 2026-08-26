@@ -1,4 +1,4 @@
-package db
+package queries
 
 import (
 	"context"
@@ -8,10 +8,10 @@ import (
 	"github.com/neverknowerdev/paylessforai/internal/subscription"
 )
 
-// subscriptionUsage is a cross-table reporting query. Table repositories do
+// SubscriptionUsage is a cross-table reporting query. Table repositories do
 // not own joins across provider credentials, requests, and usage records.
-func (s *Store) subscriptionUsage(ctx context.Context) ([]subscription.UsageRow, error) {
-	rows, err := s.db.QueryContext(ctx, `SELECT c.provider,c.label,c.subscription_fee_pico_usd,c.subscription_cycle_start,c.subscription_cycle_end,r.received_at,COALESCE(u.input_tokens,0),COALESCE(u.output_tokens,0) FROM provider_credentials c JOIN proxy_requests r ON r.selected_provider=c.provider LEFT JOIN request_usage u ON u.request_id=r.id WHERE c.access_mode='subscription' AND c.subscription_fee_pico_usd IS NOT NULL AND r.state='succeeded' ORDER BY r.received_at`)
+func SubscriptionUsage(ctx context.Context, db *sql.DB) ([]subscription.UsageRow, error) {
+	rows, err := db.QueryContext(ctx, `SELECT c.provider,c.label,c.subscription_fee_pico_usd,c.subscription_cycle_start,c.subscription_cycle_end,r.received_at,COALESCE(u.input_tokens,0),COALESCE(u.output_tokens,0) FROM provider_credentials c JOIN proxy_requests r ON r.selected_provider=c.provider LEFT JOIN request_usage u ON u.request_id=r.id WHERE c.access_mode='subscription' AND c.subscription_fee_pico_usd IS NOT NULL AND r.state='succeeded' ORDER BY r.received_at`)
 	if err != nil {
 		return nil, err
 	}

@@ -5,6 +5,8 @@ import (
 	"database/sql"
 	"strconv"
 	"strings"
+
+	"github.com/stephenafamo/bob"
 )
 
 type SQLDialect uint8
@@ -40,6 +42,20 @@ func (o *ORM) QueryContext(ctx context.Context, query string, args ...any) (*sql
 
 func (o *ORM) QueryRowContext(ctx context.Context, query string, args ...any) *sql.Row {
 	return o.DB.QueryRowContext(ctx, rebind(query, o.dialect), args...)
+}
+
+// BobExecutor exposes the same connection through Bob's optimized executor
+// interface. Generated Bob models use this interface for SQL construction and
+// reflection-free scanning while legacy reporting queries continue to use the
+// database/sql facade above.
+func (o *ORM) BobExecutor() bob.Executor {
+	if o.dialect == PostgresDialect {
+		// Generated models are currently emitted for the SQLite production
+		// schema. PostgreSQL keeps using the repository's portable SQL path
+		// until a matching psql model set is generated.
+		return nil
+	}
+	return bob.NewDB(o.DB)
 }
 
 func rebind(query string, dialect SQLDialect) string {

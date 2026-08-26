@@ -31,6 +31,7 @@ type Scenario struct {
 	Status           int     `json:"status"`
 	FailureCount     int     `json:"failure_count"`
 	FailureStatus    int     `json:"failure_status"`
+	FailureMessage   string  `json:"failure_message"`
 	Stream           bool    `json:"stream"`
 	StreamDisconnect bool    `json:"stream_disconnect"`
 	InputTokens      int64   `json:"input_tokens"`
@@ -65,6 +66,9 @@ func normalizeScenario(scenario Scenario) Scenario {
 	}
 	if scenario.FailureStatus == 0 {
 		scenario.FailureStatus = http.StatusServiceUnavailable
+	}
+	if scenario.FailureMessage == "" {
+		scenario.FailureMessage = "mock transient failure"
 	}
 	return scenario
 }
@@ -102,12 +106,12 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 	if failed {
 		w.WriteHeader(scenario.FailureStatus)
-		_, _ = io.WriteString(w, `{"error":{"message":"mock transient failure","type":"mock_error"}}`)
+		_, _ = io.WriteString(w, `{"error":{"message":"`+scenario.FailureMessage+`","type":"mock_error"}}`)
 		return
 	}
 	if scenario.Status < 200 || scenario.Status >= 300 {
 		w.WriteHeader(scenario.Status)
-		_, _ = io.WriteString(w, `{"error":{"message":"mock configured failure","type":"mock_error"}}`)
+		_, _ = io.WriteString(w, `{"error":{"message":"`+scenario.FailureMessage+`","type":"mock_error"}}`)
 		return
 	}
 	if scenario.Stream || requestStream(body) {

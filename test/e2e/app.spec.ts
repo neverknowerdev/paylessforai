@@ -126,3 +126,49 @@ test('keeps provider verification errors visible and verifies manual models befo
   await page.goto('/#models');
   await expect(page.locator('#models-table-body')).toContainText('manual-model');
 });
+
+test('configures a subscription, records quota blocking, and shows dynamic pricing', async ({ page, request }) => {
+  await request.post('http://127.0.0.1:19474/__mock/scenario', { data: { models: [{ id: 'subscription-model', name: 'Subscription Model', prompt_price: '0.000001', completion_price: '0.000002', context_length: 128000, max_completion_tokens: 4096 }], response_text: 'subscription response', input_tokens: 1000, output_tokens: 500 } });
+  await page.goto('/#access');
+  await page.getByRole('button', { name: 'Add provider' }).click();
+  await expect(page.locator('#provider-access-mode')).toHaveValue('api');
+  await page.locator('#provider-access-mode').selectOption('subscription');
+  await expect(page.locator('#subscription-fields')).toBeVisible();
+  await page.locator('#subscription-fee').fill('20');
+  await page.screenshot({ path: 'artifacts/subscription-provider-modal.png', fullPage: true });
+  await page.locator('#provider-type').selectOption('custom');
+  await page.locator('#provider-name').fill('subscription-mock');
+  await page.locator('#provider-base-url').fill('http://127.0.0.1:19474/custom/v1');
+  await page.locator('#provider-label').fill('Pro plan');
+  await page.locator('#provider-key').fill('subscription-key');
+  await page.getByRole('button', { name: 'Verify & save' }).click();
+  await expect(page.locator('#provider-feedback')).toContainText('Found 1 model');
+  await expect(page.locator('#provider-list')).toContainText('subscription-mock');
+  const configured = await (await request.get('/api/providers/credentials')).json();
+  expect(configured.data.find((item: { provider: string }) => item.provider === 'subscription-mock')).toMatchObject({ access_mode: 'subscription', subscription_fee_pico_usd: 20000000000000 });
+
+  await page.getByRole('button', { name: 'Create API key' }).click();
+  await page.locator('#key-label').fill('subscription-e2e');
+  await page.locator('#key-modal').getByRole('button', { name: 'Create key' }).click();
+  await expect(page.locator('#new-key')).toContainText('plai_');
+  const secret = (await page.locator('#new-key').textContent())?.match(/plai_[0-9a-f]+/)?.[0];
+  expect(secret).toBeTruthy();
+  await page.locator('#key-modal').getByRole('button', { name: 'Close' }).click();
+  const success = await request.post('/v1/chat/completions', { headers: { Authorization: `Bearer ${secret}` }, data: { model: 'subscription-model', messages: [{ role: 'user', content: 'hello' }] } });
+  expect(success.ok()).toBeTruthy();
+
+  await request.post('http://127.0.0.1:19474/__mock/scenario', { data: { models: [{ id: 'subscription-model', name: 'Subscription Model', prompt_price: '0.000001', completion_price: '0.000002' }], status: 429, failure_message: 'monthly usage quota exceeded' } });
+  const limited = await request.post('/v1/chat/completions', { headers: { Authorization: `Bearer ${secret}` }, data: { model: 'subscription-model', messages: [{ role: 'user', content: 'again' }] } });
+  expect(limited.status()).toBe(429);
+  expect((await limited.json()).error.code).toBe('provider_quota_exhausted');
+  const credentials = await (await request.get('/api/providers/credentials')).json();
+  expect(credentials.data.find((item: { provider: string }) => item.provider === 'subscription-mock')).toMatchObject({ access_mode: 'subscription', subscription_status: 'limited' });
+  const summary = await (await request.get('/api/stats/summary')).json();
+  expect(summary.excluded_limit_requests).toBeGreaterThanOrEqual(1);
+
+  await page.getByRole('link', { name: 'Statistics' }).click();
+  await page.locator('#refresh-button').click();
+  await expect(page.locator('[data-view-panel="stats"]')).toContainText('Subscription economics');
+  await expect(page.locator('[data-view-panel="stats"]')).toContainText('Pro plan');
+  await page.screenshot({ path: 'artifacts/subscription-statistics.png', fullPage: true });
+});

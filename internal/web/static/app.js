@@ -346,4 +346,5 @@
   updateProviderFormMode(); setText('#base-url', `${window.location.origin}/v1`); Promise.all([loadStatus(), loadSummary(), loadRequests(), loadModelStats(), loadProviderStats(), loadModels(), loadKeys(), loadProviders()]);
   const statsPanel = document.querySelector('[data-view-panel="stats"]'); if (statsPanel && !$('#subscription-stats-body')) { const article = document.createElement('article'); article.className = 'panel-card table-card stats-table-card'; article.innerHTML = '<div class="panel-heading stats-heading"><h3>Subscription economics</h3><span class="card-note">Dynamic blended pricing; observed 5h min/max</span></div><div class="table-wrap"><table><thead><tr><th>Provider</th><th>Tokens</th><th>Input / output per 1M</th><th>5h min / max</th></tr></thead><tbody id="subscription-stats-body"></tbody></table></div><div class="empty-state" id="subscription-stats-empty" hidden>No subscription usage yet.</div>'; statsPanel.append(article); }
   loadSubscriptionStats();
+  $('#refresh-button').addEventListener('click', loadSubscriptionStats);
 })();

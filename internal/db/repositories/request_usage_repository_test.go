@@ -3,9 +3,7 @@ package repositories_test
 import (
 	"testing"
 
-	bobmodels "github.com/neverknowerdev/paylessforai/internal/db/bob/models"
 	"github.com/neverknowerdev/paylessforai/internal/db/models"
-	"github.com/stephenafamo/bob"
 )
 
 func TestRequestUsageRepositoryIntegration(t *testing.T) {
@@ -18,11 +16,11 @@ func TestRequestUsageRepositoryIntegration(t *testing.T) {
 	if err := i.repos.RequestUsage.Upsert(i.ctx, usage); err != nil {
 		t.Fatal(err)
 	}
-	row, err := bobmodels.FindRequestUsage(i.ctx, bob.NewDB(i.db), usage.RequestID)
-	if err != nil {
+	var total int64
+	if err := i.db.QueryRowContext(i.ctx, `SELECT total_tokens FROM request_usage WHERE request_id = $1`, usage.RequestID).Scan(&total); err != nil {
 		t.Fatal(err)
 	}
-	if row.TotalTokens != 15 {
-		t.Fatalf("usage row: %+v", row)
+	if total != 15 {
+		t.Fatalf("usage total: %d", total)
 	}
 }

@@ -28,7 +28,7 @@ func TestModelsRepositoryUsesBobGeneratedTable(t *testing.T) {
 	}
 
 	exec := bob.NewDB(database)
-	repo := &ModelsRepository{db: databaseTX{database}, bob: exec}
+	repo := &ModelsRepository{bobRepository: bobRepository{exec: exec}}
 	ctx := context.Background()
 	model := ModelRecord{ID: "model-1", DisplayName: "Bob model", ContextLength: 8192, ObservedAt: "2026-08-26T00:00:00Z"}
 	if err := repo.Upsert(ctx, model); err != nil {
@@ -45,7 +45,3 @@ func TestModelsRepositoryUsesBobGeneratedTable(t *testing.T) {
 		t.Fatal(err)
 	}
 }
-
-// databaseTX adapts *sql.DB to the repository's legacy fallback interface.
-// The Bob path above is the code under test.
-type databaseTX struct{ *sql.DB }

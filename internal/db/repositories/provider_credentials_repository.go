@@ -2,12 +2,20 @@ package repositories
 
 import (
 	"context"
+	"database/sql"
 	"time"
+
+	bobmodels "github.com/neverknowerdev/paylessforai/internal/db/bob/models"
+	"github.com/neverknowerdev/paylessforai/internal/db/models"
+	"github.com/stephenafamo/bob/dialect/sqlite"
+	"github.com/stephenafamo/bob/dialect/sqlite/im"
+	"github.com/stephenafamo/bob/dialect/sqlite/sm"
+	"github.com/stephenafamo/bob/dialect/sqlite/um"
 )
 
-type ProviderCredentialsRepository struct{ db DBTX }
+type ProviderCredentialsRepository struct{ bobRepository }
 
-func (r *ProviderCredentialsRepository) Upsert(ctx context.Context, c ProviderCredential) error {
+func (r *ProviderCredentialsRepository) Upsert(ctx context.Context, c models.ProviderCredential) error {
 	now := time.Now().UTC().Format(time.RFC3339Nano)
 	if c.CreatedAt == "" {
 		c.CreatedAt = now
@@ -18,41 +26,60 @@ func (r *ProviderCredentialsRepository) Upsert(ctx context.Context, c ProviderCr
 	if c.SubscriptionStatus == "" {
 		c.SubscriptionStatus = "available"
 	}
-	_, err := r.db.ExecContext(ctx, `INSERT INTO provider_credentials(id,provider,label,base_url,ciphertext,nonce,enabled,created_at,updated_at,manual_models_json,access_mode,subscription_fee_pico_usd,subscription_cycle_start,subscription_cycle_end,subscription_status,next_available_at,status_reason) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?) ON CONFLICT(id) DO UPDATE SET provider=excluded.provider,label=excluded.label,base_url=excluded.base_url,ciphertext=excluded.ciphertext,nonce=excluded.nonce,enabled=excluded.enabled,updated_at=excluded.updated_at,manual_models_json=excluded.manual_models_json,access_mode=excluded.access_mode,subscription_fee_pico_usd=excluded.subscription_fee_pico_usd,subscription_cycle_start=excluded.subscription_cycle_start,subscription_cycle_end=excluded.subscription_cycle_end,subscription_status=excluded.subscription_status,next_available_at=excluded.next_available_at,status_reason=excluded.status_reason`, c.ID, c.Provider, c.Label, c.BaseURL, c.Ciphertext, c.Nonce, boolInt(c.Enabled), c.CreatedAt, now, c.ManualModelsJSON, c.AccessMode, c.SubscriptionFeePicoUSD, c.SubscriptionCycleStart, c.SubscriptionCycleEnd, c.SubscriptionStatus, c.NextAvailableAt, c.StatusReason)
+	lastChecked := nullableString(c.LastCheckedAt)
+	lastError := nullableString(c.LastError)
+	fee := nullableInt64(c.SubscriptionFeePicoUSD)
+	cycleStart := nullableString(c.SubscriptionCycleStart)
+	cycleEnd := nullableString(c.SubscriptionCycleEnd)
+	nextAvailable := nullableString(c.NextAvailableAt)
+	statusReason := nullableString(c.StatusReason)
+	enabled := boolInt(c.Enabled)
+	setter := &bobmodels.ProviderCredentialSetter{ID: &c.ID, Provider: &c.Provider, Label: &c.Label, BaseURL: &c.BaseURL, Ciphertext: &c.Ciphertext, Nonce: &c.Nonce, Enabled: &enabled, CreatedAt: &c.CreatedAt, UpdatedAt: &now, LastCheckedAt: &lastChecked, LastError: &lastError, ManualModelsJSON: &c.ManualModelsJSON, AccessMode: &c.AccessMode, SubscriptionFeePicoUsd: &fee, SubscriptionCycleStart: &cycleStart, SubscriptionCycleEnd: &cycleEnd, SubscriptionStatus: &c.SubscriptionStatus, NextAvailableAt: &nextAvailable, StatusReason: &statusReason}
+	_, err := bobmodels.ProviderCredentials.Insert(setter, im.OnConflict("id").DoUpdate(im.SetExcluded("provider", "label", "base_url", "ciphertext", "nonce", "enabled", "updated_at", "manual_models_json", "access_mode", "subscription_fee_pico_usd", "subscription_cycle_start", "subscription_cycle_end", "subscription_status", "next_available_at", "status_reason"))).One(ctx, r.exec)
 	return err
 }
-func (r *ProviderCredentialsRepository) List(ctx context.Context) ([]ProviderCredential, error) {
-	rows, err := r.db.QueryContext(ctx, `SELECT id,provider,label,base_url,ciphertext,nonce,enabled,created_at,updated_at,last_checked_at,last_error,manual_models_json,access_mode,subscription_fee_pico_usd,subscription_cycle_start,subscription_cycle_end,subscription_status,next_available_at,status_reason FROM provider_credentials ORDER BY created_at DESC`)
+func (r *ProviderCredentialsRepository) List(ctx context.Context) ([]models.ProviderCredential, error) {
+	rows, err := bobmodels.ProviderCredentials.Query(sm.OrderBy(bobmodels.ProviderCredentials.Columns.CreatedAt).Desc()).All(ctx, r.exec)
 	if err != nil {
 		return nil, err
 	}
-	defer rows.Close()
-	out := []ProviderCredential{}
-	for rows.Next() {
-		var c ProviderCredential
-		var enabled int
-		if err := rows.Scan(&c.ID, &c.Provider, &c.Label, &c.BaseURL, &c.Ciphertext, &c.Nonce, &enabled, &c.CreatedAt, &c.UpdatedAt, &c.LastCheckedAt, &c.LastError, &c.ManualModelsJSON, &c.AccessMode, &c.SubscriptionFeePicoUSD, &c.SubscriptionCycleStart, &c.SubscriptionCycleEnd, &c.SubscriptionStatus, &c.NextAvailableAt, &c.StatusReason); err != nil {
-			return nil, err
-		}
-		c.Enabled = enabled != 0
-		out = append(out, c)
+	out := make([]models.ProviderCredential, 0, len(rows))
+	for _, row := range rows {
+		out = append(out, providerCredentialFromBob(row))
 	}
-	return out, rows.Err()
+	return out, nil
 }
 func (r *ProviderCredentialsRepository) Delete(ctx context.Context, id string) error {
-	_, err := r.db.ExecContext(ctx, `DELETE FROM provider_credentials WHERE id=?`, id)
-	return err
+	row, err := bobmodels.FindProviderCredential(ctx, r.exec, id)
+	if err != nil {
+		return err
+	}
+	return row.Delete(ctx, r.exec)
 }
 func (r *ProviderCredentialsRepository) MarkLimited(ctx context.Context, provider string, next *time.Time, reason string) error {
-	var n any
+	var n *string
 	if next != nil {
-		n = next.UTC().Format(time.RFC3339Nano)
+		value := next.UTC().Format(time.RFC3339Nano)
+		n = &value
 	}
 	now := time.Now().UTC().Format(time.RFC3339Nano)
-	_, err := r.db.ExecContext(ctx, `UPDATE provider_credentials SET subscription_status='limited',next_available_at=?,status_reason=?,last_error=?,last_checked_at=?,updated_at=? WHERE provider=?`, n, NULLString(reason), NULLString(reason), now, now, provider)
+	limited := "limited"
+	reasonValue := nullableString(&reason)
+	nextValue := nullableString(n)
+	lastChecked := nullableString(&now)
+	setter := &bobmodels.ProviderCredentialSetter{SubscriptionStatus: &limited, NextAvailableAt: &nextValue, StatusReason: &reasonValue, LastError: &reasonValue, LastCheckedAt: &lastChecked, UpdatedAt: &now}
+	_, err := bobmodels.ProviderCredentials.Update(setter.UpdateMod(), um.Where(bobmodels.ProviderCredentials.Columns.Provider.EQ(sqlite.Arg(provider)))).Exec(ctx, r.exec)
 	return err
 }
 func (r *ProviderCredentialsRepository) ClearExpired(ctx context.Context, now time.Time) error {
-	_, err := r.db.ExecContext(ctx, `UPDATE provider_credentials SET subscription_status='available',next_available_at=NULL,status_reason=NULL WHERE subscription_status='limited' AND next_available_at IS NOT NULL AND next_available_at<=?`, now.UTC().Format(time.RFC3339Nano))
+	available := "available"
+	empty := sql.Null[string]{}
+	nowValue := now.UTC().Format(time.RFC3339Nano)
+	setter := &bobmodels.ProviderCredentialSetter{SubscriptionStatus: &available, NextAvailableAt: &empty, StatusReason: &empty}
+	_, err := bobmodels.ProviderCredentials.Update(setter.UpdateMod(), um.Where(sqlite.And(bobmodels.ProviderCredentials.Columns.SubscriptionStatus.EQ(sqlite.Arg("limited")), bobmodels.ProviderCredentials.Columns.NextAvailableAt.IsNotNull(), bobmodels.ProviderCredentials.Columns.NextAvailableAt.LTE(sqlite.Arg(nowValue))))).Exec(ctx, r.exec)
 	return err
+}
+
+func providerCredentialFromBob(row *bobmodels.ProviderCredential) models.ProviderCredential {
+	return models.ProviderCredential{ID: row.ID, Provider: row.Provider, Label: row.Label, BaseURL: row.BaseURL, Ciphertext: row.Ciphertext, Nonce: row.Nonce, Enabled: row.Enabled != 0, CreatedAt: row.CreatedAt, UpdatedAt: row.UpdatedAt, LastCheckedAt: stringPointer(row.LastCheckedAt), LastError: stringPointer(row.LastError), ManualModelsJSON: row.ManualModelsJSON, AccessMode: row.AccessMode, SubscriptionFeePicoUSD: int64Pointer(row.SubscriptionFeePicoUsd), SubscriptionCycleStart: stringPointer(row.SubscriptionCycleStart), SubscriptionCycleEnd: stringPointer(row.SubscriptionCycleEnd), SubscriptionStatus: row.SubscriptionStatus, NextAvailableAt: stringPointer(row.NextAvailableAt), StatusReason: stringPointer(row.StatusReason)}
 }

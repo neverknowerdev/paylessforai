@@ -1,21 +1,34 @@
 package repositories
 
-import "context"
+import (
+	"context"
 
-type ModelRoutesRepository struct{ db DBTX }
+	bobmodels "github.com/neverknowerdev/paylessforai/internal/db/bob/models"
+	"github.com/neverknowerdev/paylessforai/internal/db/models"
+	"github.com/stephenafamo/bob"
+	"github.com/stephenafamo/bob/dialect/sqlite"
+	"github.com/stephenafamo/bob/dialect/sqlite/dm"
+	"github.com/stephenafamo/bob/dialect/sqlite/im"
+)
 
-func (r *ModelRoutesRepository) Upsert(ctx context.Context, v ModelRouteRecord) error {
-	_, err := r.db.ExecContext(ctx, `INSERT INTO model_routes(id,model_id,provider,upstream_model,protocol,price_json,capabilities_json,health,trusted,observed_at) VALUES(?,?,?,?,?,?,?,?,?,?) ON CONFLICT(id) DO UPDATE SET model_id=excluded.model_id,provider=excluded.provider,upstream_model=excluded.upstream_model,protocol=excluded.protocol,price_json=excluded.price_json,capabilities_json=excluded.capabilities_json,health=excluded.health,trusted=excluded.trusted,observed_at=excluded.observed_at`, v.ID, v.ModelID, v.Provider, v.UpstreamModel, v.Protocol, v.PriceJSON, v.CapabilitiesJSON, v.Health, boolInt(v.Trusted), v.ObservedAt)
+type ModelRoutesRepository struct{ bobRepository }
+
+func (r *ModelRoutesRepository) Upsert(ctx context.Context, v models.ModelRouteRecord) error {
+	trusted := boolInt(v.Trusted)
+	setter := &bobmodels.ModelRouteSetter{ID: &v.ID, ModelID: &v.ModelID, Provider: &v.Provider, UpstreamModel: &v.UpstreamModel, Protocol: &v.Protocol, PriceJSON: &v.PriceJSON, CapabilitiesJSON: &v.CapabilitiesJSON, Health: &v.Health, Trusted: &trusted, ObservedAt: &v.ObservedAt}
+	_, err := bobmodels.ModelRoutes.Insert(setter, im.OnConflict("id").DoUpdate(im.SetExcluded("model_id", "provider", "upstream_model", "protocol", "price_json", "capabilities_json", "health", "trusted", "observed_at"))).One(ctx, r.exec)
 	return err
 }
-func (r *ModelRoutesRepository) Get(ctx context.Context, id string) (ModelRouteRecord, error) {
-	var v ModelRouteRecord
-	var trusted int
-	err := r.db.QueryRowContext(ctx, `SELECT id,model_id,provider,upstream_model,protocol,price_json,capabilities_json,health,trusted,observed_at FROM model_routes WHERE id=?`, id).Scan(&v.ID, &v.ModelID, &v.Provider, &v.UpstreamModel, &v.Protocol, &v.PriceJSON, &v.CapabilitiesJSON, &v.Health, &trusted, &v.ObservedAt)
-	v.Trusted = trusted != 0
-	return v, err
+
+func (r *ModelRoutesRepository) Get(ctx context.Context, id string) (models.ModelRouteRecord, error) {
+	row, err := bobmodels.FindModelRoute(ctx, r.exec, id)
+	if err != nil {
+		return models.ModelRouteRecord{}, err
+	}
+	return models.ModelRouteRecord{ID: row.ID, ModelID: row.ModelID, Provider: row.Provider, UpstreamModel: row.UpstreamModel, Protocol: row.Protocol, PriceJSON: row.PriceJSON, CapabilitiesJSON: row.CapabilitiesJSON, Health: row.Health, Trusted: row.Trusted != 0, ObservedAt: row.ObservedAt}, nil
 }
+
 func (r *ModelRoutesRepository) DeleteAll(ctx context.Context) error {
-	_, err := r.db.ExecContext(ctx, `DELETE FROM model_routes`)
+	_, err := bob.Exec(ctx, r.exec, sqlite.Delete(dm.From(bobmodels.ModelRoutes.NameAsExpr())))
 	return err
 }

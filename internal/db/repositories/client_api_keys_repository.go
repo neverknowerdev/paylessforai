@@ -9,10 +9,13 @@ import (
 	"strings"
 	"time"
 
+	bobmodels "github.com/neverknowerdev/paylessforai/internal/db/bob/models"
 	"github.com/neverknowerdev/paylessforai/internal/ids"
+	"github.com/stephenafamo/bob/dialect/sqlite"
+	"github.com/stephenafamo/bob/dialect/sqlite/sm"
 )
 
-type ClientAPIKeysRepository struct{ db DBTX }
+type ClientAPIKeysRepository struct{ bobRepository }
 
 func (r *ClientAPIKeysRepository) Create(ctx context.Context, label string) (ClientKey, string, error) {
 	if strings.TrimSpace(label) == "" {
@@ -24,29 +27,30 @@ func (r *ClientAPIKeysRepository) Create(ctx context.Context, label string) (Cli
 	}
 	secret := "plai_" + hex.EncodeToString(b)
 	h := sha256.Sum256([]byte(secret))
+	hash := hex.EncodeToString(h[:])
 	id := ids.New()
 	now := time.Now().UTC().Format(time.RFC3339Nano)
 	prefix := secret[:13]
-	_, err := r.db.ExecContext(ctx, `INSERT INTO client_api_keys(id,label,key_hash,key_prefix,created_at) VALUES(?,?,?,?,?)`, id, label, hex.EncodeToString(h[:]), prefix, now)
+	_, err := bobmodels.ClientAPIKeys.Insert(&bobmodels.ClientAPIKeySetter{ID: &id, Label: &label, KeyHash: &hash, KeyPrefix: &prefix, CreatedAt: &now}).One(ctx, r.exec)
 	return ClientKey{ID: id, Label: label, Prefix: prefix, CreatedAt: now}, secret, err
 }
 
 func (r *ClientAPIKeysRepository) Authenticate(ctx context.Context, secret string) (ClientKey, bool, error) {
 	h := sha256.Sum256([]byte(secret))
-	var key ClientKey
-	var revoked sql.NullString
-	err := r.db.QueryRowContext(ctx, `SELECT id,label,key_prefix,created_at,last_used_at,revoked_at FROM client_api_keys WHERE key_hash=?`, hex.EncodeToString(h[:])).Scan(&key.ID, &key.Label, &key.Prefix, &key.CreatedAt, &key.LastUsedAt, &revoked)
+	row, err := bobmodels.ClientAPIKeys.Query(sm.Where(bobmodels.ClientAPIKeys.Columns.KeyHash.EQ(sqlite.Arg(hex.EncodeToString(h[:]))))).One(ctx, r.exec)
 	if err == sql.ErrNoRows {
 		return ClientKey{}, false, nil
 	}
 	if err != nil {
 		return ClientKey{}, false, err
 	}
-	if revoked.Valid {
+	key := ClientKey{ID: row.ID, Label: row.Label, Prefix: row.KeyPrefix, CreatedAt: row.CreatedAt, LastUsedAt: stringPointer(row.LastUsedAt), RevokedAt: stringPointer(row.RevokedAt)}
+	if row.RevokedAt.Valid {
 		return key, false, nil
 	}
 	now := time.Now().UTC().Format(time.RFC3339Nano)
-	if _, err := r.db.ExecContext(ctx, `UPDATE client_api_keys SET last_used_at=? WHERE id=?`, now, key.ID); err != nil {
+	lastUsed := nullableString(&now)
+	if err := row.Update(ctx, r.exec, &bobmodels.ClientAPIKeySetter{LastUsedAt: &lastUsed}); err != nil {
 		return ClientKey{}, false, err
 	}
 	key.LastUsedAt = &now
@@ -54,22 +58,27 @@ func (r *ClientAPIKeysRepository) Authenticate(ctx context.Context, secret strin
 }
 
 func (r *ClientAPIKeysRepository) List(ctx context.Context) ([]ClientKey, error) {
-	rows, err := r.db.QueryContext(ctx, `SELECT id,label,key_prefix,created_at,last_used_at,revoked_at FROM client_api_keys ORDER BY created_at DESC`)
+	rows, err := bobmodels.ClientAPIKeys.Query(sm.OrderBy(bobmodels.ClientAPIKeys.Columns.CreatedAt).Desc()).All(ctx, r.exec)
 	if err != nil {
 		return nil, err
 	}
-	defer rows.Close()
-	out := []ClientKey{}
-	for rows.Next() {
-		var k ClientKey
-		if err := rows.Scan(&k.ID, &k.Label, &k.Prefix, &k.CreatedAt, &k.LastUsedAt, &k.RevokedAt); err != nil {
-			return nil, err
-		}
-		out = append(out, k)
+	out := make([]ClientKey, 0, len(rows))
+	for _, row := range rows {
+		out = append(out, ClientKey{ID: row.ID, Label: row.Label, Prefix: row.KeyPrefix, CreatedAt: row.CreatedAt, LastUsedAt: stringPointer(row.LastUsedAt), RevokedAt: stringPointer(row.RevokedAt)})
 	}
-	return out, rows.Err()
+	return out, nil
 }
+
 func (r *ClientAPIKeysRepository) Revoke(ctx context.Context, id string) error {
-	_, err := r.db.ExecContext(ctx, `UPDATE client_api_keys SET revoked_at=? WHERE id=? AND revoked_at IS NULL`, time.Now().UTC().Format(time.RFC3339Nano), id)
-	return err
+	row, err := bobmodels.FindClientAPIKey(ctx, r.exec, id)
+	if err != nil {
+		return err
+	}
+	if row.RevokedAt.Valid {
+		return nil
+	}
+	revoked := nullableString(pointerString(time.Now().UTC().Format(time.RFC3339Nano)))
+	return row.Update(ctx, r.exec, &bobmodels.ClientAPIKeySetter{RevokedAt: &revoked})
 }
+
+func pointerString(value string) *string { return &value }

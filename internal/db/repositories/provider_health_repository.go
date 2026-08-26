@@ -1,19 +1,35 @@
 package repositories
 
-import "context"
+import (
+	"context"
 
-type ProviderHealthRepository struct{ db DBTX }
+	bobmodels "github.com/neverknowerdev/paylessforai/internal/db/bob/models"
+	"github.com/neverknowerdev/paylessforai/internal/db/models"
+	"github.com/stephenafamo/bob"
+	"github.com/stephenafamo/bob/dialect/sqlite"
+	"github.com/stephenafamo/bob/dialect/sqlite/dm"
+	"github.com/stephenafamo/bob/dialect/sqlite/im"
+)
 
-func (r *ProviderHealthRepository) Upsert(ctx context.Context, v ProviderHealthRecord) error {
-	_, err := r.db.ExecContext(ctx, `INSERT INTO provider_health(route_id,failure_count,state,backoff_until,last_error,updated_at) VALUES(?,?,?,?,?,?) ON CONFLICT(route_id) DO UPDATE SET failure_count=excluded.failure_count,state=excluded.state,backoff_until=excluded.backoff_until,last_error=excluded.last_error,updated_at=excluded.updated_at`, v.RouteID, v.FailureCount, v.State, v.BackoffUntil, v.LastError, v.UpdatedAt)
+type ProviderHealthRepository struct{ bobRepository }
+
+func (r *ProviderHealthRepository) Upsert(ctx context.Context, v models.ProviderHealthRecord) error {
+	backoff := nullableString(v.BackoffUntil)
+	lastError := nullableString(v.LastError)
+	setter := &bobmodels.ProviderHealthSetter{RouteID: &v.RouteID, FailureCount: &v.FailureCount, State: &v.State, BackoffUntil: &backoff, LastError: &lastError, UpdatedAt: &v.UpdatedAt}
+	_, err := bobmodels.ProviderHealths.Insert(setter, im.OnConflict("route_id").DoUpdate(im.SetExcluded("failure_count", "state", "backoff_until", "last_error", "updated_at"))).One(ctx, r.exec)
 	return err
 }
-func (r *ProviderHealthRepository) Get(ctx context.Context, id string) (ProviderHealthRecord, error) {
-	var v ProviderHealthRecord
-	err := r.db.QueryRowContext(ctx, `SELECT route_id,failure_count,state,backoff_until,last_error,updated_at FROM provider_health WHERE route_id=?`, id).Scan(&v.RouteID, &v.FailureCount, &v.State, &v.BackoffUntil, &v.LastError, &v.UpdatedAt)
-	return v, err
+
+func (r *ProviderHealthRepository) Get(ctx context.Context, id string) (models.ProviderHealthRecord, error) {
+	row, err := bobmodels.FindProviderHealth(ctx, r.exec, id)
+	if err != nil {
+		return models.ProviderHealthRecord{}, err
+	}
+	return models.ProviderHealthRecord{RouteID: row.RouteID, FailureCount: row.FailureCount, State: row.State, BackoffUntil: stringPointer(row.BackoffUntil), LastError: stringPointer(row.LastError), UpdatedAt: row.UpdatedAt}, nil
 }
+
 func (r *ProviderHealthRepository) DeleteAll(ctx context.Context) error {
-	_, err := r.db.ExecContext(ctx, `DELETE FROM provider_health`)
+	_, err := bob.Exec(ctx, r.exec, sqlite.Delete(dm.From(bobmodels.ProviderHealths.NameAsExpr())))
 	return err
 }

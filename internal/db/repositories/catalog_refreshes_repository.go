@@ -2,9 +2,16 @@ package repositories
 
 import "context"
 
-type CatalogRefreshesRepository struct{ db DBTX }
+import (
+	bobmodels "github.com/neverknowerdev/paylessforai/internal/db/bob/models"
+)
+
+type CatalogRefreshesRepository struct{ bobRepository }
 
 func (r *CatalogRefreshesRepository) Create(ctx context.Context, v CatalogRefresh) error {
-	_, err := r.db.ExecContext(ctx, `INSERT INTO catalog_refreshes(id,provider,status,started_at,completed_at,error) VALUES(?,?,?,?,?,?)`, v.ID, v.Provider, v.Status, v.StartedAt, v.CompletedAt, v.Error)
+	completedAt := nullableString(v.CompletedAt)
+	errorValue := nullableString(v.Error)
+	setter := &bobmodels.CatalogRefreshSetter{ID: &v.ID, Provider: &v.Provider, Status: &v.Status, StartedAt: &v.StartedAt, CompletedAt: &completedAt, Error: &errorValue}
+	_, err := bobmodels.CatalogRefreshes.Insert(setter).One(ctx, r.exec)
 	return err
 }

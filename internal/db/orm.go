@@ -49,12 +49,6 @@ func (o *ORM) QueryRowContext(ctx context.Context, query string, args ...any) *s
 // reflection-free scanning while legacy reporting queries continue to use the
 // database/sql facade above.
 func (o *ORM) BobExecutor() bob.Executor {
-	if o.dialect == PostgresDialect {
-		// Generated models are currently emitted for the SQLite production
-		// schema. PostgreSQL keeps using the repository's portable SQL path
-		// until a matching psql model set is generated.
-		return nil
-	}
 	return bob.NewDB(o.DB)
 }
 

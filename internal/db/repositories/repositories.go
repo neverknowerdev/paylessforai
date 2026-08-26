@@ -1,16 +1,12 @@
 package repositories
 
 import (
-	"context"
-	"database/sql"
-	"strings"
-
 	"github.com/neverknowerdev/paylessforai/internal/db/models"
 	"github.com/stephenafamo/bob"
 )
 
-// Repositories groups one repository per persisted table. Repositories own
-// SQL for their table; Store exposes the application-facing database facade.
+// Repositories groups one Bob-backed repository per persisted table. Store
+// exposes the application-facing database facade.
 type Repositories struct {
 	Settings            *SettingsRepository
 	ProviderCredentials *ProviderCredentialsRepository
@@ -24,22 +20,29 @@ type Repositories struct {
 	RequestUsage        *RequestUsageRepository
 }
 
+type DBTX interface {
+	BobExecutor() bob.Executor
+}
+
 func New(db DBTX) *Repositories {
 	var bobExec bob.Executor
 	if provider, ok := db.(interface{ BobExecutor() bob.Executor }); ok {
 		bobExec = provider.BobExecutor()
 	}
+	if bobExec == nil {
+		panic("repositories.New requires a Bob executor")
+	}
 	return &Repositories{
-		Settings:            &SettingsRepository{db: db},
-		ProviderCredentials: &ProviderCredentialsRepository{db: db},
-		ClientAPIKeys:       &ClientAPIKeysRepository{db: db},
-		CatalogRefreshes:    &CatalogRefreshesRepository{db: db},
-		Models:              &ModelsRepository{db: db, bob: bobExec},
-		ModelRoutes:         &ModelRoutesRepository{db: db},
-		ProviderHealth:      &ProviderHealthRepository{db: db},
-		ProxyRequests:       &ProxyRequestsRepository{db: db},
-		ProxyAttempts:       &ProxyAttemptsRepository{db: db},
-		RequestUsage:        &RequestUsageRepository{db: db},
+		Settings:            &SettingsRepository{bobRepository: bobRepository{exec: bobExec}},
+		ProviderCredentials: &ProviderCredentialsRepository{bobRepository: bobRepository{exec: bobExec}},
+		ClientAPIKeys:       &ClientAPIKeysRepository{bobRepository: bobRepository{exec: bobExec}},
+		CatalogRefreshes:    &CatalogRefreshesRepository{bobRepository: bobRepository{exec: bobExec}},
+		Models:              &ModelsRepository{bobRepository: bobRepository{exec: bobExec}},
+		ModelRoutes:         &ModelRoutesRepository{bobRepository: bobRepository{exec: bobExec}},
+		ProviderHealth:      &ProviderHealthRepository{bobRepository: bobRepository{exec: bobExec}},
+		ProxyRequests:       &ProxyRequestsRepository{bobRepository: bobRepository{exec: bobExec}},
+		ProxyAttempts:       &ProxyAttemptsRepository{bobRepository: bobRepository{exec: bobExec}},
+		RequestUsage:        &RequestUsageRepository{bobRepository: bobRepository{exec: bobExec}},
 	}
 }
 
@@ -53,22 +56,9 @@ type ModelRecord = models.ModelRecord
 type ModelRouteRecord = models.ModelRouteRecord
 type ProviderHealthRecord = models.ProviderHealthRecord
 
-type DBTX interface {
-	ExecContext(context.Context, string, ...any) (sql.Result, error)
-	QueryContext(context.Context, string, ...any) (*sql.Rows, error)
-	QueryRowContext(context.Context, string, ...any) *sql.Row
-}
-
-func boolInt(value bool) int {
+func boolInt(value bool) int64 {
 	if value {
 		return 1
 	}
 	return 0
-}
-
-func NULLString(value string) any {
-	if strings.TrimSpace(value) == "" {
-		return nil
-	}
-	return value
 }

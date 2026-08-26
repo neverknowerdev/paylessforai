@@ -1,0 +1,42 @@
+name: Unit tests
+
+on:
+  push:
+    branches:
+      - main
+      - 'codex/**'
+  pull_request: {}
+
+permissions:
+  contents: read
+
+jobs:
+  go:
+    name: Go checks
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    steps:
+      - name: Check out source
+        uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      - name: Run unit tests
+        run: GOCACHE="$RUNNER_TEMP/go-cache" go test ./...
+
+      - name: Run race tests
+        run: GOCACHE="$RUNNER_TEMP/go-cache" go test -race ./...
+
+      - name: Run vet
+        run: GOCACHE="$RUNNER_TEMP/go-cache" go vet ./...
+
+      - name: Verify a static build
+        run: CGO_ENABLED=0 GOCACHE="$RUNNER_TEMP/go-cache" go build -o "$RUNNER_TEMP/paylessforai-app" ./cmd/paylessforai-app
+
+      - name: Check diff formatting
+        run: git diff --check

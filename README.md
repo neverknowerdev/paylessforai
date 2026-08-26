@@ -1,1 +1,196 @@
-# paylessforai
+# PayLessForAI
+
+PayLessForAI is an LLM gateway that exposes OpenAI- and Anthropic-compatible
+endpoints, discovers models and prices from multiple providers, and routes each
+request to the cheapest healthy compatible route.
+
+It ships as one dependency-free Go binary, `paylessforai-app`. The app owns
+provider credentials, model/pricing discovery, routing, retries, statistics,
+and the embedded administration UI on the user's machine. A hosted deployment
+will be added later; v1 is intentionally local-only.
+
+## v1 capabilities
+
+- OpenRouter and Surplus Intelligence provider clients.
+- OpenRouter `:free` variants and explicitly zero-priced token models, ranked before paid routes.
+- Startup model/catalog discovery with periodic refresh.
+- Provider architecture metadata: input/output modalities and supported feature tags,
+  surfaced in `/v1/models` and the UI; requests automatically require compatible
+  modalities when multimodal content is sent.
+- OpenAI Chat Completions, OpenAI Responses, and Anthropic Messages APIs,
+  including streaming responses.
+- Deterministic, tested route matching and bounded retry/failover behavior.
+- Fixed-point estimated pricing from provider catalogs.
+- Actual token, cache, reasoning, and provider-reported cost accounting, with
+usage-based cost fallback when a provider omits its price. Request statistics also
+include the selected provider, upstream model, and durable attempt count so free
+route failover is visible. Each request compares the provider-catalog (official)
+cost with the actual charged cost and records the dollar and percentage discount
+(or overage). Provider failures are stored with a concise parsed message by
+default, while the original raw payload remains available from the request
+detail view.
+- Local client API keys and encrypted provider-credential management.
+- Embedded UI for the base URL, keys, provider credentials, and recent request
+  statistics. The Statistics view shows overall attempts/retries, success rate,
+  fastest/average/slowest response time, tokens, cost, and per-model breakdowns;
+  free models receive a distinct FREE label. Requests also show end-to-end
+  response time in the table and detail view.
+
+The Models view exposes tag/provider filters, price and discount sorting, and a
+catalog discount column comparing each current route with the canonical
+OpenRouter price for that logical model.
+Surplus routes are marked free only when the provider metadata explicitly labels
+them free (for example `hy3-free`); zero prompt/completion fields alone are not
+enough because media models may use a separate image, audio, video, or job meter.
+
+## Quick start
+
+PayLessForAI currently requires Go 1.26 to build:
+
+```sh
+git clone https://github.com/neverknowerdev/paylessforai.git
+cd paylessforai
+CGO_ENABLED=0 go build -o paylessforai-app ./cmd/paylessforai-app
+./paylessforai-app
+```
+
+The default listener is `127.0.0.1:9472`. Open
+<http://127.0.0.1:9472/> in a browser, add provider credentials, and create a
+local client key. The default data directory is the operating-system user
+configuration directory under `paylessforai`; override it with `-data-dir`.
+
+The UI is intentionally local-only by default. Provider credentials are stored
+encrypted in SQLite, and the generated `master.key` in the data directory is
+required to decrypt them. Back up that file if you need to move the installation
+to another machine.
+
+Provider onboarding is transactional: the credential is verified and the
+provider catalog is discovered before the credential is saved. If a provider
+returns no models, the dialog stays open and offers manual model definitions in
+the form `model-id | input USD per 1M tokens | output USD per 1M tokens`. Each
+manual model is checked with a minimal inference request before it is persisted;
+discovery and verification failures remain visible in the dialog instead of
+silently closing it.
+
+An API key can only be configured once: new credentials are compared against
+all existing encrypted provider credentials and duplicates are rejected before
+any upstream request is made.
+
+## Configure an IDE or API client
+
+After creating a client key in the UI, configure an OpenAI-compatible client
+with:
+
+```text
+Base URL: http://127.0.0.1:9472/v1
+API key:  <the PayLessForAI client key>
+```
+
+Anthropic-compatible clients should use `http://127.0.0.1:9472` as their base
+URL, send the local key in `x-api-key`, and call `/v1/messages` (the
+`/anthropic/v1/messages` alias is also available).
+
+The local client key is separate from the OpenRouter or Surplus API keys
+configured in the UI.
+
+## HTTP API
+
+| Method | Endpoint | Purpose |
+| --- | --- | --- |
+| `GET` | `/v1/models` | Current merged model catalog |
+| `POST` | `/v1/chat/completions` | OpenAI Chat Completions |
+| `POST` | `/v1/responses` | OpenAI Responses |
+| `POST` | `/v1/messages` | Anthropic Messages |
+| `POST` | `/anthropic/v1/messages` | Anthropic compatibility alias |
+| `GET` | `/healthz` | Process health |
+| `GET` | `/readyz` | Database readiness |
+
+Inference endpoints require `Authorization: Bearer <client-key>`. Anthropic
+Messages also accepts `x-api-key: <client-key>`. Every proxied response includes
+an `X-PayLess-Request-ID` header for tracing.
+
+The local UI uses management endpoints under `/api/` for client keys, provider
+credentials, request statistics, model statistics, and status. Keep the listener bound to
+loopback unless those endpoints are protected by an external access layer.
+
+## Routing and pricing
+
+At startup, after a provider credential is added, and on the configured refresh
+interval, PayLessForAI fetches provider model metadata and pricing. Discovery
+tries the provider's common catalog paths (`/models`, `/v1/models`, and
+`/api/v1/models`, plus OpenRouter's `/models/user` when applicable) until one
+responds with a usable catalog. Matching is based on the requested logical model,
+protocol, capabilities, limits, health, and current price.
+
+For a model available through more than one route:
+
+1. Free routes are tried first, including OpenRouter `:free` variants.
+2. Paid routes are ranked by estimated request cost.
+3. A pre-response rate-limit, timeout, server, or transport failure can retry
+   or fail over to another eligible route.
+4. Once response bytes have been sent, PayLessForAI does not switch providers;
+   it records a partial stream/error instead.
+
+Estimated cost uses fixed-point USD arithmetic and catalog prices. After a
+request completes, provider-reported cost is authoritative when present;
+otherwise PayLessForAI calculates an actual estimate from token, cache, and
+reasoning usage. Request statistics are persisted in SQLite and shown in the UI.
+A discount/overage is shown only when both the actual cost and a non-zero
+official catalog baseline are available; older rows created before pricing
+comparison was introduced, and models with no paid catalog price, are labeled
+accordingly.
+The Overview, Models, and Requests views also show the aggregate dollars saved
+against those official baselines; overages are not counted as savings.
+The Models table displays catalog input/output prices per 1M tokens for
+readability; routing and request accounting continue to use the provider's
+per-token prices internally.
+
+## Configuration
+
+Useful command-line flags include:
+
+```text
+-data-dir                 Database and master-key directory
+-listen                   HTTP address (default: 127.0.0.1:9472)
+-refresh-interval         Catalog refresh interval (default: 5m)
+-provider-base-url        Provider endpoint override (repeatable: name=url)
+-openrouter-base-url      OpenRouter endpoint override (compatibility alias)
+-surplus-base-url         Surplus endpoint override (compatibility alias)
+-read-header-timeout      HTTP request-header timeout
+-idle-timeout             HTTP keep-alive timeout
+-shutdown-timeout        Graceful shutdown timeout
+```
+
+The app intentionally starts without provider credentials. Add one or more
+provider credentials through the Access & keys UI or the
+`POST /api/providers/credentials` API; keys are encrypted locally and can be
+removed or refreshed without restarting the binary. Built-in providers use
+their default endpoints. OpenAI-compatible providers not built into this
+binary can be added by supplying `provider`, `base_url`, and `api_key`.
+
+## Development and tests
+
+Run the Go checks from the repository root:
+
+```sh
+go test ./...
+go test -race ./...
+go vet ./...
+CGO_ENABLED=0 go build ./cmd/paylessforai-app
+```
+
+The browser suite starts the real binary and deterministic mock providers. It
+starts with no provider credentials, then adds credentials through the same
+credential API used by the UI; it never uses real provider tokens:
+
+```sh
+cd test/e2e
+npm install
+npx playwright install chromium
+npm test
+```
+
+The same checks run in separate GitHub Actions workflows:
+
+- [Unit tests](.github/workflows/unit-tests.yml)
+- [Browser E2E](.github/workflows/e2e.yml)

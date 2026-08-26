@@ -2,7 +2,6 @@ package store
 
 import (
 	"context"
-	"crypto/rand"
 	"crypto/sha256"
 	"embed"
 	"encoding/hex"
@@ -17,7 +16,6 @@ import (
 
 	"database/sql"
 
-	"github.com/neverknowerdev/paylessforai/internal/retry"
 	"github.com/neverknowerdev/paylessforai/internal/subscription"
 	_ "modernc.org/sqlite"
 )
@@ -26,7 +24,8 @@ import (
 var migrationFS embed.FS
 
 type Store struct {
-	db *sql.DB
+	db           *sql.DB
+	Repositories *Repositories
 }
 
 type ClientKey struct {
@@ -219,7 +218,7 @@ func Open(ctx context.Context, path string) (*Store, error) {
 	}
 	db.SetMaxOpenConns(1)
 	db.SetMaxIdleConns(1)
-	store := &Store{db: db}
+	store := &Store{db: db, Repositories: newRepositories(db)}
 	if err := store.configure(ctx); err != nil {
 		db.Close()
 		return nil, err
@@ -245,114 +244,32 @@ func (s *Store) DB() *sql.DB { return s.db }
 func (s *Store) Close() error { return s.db.Close() }
 
 func (s *Store) CreateClientKey(ctx context.Context, label string) (ClientKey, string, error) {
-	if strings.TrimSpace(label) == "" {
-		label = "default"
-	}
-	secretBytes := make([]byte, 32)
-	if _, err := rand.Read(secretBytes); err != nil {
-		return ClientKey{}, "", fmt.Errorf("generate client key: %w", err)
-	}
-	secret := "plai_" + hex.EncodeToString(secretBytes)
-	hash := sha256.Sum256([]byte(secret))
-	idBytes := make([]byte, 16)
-	if _, err := rand.Read(idBytes); err != nil {
-		return ClientKey{}, "", fmt.Errorf("generate client key ID: %w", err)
-	}
-	id := hex.EncodeToString(idBytes)
-	now := time.Now().UTC().Format(time.RFC3339Nano)
-	if _, err := s.db.ExecContext(ctx, `INSERT INTO client_api_keys(id, label, key_hash, key_prefix, created_at) VALUES(?, ?, ?, ?, ?)`, id, label, hex.EncodeToString(hash[:]), secret[:13], now); err != nil {
-		return ClientKey{}, "", fmt.Errorf("store client key: %w", err)
-	}
-	return ClientKey{ID: id, Label: label, Prefix: secret[:13], CreatedAt: now}, secret, nil
+	return s.Repositories.ClientAPIKeys.Create(ctx, label)
 }
 
 func (s *Store) AuthenticateClientKey(ctx context.Context, secret string) (ClientKey, bool, error) {
-	hash := sha256.Sum256([]byte(secret))
-	var key ClientKey
-	var lastUsed, revoked *string
-	err := s.db.QueryRowContext(ctx, `SELECT id, label, key_prefix, created_at, last_used_at, revoked_at FROM client_api_keys WHERE key_hash = ?`, hex.EncodeToString(hash[:])).Scan(&key.ID, &key.Label, &key.Prefix, &key.CreatedAt, &lastUsed, &revoked)
-	if errors.Is(err, sql.ErrNoRows) {
-		return ClientKey{}, false, nil
-	}
-	if err != nil {
-		return ClientKey{}, false, err
-	}
-	key.LastUsedAt, key.RevokedAt = lastUsed, revoked
-	if revoked != nil {
-		return key, false, nil
-	}
-	now := time.Now().UTC().Format(time.RFC3339Nano)
-	if _, err := s.db.ExecContext(ctx, `UPDATE client_api_keys SET last_used_at = ? WHERE id = ?`, now, key.ID); err != nil {
-		return ClientKey{}, false, err
-	}
-	key.LastUsedAt = &now
-	return key, true, nil
+	return s.Repositories.ClientAPIKeys.Authenticate(ctx, secret)
 }
 
 func (s *Store) ListClientKeys(ctx context.Context) ([]ClientKey, error) {
-	rows, err := s.db.QueryContext(ctx, `SELECT id, label, key_prefix, created_at, last_used_at, revoked_at FROM client_api_keys ORDER BY created_at DESC`)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-	var keys []ClientKey
-	for rows.Next() {
-		var key ClientKey
-		if err := rows.Scan(&key.ID, &key.Label, &key.Prefix, &key.CreatedAt, &key.LastUsedAt, &key.RevokedAt); err != nil {
-			return nil, err
-		}
-		keys = append(keys, key)
-	}
-	return keys, rows.Err()
+	return s.Repositories.ClientAPIKeys.List(ctx)
 }
 
 func (s *Store) RevokeClientKey(ctx context.Context, id string) error {
-	_, err := s.db.ExecContext(ctx, `UPDATE client_api_keys SET revoked_at = ? WHERE id = ? AND revoked_at IS NULL`, time.Now().UTC().Format(time.RFC3339Nano), id)
-	return err
+	return s.Repositories.ClientAPIKeys.Revoke(ctx, id)
 }
 
 func (s *Store) UpsertProviderCredential(ctx context.Context, credential ProviderCredential) error {
-	now := time.Now().UTC().Format(time.RFC3339Nano)
-	if credential.CreatedAt == "" {
-		credential.CreatedAt = now
-	}
-	if credential.AccessMode == "" {
-		credential.AccessMode = "api"
-	}
-	if credential.SubscriptionStatus == "" {
-		credential.SubscriptionStatus = "available"
-	}
-	_, err := s.db.ExecContext(ctx, `INSERT INTO provider_credentials(id, provider, label, base_url, ciphertext, nonce, enabled, created_at, updated_at, manual_models_json, access_mode, subscription_fee_pico_usd, subscription_cycle_start, subscription_cycle_end, subscription_status, next_available_at, status_reason) VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) ON CONFLICT(id) DO UPDATE SET provider=excluded.provider, label=excluded.label, base_url=excluded.base_url, ciphertext=excluded.ciphertext, nonce=excluded.nonce, enabled=excluded.enabled, updated_at=excluded.updated_at, manual_models_json=excluded.manual_models_json, access_mode=excluded.access_mode, subscription_fee_pico_usd=excluded.subscription_fee_pico_usd, subscription_cycle_start=excluded.subscription_cycle_start, subscription_cycle_end=excluded.subscription_cycle_end, subscription_status=excluded.subscription_status, next_available_at=excluded.next_available_at, status_reason=excluded.status_reason`, credential.ID, credential.Provider, credential.Label, credential.BaseURL, credential.Ciphertext, credential.Nonce, boolInt(credential.Enabled), credential.CreatedAt, now, credential.ManualModelsJSON, credential.AccessMode, credential.SubscriptionFeePicoUSD, credential.SubscriptionCycleStart, credential.SubscriptionCycleEnd, credential.SubscriptionStatus, credential.NextAvailableAt, credential.StatusReason)
-	return err
+	return s.Repositories.ProviderCredentials.Upsert(ctx, credential)
 }
 
 func (s *Store) ListProviderCredentials(ctx context.Context) ([]ProviderCredential, error) {
-	rows, err := s.db.QueryContext(ctx, `SELECT id, provider, label, base_url, ciphertext, nonce, enabled, created_at, updated_at, last_checked_at, last_error, manual_models_json, access_mode, subscription_fee_pico_usd, subscription_cycle_start, subscription_cycle_end, subscription_status, next_available_at, status_reason FROM provider_credentials ORDER BY created_at DESC`)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-	var result []ProviderCredential
-	for rows.Next() {
-		var credential ProviderCredential
-		var enabled int
-		if err := rows.Scan(&credential.ID, &credential.Provider, &credential.Label, &credential.BaseURL, &credential.Ciphertext, &credential.Nonce, &enabled, &credential.CreatedAt, &credential.UpdatedAt, &credential.LastCheckedAt, &credential.LastError, &credential.ManualModelsJSON, &credential.AccessMode, &credential.SubscriptionFeePicoUSD, &credential.SubscriptionCycleStart, &credential.SubscriptionCycleEnd, &credential.SubscriptionStatus, &credential.NextAvailableAt, &credential.StatusReason); err != nil {
-			return nil, err
-		}
-		credential.Enabled = enabled != 0
-		result = append(result, credential)
-	}
-	return result, rows.Err()
+	return s.Repositories.ProviderCredentials.List(ctx)
 }
 
 // MarkProviderLimited persists a provider/account limit and its best-known reset time.
 func (s *Store) MarkProviderLimited(ctx context.Context, provider string, next *time.Time, reason string) error {
-	var nextValue any
-	if next != nil {
-		nextValue = next.UTC().Format(time.RFC3339Nano)
-	}
-	_, err := s.db.ExecContext(ctx, `UPDATE provider_credentials SET subscription_status='limited', next_available_at=?, status_reason=?, last_error=?, last_checked_at=?, updated_at=? WHERE provider=?`, nextValue, NULLString(reason), NULLString(reason), time.Now().UTC().Format(time.RFC3339Nano), time.Now().UTC().Format(time.RFC3339Nano), provider)
-	return err
+	return s.Repositories.ProviderCredentials.MarkLimited(ctx, provider, next, reason)
 }
 
 func NULLString(value string) any {
@@ -363,39 +280,11 @@ func NULLString(value string) any {
 }
 
 func (s *Store) ClearExpiredProviderLimits(ctx context.Context, now time.Time) error {
-	_, err := s.db.ExecContext(ctx, `UPDATE provider_credentials SET subscription_status='available', next_available_at=NULL, status_reason=NULL WHERE subscription_status='limited' AND next_available_at IS NOT NULL AND next_available_at <= ?`, now.UTC().Format(time.RFC3339Nano))
-	return err
+	return s.Repositories.ProviderCredentials.ClearExpired(ctx, now)
 }
 
 func (s *Store) SubscriptionUsage(ctx context.Context) ([]subscription.UsageRow, error) {
-	rows, err := s.db.QueryContext(ctx, `SELECT c.provider, c.label, c.subscription_fee_pico_usd, c.subscription_cycle_start, c.subscription_cycle_end, r.received_at, COALESCE(u.input_tokens,0), COALESCE(u.output_tokens,0) FROM provider_credentials c JOIN proxy_requests r ON r.selected_provider=c.provider LEFT JOIN request_usage u ON u.request_id=r.id WHERE c.access_mode='subscription' AND c.subscription_fee_pico_usd IS NOT NULL AND r.state='succeeded' ORDER BY r.received_at`)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-	result := make([]subscription.UsageRow, 0)
-	for rows.Next() {
-		var provider, label, at string
-		var fee int64
-		var start, end sql.NullString
-		var in, out int64
-		if err := rows.Scan(&provider, &label, &fee, &start, &end, &at, &in, &out); err != nil {
-			return nil, err
-		}
-		when, err := time.Parse(time.RFC3339Nano, at)
-		if err != nil {
-			continue
-		}
-		row := subscription.UsageRow{Provider: provider, Label: label, FeePicoUSD: fee, At: when, InputTokens: in, OutputTokens: out}
-		if start.Valid {
-			row.CycleStart, _ = time.Parse(time.RFC3339Nano, start.String)
-		}
-		if end.Valid {
-			row.CycleEnd, _ = time.Parse(time.RFC3339Nano, end.String)
-		}
-		result = append(result, row)
-	}
-	return result, rows.Err()
+	return s.Repositories.ProviderCredentials.Usage(ctx)
 }
 
 func (s *Store) SubscriptionPricing(ctx context.Context) ([]subscription.Pricing, error) {
@@ -407,8 +296,7 @@ func (s *Store) SubscriptionPricing(ctx context.Context) ([]subscription.Pricing
 }
 
 func (s *Store) DeleteProviderCredential(ctx context.Context, id string) error {
-	_, err := s.db.ExecContext(ctx, `DELETE FROM provider_credentials WHERE id = ?`, id)
-	return err
+	return s.Repositories.ProviderCredentials.Delete(ctx, id)
 }
 
 func boolInt(value bool) int {
@@ -419,31 +307,11 @@ func boolInt(value bool) int {
 }
 
 func (s *Store) CreateProxyRequest(ctx context.Context, id, clientKeyID, protocol, model string) error {
-	_, err := s.db.ExecContext(ctx, `INSERT INTO proxy_requests(id, client_key_id, protocol, logical_model, state, received_at) VALUES(?, NULLIF(?, ''), ?, ?, 'received', ?)`, id, clientKeyID, protocol, model, time.Now().UTC().Format(time.RFC3339Nano))
-	return err
+	return s.Repositories.ProxyRequests.Create(ctx, id, clientKeyID, protocol, model)
 }
 
 func (s *Store) CompleteProxyRequest(ctx context.Context, id, state, errorCode, errorMessage string) error {
-	now := time.Now().UTC()
-	completedAt := now.Format(time.RFC3339Nano)
-	var receivedAt string
-	if err := s.db.QueryRowContext(ctx, `SELECT received_at FROM proxy_requests WHERE id = ?`, id).Scan(&receivedAt); err != nil && !errors.Is(err, sql.ErrNoRows) {
-		return err
-	}
-	var duration any
-	if parsed, err := time.Parse(time.RFC3339Nano, receivedAt); err == nil {
-		ms := now.Sub(parsed).Milliseconds()
-		if ms < 0 {
-			ms = 0
-		}
-		duration = ms
-	}
-	disposition := "included"
-	if errorCode == "provider_rate_limit" || errorCode == "provider_quota_exhausted" || errorCode == "all_subscription_quotas_exhausted" {
-		disposition = "excluded_limit"
-	}
-	_, err := s.db.ExecContext(ctx, `UPDATE proxy_requests SET state = ?, completed_at = ?, duration_ms = ?, error_code = NULLIF(?, ''), error_message = NULLIF(?, ''), stats_disposition = CASE WHEN ? = 'excluded_limit' THEN 'excluded_limit' ELSE stats_disposition END WHERE id = ?`, state, completedAt, duration, errorCode, errorMessage, disposition, id)
-	return err
+	return s.Repositories.ProxyRequests.Complete(ctx, id, state, errorCode, errorMessage)
 }
 
 // RecordProxyAttempt records both the route actually contacted and the durable
@@ -453,45 +321,11 @@ func (s *Store) RecordProxyAttempt(ctx context.Context, requestID string, attemp
 }
 
 func (s *Store) recordProxyAttempt(ctx context.Context, requestID string, attempt int, provider, upstream, state, errorClass, errorMessage string, rawError ...string) error {
-	if attempt < 1 {
-		return fmt.Errorf("attempt number must be positive")
-	}
-	nowTime := time.Now().UTC()
-	now := nowTime.Format(time.RFC3339Nano)
-	if _, err := s.db.ExecContext(ctx, `UPDATE proxy_requests SET selected_provider = ?, selected_upstream_model = ?, attempt_count = CASE WHEN attempt_count < ? THEN ? ELSE attempt_count END WHERE id = ?`, provider, upstream, attempt, attempt, requestID); err != nil {
-		return err
-	}
-	raw := ""
-	if len(rawError) > 0 {
-		raw = rawError[0]
-	}
-	var startedAt string
-	if err := s.db.QueryRowContext(ctx, `SELECT started_at FROM proxy_attempts WHERE id = ?`, requestID+":"+fmt.Sprint(attempt)).Scan(&startedAt); err != nil && !errors.Is(err, sql.ErrNoRows) {
-		return err
-	}
-	var duration any
-	if state != "started" {
-		if parsed, err := time.Parse(time.RFC3339Nano, startedAt); err == nil {
-			ms := nowTime.Sub(parsed).Milliseconds()
-			if ms < 0 {
-				ms = 0
-			}
-			duration = ms
-		} else {
-			duration = int64(0)
-		}
-	}
-	disposition := "included"
-	if errorClass == string(retry.ErrorRateLimit) || errorClass == string(retry.ErrorQuotaExhausted) {
-		disposition = "excluded_limit"
-	}
-	_, err := s.db.ExecContext(ctx, `INSERT INTO proxy_attempts(id, request_id, attempt_number, route_id, provider, upstream_model, state, started_at, completed_at, duration_ms, error_class, error_message, error_raw, stats_disposition) VALUES(?, ?, ?, ?, ?, ?, ?, ?, NULLIF(?, ''), ?, NULLIF(?, ''), NULLIF(?, ''), NULLIF(?, ''), ?) ON CONFLICT(id) DO UPDATE SET provider=excluded.provider, upstream_model=excluded.upstream_model, state=excluded.state, completed_at=excluded.completed_at, duration_ms=COALESCE(excluded.duration_ms, proxy_attempts.duration_ms), error_class=excluded.error_class, error_message=excluded.error_message, error_raw=excluded.error_raw, stats_disposition=excluded.stats_disposition`, requestID+":"+fmt.Sprint(attempt), requestID, attempt, provider+":"+upstream, provider, upstream, state, now, now, duration, errorClass, errorMessage, raw, disposition)
-	return err
+	return s.Repositories.ProxyAttempts.Record(ctx, requestID, attempt, provider, upstream, state, errorClass, errorMessage, rawError...)
 }
 
 func (s *Store) RecordUsage(ctx context.Context, usage RequestUsage) error {
-	_, err := s.db.ExecContext(ctx, `INSERT INTO request_usage(request_id, input_tokens, output_tokens, total_tokens, cached_read_tokens, cache_write_tokens, reasoning_tokens, estimated_cost_pico_usd, official_cost_pico_usd, actual_cost_pico_usd, discount_pico_usd, discount_percent_bps, raw_usage_json) VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) ON CONFLICT(request_id) DO UPDATE SET input_tokens=excluded.input_tokens, output_tokens=excluded.output_tokens, total_tokens=excluded.total_tokens, cached_read_tokens=excluded.cached_read_tokens, cache_write_tokens=excluded.cache_write_tokens, reasoning_tokens=excluded.reasoning_tokens, estimated_cost_pico_usd=excluded.estimated_cost_pico_usd, official_cost_pico_usd=excluded.official_cost_pico_usd, actual_cost_pico_usd=excluded.actual_cost_pico_usd, discount_pico_usd=excluded.discount_pico_usd, discount_percent_bps=excluded.discount_percent_bps, raw_usage_json=excluded.raw_usage_json`, usage.RequestID, usage.InputTokens, usage.OutputTokens, usage.TotalTokens, usage.CachedReadTokens, usage.CacheWriteTokens, usage.ReasoningTokens, usage.EstimatedCostPico, usage.OfficialCostPico, usage.ActualCostPico, usage.DiscountPico, usage.DiscountBPS, usage.RawUsageJSON)
-	return err
+	return s.Repositories.RequestUsage.Upsert(ctx, usage)
 }
 
 func (s *Store) ListRequestStats(ctx context.Context, limit int) ([]RequestStat, error) {

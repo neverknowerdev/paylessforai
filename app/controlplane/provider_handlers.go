@@ -6,7 +6,9 @@ import (
 	"crypto/subtle"
 	"encoding/json"
 	"fmt"
+	"math"
 	"net/http"
+	"strconv"
 	"strings"
 	"time"
 
@@ -63,15 +65,37 @@ func (s *Server) createProviderCredential(w http.ResponseWriter, r *http.Request
 		return
 	}
 	var input struct {
-		Provider     string                  `json:"provider"`
-		Label        string                  `json:"label"`
-		APIKey       string                  `json:"api_key"`
-		BaseURL      string                  `json:"base_url"`
-		ManualModels []providers.ManualModel `json:"manual_models"`
+		Provider               string                  `json:"provider"`
+		Label                  string                  `json:"label"`
+		APIKey                 string                  `json:"api_key"`
+		BaseURL                string                  `json:"base_url"`
+		ManualModels           []providers.ManualModel `json:"manual_models"`
+		AccessMode             string                  `json:"access_mode"`
+		SubscriptionFeeUSD     string                  `json:"subscription_fee_usd"`
+		SubscriptionCycleStart string                  `json:"subscription_cycle_start"`
+		SubscriptionCycleEnd   string                  `json:"subscription_cycle_end"`
 	}
 	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 4096)).Decode(&input); err != nil || strings.TrimSpace(input.Provider) == "" || strings.TrimSpace(input.APIKey) == "" {
 		writeError(w, http.StatusBadRequest, "invalid_request", "provider, label, and api_key are required")
 		return
+	}
+	input.AccessMode = strings.ToLower(strings.TrimSpace(input.AccessMode))
+	if input.AccessMode == "" {
+		input.AccessMode = "api"
+	}
+	if input.AccessMode != "api" && input.AccessMode != "subscription" {
+		writeError(w, http.StatusBadRequest, "invalid_access_mode", "access_mode must be api or subscription")
+		return
+	}
+	var feePico *int64
+	if input.AccessMode == "subscription" {
+		fee, err := strconv.ParseFloat(strings.TrimSpace(input.SubscriptionFeeUSD), 64)
+		if err != nil || fee <= 0 {
+			writeError(w, http.StatusBadRequest, "invalid_subscription_fee", "subscription_fee_usd must be a positive amount")
+			return
+		}
+		value := int64(math.Round(fee * 1e12))
+		feePico = &value
 	}
 	input.Provider = strings.ToLower(strings.TrimSpace(input.Provider))
 	input.BaseURL = strings.TrimRight(strings.TrimSpace(input.BaseURL), "/")
@@ -131,7 +155,13 @@ func (s *Server) createProviderCredential(w http.ResponseWriter, r *http.Request
 		writeError(w, http.StatusInternalServerError, "credential_encrypt_failed", "could not encrypt provider credential")
 		return
 	}
-	item := store.ProviderCredential{ID: ids.New(), Provider: input.Provider, Label: input.Label, BaseURL: input.BaseURL, Ciphertext: ciphertext, Nonce: nonce, Enabled: true, ManualModelsJSON: string(manualJSON)}
+	item := store.ProviderCredential{ID: ids.New(), Provider: input.Provider, Label: input.Label, BaseURL: input.BaseURL, Ciphertext: ciphertext, Nonce: nonce, Enabled: true, ManualModelsJSON: string(manualJSON), AccessMode: input.AccessMode, SubscriptionFeePicoUSD: feePico}
+	if input.SubscriptionCycleStart != "" {
+		item.SubscriptionCycleStart = &input.SubscriptionCycleStart
+	}
+	if input.SubscriptionCycleEnd != "" {
+		item.SubscriptionCycleEnd = &input.SubscriptionCycleEnd
+	}
 	if err := s.db.UpsertProviderCredential(r.Context(), item); err != nil {
 		writeError(w, http.StatusInternalServerError, "credential_store_failed", "could not store provider credential")
 		return

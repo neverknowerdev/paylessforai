@@ -49,6 +49,19 @@ func Run(parent context.Context, args []string) error {
 	registry := providers.Builtin(c.ProviderBaseURLs)
 	clients := loadProviderClients(registry, db, secretBox)
 	catalogManager := catalog.New(clients)
+	if stored, err := db.ListProviderCredentials(parent); err == nil {
+		for _, credential := range stored {
+			if credential.SubscriptionStatus == "limited" {
+				var until *time.Time
+				if credential.NextAvailableAt != nil {
+					if parsed, parseErr := time.Parse(time.RFC3339Nano, *credential.NextAvailableAt); parseErr == nil {
+						until = &parsed
+					}
+				}
+				catalogManager.SetProviderBlocked(credential.Provider, until)
+			}
+		}
+	}
 	appContext, cancel := context.WithCancel(parent)
 	defer cancel()
 	if len(clients) > 0 {

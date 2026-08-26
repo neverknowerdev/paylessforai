@@ -17,6 +17,8 @@ import (
 
 	"database/sql"
 
+	"github.com/neverknowerdev/paylessforai/internal/retry"
+	"github.com/neverknowerdev/paylessforai/internal/subscription"
 	_ "modernc.org/sqlite"
 )
 
@@ -92,102 +94,116 @@ type RequestStat struct {
 }
 
 type StatsSummary struct {
-	TotalRequests      int64  `json:"total_requests"`
-	SucceededRequests  int64  `json:"succeeded_requests"`
-	FailedRequests     int64  `json:"failed_requests"`
-	PartialRequests    int64  `json:"partial_requests"`
-	InputTokens        int64  `json:"input_tokens"`
-	OutputTokens       int64  `json:"output_tokens"`
-	TotalTokens        int64  `json:"total_tokens"`
-	CachedReadTokens   int64  `json:"cached_read_tokens"`
-	CacheWriteTokens   int64  `json:"cache_write_tokens"`
-	ReasoningTokens    int64  `json:"reasoning_tokens"`
-	EstimatedCostPico  int64  `json:"estimated_cost_pico_usd"`
-	OfficialCostPico   int64  `json:"official_cost_pico_usd"`
-	ActualCostPico     int64  `json:"actual_cost_pico_usd"`
-	SavedCostPico      int64  `json:"saved_cost_pico_usd"`
-	SavedPercentBPS    *int64 `json:"saved_percent_bps,omitempty"`
-	RequestsWithActual int64  `json:"requests_with_actual_cost"`
-	TotalAttempts      int64  `json:"total_attempts"`
-	RetriedRequests    int64  `json:"retried_requests"`
-	FastestMS          *int64 `json:"fastest_response_ms,omitempty"`
-	SlowestMS          *int64 `json:"slowest_response_ms,omitempty"`
-	AverageMS          *int64 `json:"average_response_ms,omitempty"`
-	RequestsWithTime   int64  `json:"requests_with_response_time"`
+	TotalRequests         int64  `json:"total_requests"`
+	SucceededRequests     int64  `json:"succeeded_requests"`
+	FailedRequests        int64  `json:"failed_requests"`
+	PartialRequests       int64  `json:"partial_requests"`
+	InputTokens           int64  `json:"input_tokens"`
+	OutputTokens          int64  `json:"output_tokens"`
+	TotalTokens           int64  `json:"total_tokens"`
+	CachedReadTokens      int64  `json:"cached_read_tokens"`
+	CacheWriteTokens      int64  `json:"cache_write_tokens"`
+	ReasoningTokens       int64  `json:"reasoning_tokens"`
+	EstimatedCostPico     int64  `json:"estimated_cost_pico_usd"`
+	OfficialCostPico      int64  `json:"official_cost_pico_usd"`
+	ActualCostPico        int64  `json:"actual_cost_pico_usd"`
+	SavedCostPico         int64  `json:"saved_cost_pico_usd"`
+	SavedPercentBPS       *int64 `json:"saved_percent_bps,omitempty"`
+	RequestsWithActual    int64  `json:"requests_with_actual_cost"`
+	TotalAttempts         int64  `json:"total_attempts"`
+	RetriedRequests       int64  `json:"retried_requests"`
+	FastestMS             *int64 `json:"fastest_response_ms,omitempty"`
+	SlowestMS             *int64 `json:"slowest_response_ms,omitempty"`
+	AverageMS             *int64 `json:"average_response_ms,omitempty"`
+	RequestsWithTime      int64  `json:"requests_with_response_time"`
+	EligibleRequests      int64  `json:"eligible_requests"`
+	ExcludedLimitRequests int64  `json:"excluded_limit_requests"`
+	SuccessRateBPS        int64  `json:"success_rate_bps"`
 }
 
 type ModelStats struct {
-	Model             string `json:"model"`
-	Free              bool   `json:"free"`
-	Requests          int64  `json:"requests"`
-	SucceededRequests int64  `json:"succeeded_requests"`
-	FailedRequests    int64  `json:"failed_requests"`
-	PartialRequests   int64  `json:"partial_requests"`
-	SuccessRateBPS    int64  `json:"success_rate_bps"`
-	TotalAttempts     int64  `json:"total_attempts"`
-	RetriedRequests   int64  `json:"retried_requests"`
-	RetryRateBPS      int64  `json:"retry_rate_bps"`
-	FastestMS         *int64 `json:"fastest_response_ms,omitempty"`
-	SlowestMS         *int64 `json:"slowest_response_ms,omitempty"`
-	AverageMS         *int64 `json:"average_response_ms,omitempty"`
-	RequestsWithTime  int64  `json:"requests_with_response_time"`
-	InputTokens       int64  `json:"input_tokens"`
-	OutputTokens      int64  `json:"output_tokens"`
-	TotalTokens       int64  `json:"total_tokens"`
-	CachedReadTokens  int64  `json:"cached_read_tokens"`
-	CacheWriteTokens  int64  `json:"cache_write_tokens"`
-	ReasoningTokens   int64  `json:"reasoning_tokens"`
-	EstimatedCostPico int64  `json:"estimated_cost_pico_usd"`
-	OfficialCostPico  int64  `json:"official_cost_pico_usd"`
-	ActualCostPico    int64  `json:"actual_cost_pico_usd"`
-	SavedCostPico     int64  `json:"saved_cost_pico_usd"`
-	DiscountPico      int64  `json:"discount_pico_usd"`
-	DiscountBPS       *int64 `json:"discount_percent_bps,omitempty"`
+	Model                 string `json:"model"`
+	Free                  bool   `json:"free"`
+	Requests              int64  `json:"requests"`
+	EligibleRequests      int64  `json:"eligible_requests"`
+	ExcludedLimitRequests int64  `json:"excluded_limit_requests"`
+	SucceededRequests     int64  `json:"succeeded_requests"`
+	FailedRequests        int64  `json:"failed_requests"`
+	PartialRequests       int64  `json:"partial_requests"`
+	SuccessRateBPS        int64  `json:"success_rate_bps"`
+	TotalAttempts         int64  `json:"total_attempts"`
+	RetriedRequests       int64  `json:"retried_requests"`
+	RetryRateBPS          int64  `json:"retry_rate_bps"`
+	FastestMS             *int64 `json:"fastest_response_ms,omitempty"`
+	SlowestMS             *int64 `json:"slowest_response_ms,omitempty"`
+	AverageMS             *int64 `json:"average_response_ms,omitempty"`
+	RequestsWithTime      int64  `json:"requests_with_response_time"`
+	InputTokens           int64  `json:"input_tokens"`
+	OutputTokens          int64  `json:"output_tokens"`
+	TotalTokens           int64  `json:"total_tokens"`
+	CachedReadTokens      int64  `json:"cached_read_tokens"`
+	CacheWriteTokens      int64  `json:"cache_write_tokens"`
+	ReasoningTokens       int64  `json:"reasoning_tokens"`
+	EstimatedCostPico     int64  `json:"estimated_cost_pico_usd"`
+	OfficialCostPico      int64  `json:"official_cost_pico_usd"`
+	ActualCostPico        int64  `json:"actual_cost_pico_usd"`
+	SavedCostPico         int64  `json:"saved_cost_pico_usd"`
+	DiscountPico          int64  `json:"discount_pico_usd"`
+	DiscountBPS           *int64 `json:"discount_percent_bps,omitempty"`
 }
 
 // ProviderStats aggregates terminal request outcomes by the provider that
 // ultimately served each request. Retry attempts are included in the attempt
 // totals while spend and usage remain attached to the completed request.
 type ProviderStats struct {
-	Provider          string `json:"provider"`
-	Requests          int64  `json:"requests"`
-	SucceededRequests int64  `json:"succeeded_requests"`
-	FailedRequests    int64  `json:"failed_requests"`
-	PartialRequests   int64  `json:"partial_requests"`
-	SuccessRateBPS    int64  `json:"success_rate_bps"`
-	TotalAttempts     int64  `json:"total_attempts"`
-	RetriedRequests   int64  `json:"retried_requests"`
-	RetryRateBPS      int64  `json:"retry_rate_bps"`
-	FastestMS         *int64 `json:"fastest_response_ms,omitempty"`
-	SlowestMS         *int64 `json:"slowest_response_ms,omitempty"`
-	AverageMS         *int64 `json:"average_response_ms,omitempty"`
-	RequestsWithTime  int64  `json:"requests_with_response_time"`
-	InputTokens       int64  `json:"input_tokens"`
-	OutputTokens      int64  `json:"output_tokens"`
-	TotalTokens       int64  `json:"total_tokens"`
-	CachedReadTokens  int64  `json:"cached_read_tokens"`
-	CacheWriteTokens  int64  `json:"cache_write_tokens"`
-	ReasoningTokens   int64  `json:"reasoning_tokens"`
-	EstimatedCostPico int64  `json:"estimated_cost_pico_usd"`
-	OfficialCostPico  int64  `json:"official_cost_pico_usd"`
-	ActualCostPico    int64  `json:"actual_cost_pico_usd"`
-	SavedCostPico     int64  `json:"saved_cost_pico_usd"`
-	DiscountBPS       *int64 `json:"discount_percent_bps,omitempty"`
+	Provider              string `json:"provider"`
+	Requests              int64  `json:"requests"`
+	EligibleRequests      int64  `json:"eligible_requests"`
+	ExcludedLimitRequests int64  `json:"excluded_limit_requests"`
+	SucceededRequests     int64  `json:"succeeded_requests"`
+	FailedRequests        int64  `json:"failed_requests"`
+	PartialRequests       int64  `json:"partial_requests"`
+	SuccessRateBPS        int64  `json:"success_rate_bps"`
+	TotalAttempts         int64  `json:"total_attempts"`
+	RetriedRequests       int64  `json:"retried_requests"`
+	RetryRateBPS          int64  `json:"retry_rate_bps"`
+	FastestMS             *int64 `json:"fastest_response_ms,omitempty"`
+	SlowestMS             *int64 `json:"slowest_response_ms,omitempty"`
+	AverageMS             *int64 `json:"average_response_ms,omitempty"`
+	RequestsWithTime      int64  `json:"requests_with_response_time"`
+	InputTokens           int64  `json:"input_tokens"`
+	OutputTokens          int64  `json:"output_tokens"`
+	TotalTokens           int64  `json:"total_tokens"`
+	CachedReadTokens      int64  `json:"cached_read_tokens"`
+	CacheWriteTokens      int64  `json:"cache_write_tokens"`
+	ReasoningTokens       int64  `json:"reasoning_tokens"`
+	EstimatedCostPico     int64  `json:"estimated_cost_pico_usd"`
+	OfficialCostPico      int64  `json:"official_cost_pico_usd"`
+	ActualCostPico        int64  `json:"actual_cost_pico_usd"`
+	SavedCostPico         int64  `json:"saved_cost_pico_usd"`
+	DiscountBPS           *int64 `json:"discount_percent_bps,omitempty"`
 }
 
 type ProviderCredential struct {
-	ID               string  `json:"id"`
-	Provider         string  `json:"provider"`
-	Label            string  `json:"label"`
-	BaseURL          string  `json:"base_url,omitempty"`
-	Ciphertext       []byte  `json:"-"`
-	Nonce            []byte  `json:"-"`
-	Enabled          bool    `json:"enabled"`
-	CreatedAt        string  `json:"created_at"`
-	UpdatedAt        string  `json:"updated_at"`
-	LastCheckedAt    *string `json:"last_checked_at,omitempty"`
-	LastError        *string `json:"last_error,omitempty"`
-	ManualModelsJSON string  `json:"-"`
+	ID                     string  `json:"id"`
+	Provider               string  `json:"provider"`
+	Label                  string  `json:"label"`
+	BaseURL                string  `json:"base_url,omitempty"`
+	Ciphertext             []byte  `json:"-"`
+	Nonce                  []byte  `json:"-"`
+	Enabled                bool    `json:"enabled"`
+	CreatedAt              string  `json:"created_at"`
+	UpdatedAt              string  `json:"updated_at"`
+	LastCheckedAt          *string `json:"last_checked_at,omitempty"`
+	LastError              *string `json:"last_error,omitempty"`
+	ManualModelsJSON       string  `json:"-"`
+	AccessMode             string  `json:"access_mode"`
+	SubscriptionFeePicoUSD *int64  `json:"subscription_fee_pico_usd,omitempty"`
+	SubscriptionCycleStart *string `json:"subscription_cycle_start,omitempty"`
+	SubscriptionCycleEnd   *string `json:"subscription_cycle_end,omitempty"`
+	SubscriptionStatus     string  `json:"subscription_status"`
+	NextAvailableAt        *string `json:"next_available_at,omitempty"`
+	StatusReason           *string `json:"status_reason,omitempty"`
 }
 
 func Open(ctx context.Context, path string) (*Store, error) {
@@ -300,12 +316,18 @@ func (s *Store) UpsertProviderCredential(ctx context.Context, credential Provide
 	if credential.CreatedAt == "" {
 		credential.CreatedAt = now
 	}
-	_, err := s.db.ExecContext(ctx, `INSERT INTO provider_credentials(id, provider, label, base_url, ciphertext, nonce, enabled, created_at, updated_at, manual_models_json) VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?) ON CONFLICT(id) DO UPDATE SET provider=excluded.provider, label=excluded.label, base_url=excluded.base_url, ciphertext=excluded.ciphertext, nonce=excluded.nonce, enabled=excluded.enabled, updated_at=excluded.updated_at, manual_models_json=excluded.manual_models_json`, credential.ID, credential.Provider, credential.Label, credential.BaseURL, credential.Ciphertext, credential.Nonce, boolInt(credential.Enabled), credential.CreatedAt, now, credential.ManualModelsJSON)
+	if credential.AccessMode == "" {
+		credential.AccessMode = "api"
+	}
+	if credential.SubscriptionStatus == "" {
+		credential.SubscriptionStatus = "available"
+	}
+	_, err := s.db.ExecContext(ctx, `INSERT INTO provider_credentials(id, provider, label, base_url, ciphertext, nonce, enabled, created_at, updated_at, manual_models_json, access_mode, subscription_fee_pico_usd, subscription_cycle_start, subscription_cycle_end, subscription_status, next_available_at, status_reason) VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) ON CONFLICT(id) DO UPDATE SET provider=excluded.provider, label=excluded.label, base_url=excluded.base_url, ciphertext=excluded.ciphertext, nonce=excluded.nonce, enabled=excluded.enabled, updated_at=excluded.updated_at, manual_models_json=excluded.manual_models_json, access_mode=excluded.access_mode, subscription_fee_pico_usd=excluded.subscription_fee_pico_usd, subscription_cycle_start=excluded.subscription_cycle_start, subscription_cycle_end=excluded.subscription_cycle_end, subscription_status=excluded.subscription_status, next_available_at=excluded.next_available_at, status_reason=excluded.status_reason`, credential.ID, credential.Provider, credential.Label, credential.BaseURL, credential.Ciphertext, credential.Nonce, boolInt(credential.Enabled), credential.CreatedAt, now, credential.ManualModelsJSON, credential.AccessMode, credential.SubscriptionFeePicoUSD, credential.SubscriptionCycleStart, credential.SubscriptionCycleEnd, credential.SubscriptionStatus, credential.NextAvailableAt, credential.StatusReason)
 	return err
 }
 
 func (s *Store) ListProviderCredentials(ctx context.Context) ([]ProviderCredential, error) {
-	rows, err := s.db.QueryContext(ctx, `SELECT id, provider, label, base_url, ciphertext, nonce, enabled, created_at, updated_at, last_checked_at, last_error, manual_models_json FROM provider_credentials ORDER BY created_at DESC`)
+	rows, err := s.db.QueryContext(ctx, `SELECT id, provider, label, base_url, ciphertext, nonce, enabled, created_at, updated_at, last_checked_at, last_error, manual_models_json, access_mode, subscription_fee_pico_usd, subscription_cycle_start, subscription_cycle_end, subscription_status, next_available_at, status_reason FROM provider_credentials ORDER BY created_at DESC`)
 	if err != nil {
 		return nil, err
 	}
@@ -314,13 +336,74 @@ func (s *Store) ListProviderCredentials(ctx context.Context) ([]ProviderCredenti
 	for rows.Next() {
 		var credential ProviderCredential
 		var enabled int
-		if err := rows.Scan(&credential.ID, &credential.Provider, &credential.Label, &credential.BaseURL, &credential.Ciphertext, &credential.Nonce, &enabled, &credential.CreatedAt, &credential.UpdatedAt, &credential.LastCheckedAt, &credential.LastError, &credential.ManualModelsJSON); err != nil {
+		if err := rows.Scan(&credential.ID, &credential.Provider, &credential.Label, &credential.BaseURL, &credential.Ciphertext, &credential.Nonce, &enabled, &credential.CreatedAt, &credential.UpdatedAt, &credential.LastCheckedAt, &credential.LastError, &credential.ManualModelsJSON, &credential.AccessMode, &credential.SubscriptionFeePicoUSD, &credential.SubscriptionCycleStart, &credential.SubscriptionCycleEnd, &credential.SubscriptionStatus, &credential.NextAvailableAt, &credential.StatusReason); err != nil {
 			return nil, err
 		}
 		credential.Enabled = enabled != 0
 		result = append(result, credential)
 	}
 	return result, rows.Err()
+}
+
+// MarkProviderLimited persists a provider/account limit and its best-known reset time.
+func (s *Store) MarkProviderLimited(ctx context.Context, provider string, next *time.Time, reason string) error {
+	var nextValue any
+	if next != nil {
+		nextValue = next.UTC().Format(time.RFC3339Nano)
+	}
+	_, err := s.db.ExecContext(ctx, `UPDATE provider_credentials SET subscription_status='limited', next_available_at=?, status_reason=?, last_error=?, last_checked_at=?, updated_at=? WHERE provider=?`, nextValue, NULLString(reason), NULLString(reason), time.Now().UTC().Format(time.RFC3339Nano), time.Now().UTC().Format(time.RFC3339Nano), provider)
+	return err
+}
+
+func NULLString(value string) any {
+	if strings.TrimSpace(value) == "" {
+		return nil
+	}
+	return value
+}
+
+func (s *Store) ClearExpiredProviderLimits(ctx context.Context, now time.Time) error {
+	_, err := s.db.ExecContext(ctx, `UPDATE provider_credentials SET subscription_status='available', next_available_at=NULL, status_reason=NULL WHERE subscription_status='limited' AND next_available_at IS NOT NULL AND next_available_at <= ?`, now.UTC().Format(time.RFC3339Nano))
+	return err
+}
+
+func (s *Store) SubscriptionUsage(ctx context.Context) ([]subscription.UsageRow, error) {
+	rows, err := s.db.QueryContext(ctx, `SELECT c.provider, c.label, c.subscription_fee_pico_usd, c.subscription_cycle_start, c.subscription_cycle_end, r.received_at, COALESCE(u.input_tokens,0), COALESCE(u.output_tokens,0) FROM provider_credentials c JOIN proxy_requests r ON r.selected_provider=c.provider LEFT JOIN request_usage u ON u.request_id=r.id WHERE c.access_mode='subscription' AND c.subscription_fee_pico_usd IS NOT NULL AND r.state='succeeded' ORDER BY r.received_at`)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	result := make([]subscription.UsageRow, 0)
+	for rows.Next() {
+		var provider, label, at string
+		var fee int64
+		var start, end sql.NullString
+		var in, out int64
+		if err := rows.Scan(&provider, &label, &fee, &start, &end, &at, &in, &out); err != nil {
+			return nil, err
+		}
+		when, err := time.Parse(time.RFC3339Nano, at)
+		if err != nil {
+			continue
+		}
+		row := subscription.UsageRow{Provider: provider, Label: label, FeePicoUSD: fee, At: when, InputTokens: in, OutputTokens: out}
+		if start.Valid {
+			row.CycleStart, _ = time.Parse(time.RFC3339Nano, start.String)
+		}
+		if end.Valid {
+			row.CycleEnd, _ = time.Parse(time.RFC3339Nano, end.String)
+		}
+		result = append(result, row)
+	}
+	return result, rows.Err()
+}
+
+func (s *Store) SubscriptionPricing(ctx context.Context) ([]subscription.Pricing, error) {
+	rows, err := s.SubscriptionUsage(ctx)
+	if err != nil {
+		return nil, err
+	}
+	return subscription.Calculate(rows), nil
 }
 
 func (s *Store) DeleteProviderCredential(ctx context.Context, id string) error {
@@ -355,7 +438,11 @@ func (s *Store) CompleteProxyRequest(ctx context.Context, id, state, errorCode, 
 		}
 		duration = ms
 	}
-	_, err := s.db.ExecContext(ctx, `UPDATE proxy_requests SET state = ?, completed_at = ?, duration_ms = ?, error_code = NULLIF(?, ''), error_message = NULLIF(?, '') WHERE id = ?`, state, completedAt, duration, errorCode, errorMessage, id)
+	disposition := "included"
+	if errorCode == "provider_rate_limit" || errorCode == "provider_quota_exhausted" || errorCode == "all_subscription_quotas_exhausted" {
+		disposition = "excluded_limit"
+	}
+	_, err := s.db.ExecContext(ctx, `UPDATE proxy_requests SET state = ?, completed_at = ?, duration_ms = ?, error_code = NULLIF(?, ''), error_message = NULLIF(?, ''), stats_disposition = CASE WHEN ? = 'excluded_limit' THEN 'excluded_limit' ELSE stats_disposition END WHERE id = ?`, state, completedAt, duration, errorCode, errorMessage, disposition, id)
 	return err
 }
 
@@ -394,7 +481,11 @@ func (s *Store) recordProxyAttempt(ctx context.Context, requestID string, attemp
 			duration = int64(0)
 		}
 	}
-	_, err := s.db.ExecContext(ctx, `INSERT INTO proxy_attempts(id, request_id, attempt_number, route_id, provider, upstream_model, state, started_at, completed_at, duration_ms, error_class, error_message, error_raw) VALUES(?, ?, ?, ?, ?, ?, ?, ?, NULLIF(?, ''), ?, NULLIF(?, ''), NULLIF(?, ''), NULLIF(?, '')) ON CONFLICT(id) DO UPDATE SET provider=excluded.provider, upstream_model=excluded.upstream_model, state=excluded.state, completed_at=excluded.completed_at, duration_ms=COALESCE(excluded.duration_ms, proxy_attempts.duration_ms), error_class=excluded.error_class, error_message=excluded.error_message, error_raw=excluded.error_raw`, requestID+":"+fmt.Sprint(attempt), requestID, attempt, provider+":"+upstream, provider, upstream, state, now, now, duration, errorClass, errorMessage, raw)
+	disposition := "included"
+	if errorClass == string(retry.ErrorRateLimit) || errorClass == string(retry.ErrorQuotaExhausted) {
+		disposition = "excluded_limit"
+	}
+	_, err := s.db.ExecContext(ctx, `INSERT INTO proxy_attempts(id, request_id, attempt_number, route_id, provider, upstream_model, state, started_at, completed_at, duration_ms, error_class, error_message, error_raw, stats_disposition) VALUES(?, ?, ?, ?, ?, ?, ?, ?, NULLIF(?, ''), ?, NULLIF(?, ''), NULLIF(?, ''), NULLIF(?, ''), ?) ON CONFLICT(id) DO UPDATE SET provider=excluded.provider, upstream_model=excluded.upstream_model, state=excluded.state, completed_at=excluded.completed_at, duration_ms=COALESCE(excluded.duration_ms, proxy_attempts.duration_ms), error_class=excluded.error_class, error_message=excluded.error_message, error_raw=excluded.error_raw, stats_disposition=excluded.stats_disposition`, requestID+":"+fmt.Sprint(attempt), requestID, attempt, provider+":"+upstream, provider, upstream, state, now, now, duration, errorClass, errorMessage, raw, disposition)
 	return err
 }
 
@@ -519,6 +610,12 @@ func (s *Store) RequestStatsSummary(ctx context.Context) (StatsSummary, error) {
 		value := summary.SavedCostPico * 10000 / summary.OfficialCostPico
 		summary.SavedPercentBPS = &value
 	}
+	if err == nil {
+		_ = s.db.QueryRowContext(ctx, `SELECT COALESCE(SUM(CASE WHEN stats_disposition='included' THEN 1 ELSE 0 END),0), COALESCE(SUM(CASE WHEN stats_disposition='excluded_limit' THEN 1 ELSE 0 END),0) FROM proxy_requests`).Scan(&summary.EligibleRequests, &summary.ExcludedLimitRequests)
+		if summary.EligibleRequests > 0 {
+			summary.SuccessRateBPS = summary.SucceededRequests * 10000 / summary.EligibleRequests
+		}
+	}
 	return summary, err
 }
 
@@ -527,6 +624,8 @@ func (s *Store) ModelStats(ctx context.Context, freeModels map[string]bool) ([]M
 		r.logical_model,
 		CASE WHEN EXISTS (SELECT 1 FROM proxy_attempts pa JOIN proxy_requests rp ON rp.id = pa.request_id WHERE rp.logical_model = r.logical_model AND pa.upstream_model LIKE '%:free') THEN 1 ELSE 0 END,
 		COUNT(*),
+		COALESCE(SUM(CASE WHEN r.stats_disposition='included' THEN 1 ELSE 0 END),0),
+		COALESCE(SUM(CASE WHEN r.stats_disposition='excluded_limit' THEN 1 ELSE 0 END),0),
 		COALESCE(SUM(CASE WHEN r.state = 'succeeded' THEN 1 ELSE 0 END), 0),
 		COALESCE(SUM(CASE WHEN r.state = 'failed' THEN 1 ELSE 0 END), 0),
 		COALESCE(SUM(CASE WHEN r.state = 'partial' THEN 1 ELSE 0 END), 0),
@@ -548,7 +647,7 @@ func (s *Store) ModelStats(ctx context.Context, freeModels map[string]bool) ([]M
 		var item ModelStats
 		var observedFree int
 		var fastest, slowest, average sql.NullInt64
-		if err := rows.Scan(&item.Model, &observedFree, &item.Requests, &item.SucceededRequests, &item.FailedRequests, &item.PartialRequests,
+		if err := rows.Scan(&item.Model, &observedFree, &item.Requests, &item.EligibleRequests, &item.ExcludedLimitRequests, &item.SucceededRequests, &item.FailedRequests, &item.PartialRequests,
 			&item.TotalAttempts, &item.RetriedRequests, &fastest, &slowest, &average, &item.RequestsWithTime,
 			&item.InputTokens, &item.OutputTokens, &item.TotalTokens, &item.CachedReadTokens, &item.CacheWriteTokens, &item.ReasoningTokens,
 			&item.EstimatedCostPico, &item.OfficialCostPico, &item.ActualCostPico, &item.DiscountPico, &item.SavedCostPico); err != nil {
@@ -556,7 +655,9 @@ func (s *Store) ModelStats(ctx context.Context, freeModels map[string]bool) ([]M
 		}
 		item.Free = freeModels[item.Model] || observedFree != 0
 		if item.Requests > 0 {
-			item.SuccessRateBPS = item.SucceededRequests * 10000 / item.Requests
+			if item.EligibleRequests > 0 {
+				item.SuccessRateBPS = item.SucceededRequests * 10000 / item.EligibleRequests
+			}
 			item.RetryRateBPS = item.RetriedRequests * 10000 / item.Requests
 		}
 		if item.OfficialCostPico > 0 {
@@ -581,6 +682,8 @@ func (s *Store) ProviderStats(ctx context.Context) ([]ProviderStats, error) {
 	rows, err := s.db.QueryContext(ctx, `SELECT
 		COALESCE(NULLIF(r.selected_provider, ''), 'unknown'),
 		COUNT(*),
+		COALESCE(SUM(CASE WHEN r.stats_disposition='included' THEN 1 ELSE 0 END),0),
+		COALESCE(SUM(CASE WHEN r.stats_disposition='excluded_limit' THEN 1 ELSE 0 END),0),
 		COALESCE(SUM(CASE WHEN r.state = 'succeeded' THEN 1 ELSE 0 END), 0),
 		COALESCE(SUM(CASE WHEN r.state = 'failed' THEN 1 ELSE 0 END), 0),
 		COALESCE(SUM(CASE WHEN r.state = 'partial' THEN 1 ELSE 0 END), 0),
@@ -602,14 +705,16 @@ func (s *Store) ProviderStats(ctx context.Context) ([]ProviderStats, error) {
 	for rows.Next() {
 		var item ProviderStats
 		var fastest, slowest, average sql.NullInt64
-		if err := rows.Scan(&item.Provider, &item.Requests, &item.SucceededRequests, &item.FailedRequests, &item.PartialRequests,
+		if err := rows.Scan(&item.Provider, &item.Requests, &item.EligibleRequests, &item.ExcludedLimitRequests, &item.SucceededRequests, &item.FailedRequests, &item.PartialRequests,
 			&item.TotalAttempts, &item.RetriedRequests, &fastest, &slowest, &average, &item.RequestsWithTime,
 			&item.InputTokens, &item.OutputTokens, &item.TotalTokens, &item.CachedReadTokens, &item.CacheWriteTokens, &item.ReasoningTokens,
 			&item.EstimatedCostPico, &item.OfficialCostPico, &item.ActualCostPico, &item.SavedCostPico); err != nil {
 			return nil, err
 		}
 		if item.Requests > 0 {
-			item.SuccessRateBPS = item.SucceededRequests * 10000 / item.Requests
+			if item.EligibleRequests > 0 {
+				item.SuccessRateBPS = item.SucceededRequests * 10000 / item.EligibleRequests
+			}
 			item.RetryRateBPS = item.RetriedRequests * 10000 / item.Requests
 		}
 		if item.OfficialCostPico > 0 {

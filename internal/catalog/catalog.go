@@ -34,10 +34,39 @@ type Manager struct {
 	clients []providers.Client
 	mu      sync.RWMutex
 	current Snapshot
+	blocked map[string]*time.Time
 }
 
 func New(clients []providers.Client) *Manager {
-	return &Manager{clients: append([]providers.Client(nil), clients...)}
+	return &Manager{clients: append([]providers.Client(nil), clients...), blocked: make(map[string]*time.Time)}
+}
+
+func (m *Manager) SetProviderBlocked(provider string, until *time.Time) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if m.blocked == nil {
+		m.blocked = make(map[string]*time.Time)
+	}
+	if until == nil {
+		m.blocked[provider] = nil
+		return
+	}
+	copy := until.UTC()
+	m.blocked[provider] = &copy
+}
+
+func (m *Manager) ProviderBlocked(provider string, now time.Time) bool {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	until, ok := m.blocked[provider]
+	if !ok {
+		return false
+	}
+	if until != nil && !now.Before(*until) {
+		delete(m.blocked, provider)
+		return false
+	}
+	return true
 }
 
 func (m *Manager) SetClients(clients []providers.Client) {

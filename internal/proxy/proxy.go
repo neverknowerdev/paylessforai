@@ -233,12 +233,21 @@ func appendUnique(values []string, additions ...string) []string {
 
 func (p *Proxy) execute(ctx context.Context, writer http.ResponseWriter, requestID string, body []byte, request parsedRequest, ranked []matcher.RankedRoute, officialPrice matcher.Price, officialExpectedCost int64) error {
 	current := 0
+	blocked := false
 	policy := retry.DefaultPolicy()
 	for attempt := 1; attempt <= policy.MaximumAttempts; attempt++ {
 		if current >= len(ranked) {
+			if blocked {
+				return &proxyError{status: http.StatusTooManyRequests, code: "all_subscription_quotas_exhausted", message: "all eligible subscription provider accounts are temporarily limited"}
+			}
 			return &proxyError{status: http.StatusServiceUnavailable, code: "no_fallback_route", message: "all eligible routes were exhausted"}
 		}
 		route := ranked[current].Route
+		if p.Catalog.ProviderBlocked(route.Provider, time.Now().UTC()) {
+			blocked = true
+			current++
+			continue
+		}
 		client := p.Catalog.Client(route.Provider)
 		if client == nil {
 			if p.Store != nil {
@@ -275,6 +284,16 @@ func (p *Proxy) execute(ctx context.Context, writer http.ResponseWriter, request
 			return completeErr
 		}
 		classified := classify(err)
+		if classified.Class == retry.ErrorQuotaExhausted {
+			blocked = true
+			var upstream *providers.UpstreamError
+			if errors.As(err, &upstream) {
+				p.Catalog.SetProviderBlocked(route.Provider, upstream.NextAvailableAt)
+				if p.Store != nil {
+					_ = p.Store.MarkProviderLimited(ctx, route.Provider, upstream.NextAvailableAt, upstream.Message)
+				}
+			}
+		}
 		if p.Store != nil {
 			_ = p.Store.RecordProxyAttempt(ctx, requestID, attempt, route.Provider, route.UpstreamModel, "failed", errorCode(err), humanErrorMessage(err), rawErrorMessage(err))
 		}
@@ -501,7 +520,7 @@ func classify(err error) retry.ClassifiedError {
 			value := time.Duration(*upstream.RetryAfter) * time.Second
 			delay = &value
 		}
-		return retry.ClassifiedError{Class: upstream.Class, HTTPStatus: upstream.StatusCode, RetryAfter: delay, Description: upstream.Message}
+		return retry.ClassifiedError{Class: upstream.Class, HTTPStatus: upstream.StatusCode, RetryAfter: delay, NextAvailableAt: upstream.NextAvailableAt, Description: upstream.Message}
 	}
 	return retry.ClassifiedError{Class: retry.ErrorTransport, Description: err.Error()}
 }
@@ -613,6 +632,8 @@ func errorCode(err error) string {
 			return "model_not_found"
 		case retry.ErrorRateLimit:
 			return "provider_rate_limit"
+		case retry.ErrorQuotaExhausted:
+			return "provider_quota_exhausted"
 		case retry.ErrorTimeout:
 			return "provider_timeout"
 		}

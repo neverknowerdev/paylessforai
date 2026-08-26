@@ -94,6 +94,7 @@ func (m *Manager) Refresh(ctx context.Context) error {
 	type discovered struct {
 		provider string
 		models   []providers.Model
+		client   providers.Client
 	}
 	clients := m.Clients()
 	all := make([]discovered, 0, len(clients))
@@ -104,7 +105,7 @@ func (m *Manager) Refresh(ctx context.Context) error {
 			failures = append(failures, client.Name()+": "+err.Error())
 			continue
 		}
-		all = append(all, discovered{provider: client.Name(), models: models})
+		all = append(all, discovered{provider: client.Name(), models: models, client: client})
 	}
 	if len(all) == 0 {
 		return fmt.Errorf("all provider catalog refreshes failed: %s", strings.Join(failures, "; "))
@@ -121,6 +122,17 @@ func (m *Manager) Refresh(ctx context.Context) error {
 	modelMap := map[string]Model{}
 	routes := make([]matcher.Route, 0)
 	for _, batch := range all {
+		executionKey, credentialID := batch.provider, ""
+		billingClass := matcher.BillingMetered
+		if metadata, ok := batch.client.(providers.ClientMetadata); ok {
+			if value := metadata.ExecutionKey(); value != "" {
+				executionKey = value
+			}
+			credentialID = metadata.CredentialID()
+			if value := metadata.BillingClass(); value != "" {
+				billingClass = value
+			}
+		}
 		for _, model := range batch.models {
 			logical := logicalModel(batch.provider, model.ID, openRouterIDs)
 			// Providers classify free routes while parsing their native catalog
@@ -148,7 +160,11 @@ func (m *Manager) Refresh(ctx context.Context) error {
 			for _, modality := range model.OutputModalities {
 				outputModalities[strings.ToLower(modality)] = true
 			}
-			routes = append(routes, matcher.Route{ID: batch.provider + ":" + model.ID, Provider: batch.provider, LogicalModel: logical, UpstreamModel: model.ID, Free: free, Price: model.Pricing, PriceAvailable: model.PriceAvailable, OfficialPrice: model.OfficialPricing, OfficialPriceAvailable: model.OfficialPriceAvailable, Capabilities: matcher.Capabilities{Protocols: protocols, Parameters: parameters, Tools: parameters["tools"], StructuredOutput: parameters["response_format"] || parameters["structured_outputs"], MaxContext: model.ContextLength, MaxOutput: model.MaxCompletionTokens, InputModalities: inputModalities, OutputModalities: outputModalities, Tags: append([]string(nil), model.Tags...)}, Health: matcher.HealthHealthy, Trusted: true})
+			routeBilling := billingClass
+			if free {
+				routeBilling = matcher.BillingFree
+			}
+			routes = append(routes, matcher.Route{ID: executionKey + ":" + model.ID, Provider: batch.provider, LogicalModel: logical, UpstreamModel: model.ID, Free: free, Price: model.Pricing, PriceAvailable: model.PriceAvailable, OfficialPrice: model.OfficialPricing, OfficialPriceAvailable: model.OfficialPriceAvailable, CredentialID: credentialID, ExecutionKey: executionKey, BillingClass: routeBilling, Capabilities: matcher.Capabilities{Protocols: protocols, Parameters: parameters, Tools: parameters["tools"], StructuredOutput: parameters["response_format"] || parameters["structured_outputs"], MaxContext: model.ContextLength, MaxOutput: model.MaxCompletionTokens, InputModalities: inputModalities, OutputModalities: outputModalities, Tags: append([]string(nil), model.Tags...)}, Health: matcher.HealthHealthy, Trusted: true})
 		}
 	}
 	models := make([]Model, 0, len(modelMap))
@@ -173,6 +189,18 @@ func (m *Manager) Client(provider string) providers.Client {
 		}
 	}
 	return nil
+}
+
+func (m *Manager) ClientForRoute(route matcher.Route) providers.Client {
+	if route.ExecutionKey == "" {
+		return m.Client(route.Provider)
+	}
+	for _, client := range m.Clients() {
+		if metadata, ok := client.(providers.ClientMetadata); ok && metadata.ExecutionKey() == route.ExecutionKey {
+			return client
+		}
+	}
+	return m.Client(route.Provider)
 }
 
 func logicalModel(provider, id string, openRouterIDs []string) string {

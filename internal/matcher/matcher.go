@@ -26,6 +26,16 @@ const (
 	HealthDisabled Health = "disabled"
 )
 
+// BillingClass describes the marginal billing source of a route. It is kept
+// in matcher so the pure engine does not depend on persistence or groups.
+type BillingClass string
+
+const (
+	BillingFree         BillingClass = "free"
+	BillingSubscription BillingClass = "subscription"
+	BillingMetered      BillingClass = "metered"
+)
+
 // Price stores USD prices in pico-USD per token. Fixed-point values keep route
 // selection deterministic and avoid binary floating-point surprises.
 type Price struct {
@@ -78,26 +88,33 @@ type Route struct {
 	Trusted                bool
 	SuccessRateBPS         int64
 	LatencyMillisP50       int64
+	CredentialID           string
+	ExecutionKey           string
+	BillingClass           BillingClass
 }
 
 // MatchRequest contains only facts needed by the matcher.
 type MatchRequest struct {
-	Protocol                 Protocol
-	LogicalModel             string
-	RequiredParameters       []string
-	RequireTools             bool
-	RequireStructured        bool
-	InputTokens              int64
-	ExpectedOutput           int64
-	MaxContext               int64
-	MaxOutput                int64
-	AllowStale               bool
-	AllowUntrusted           bool
-	AllowedProviders         []string
-	ExcludedProviders        []string
-	MaximumCostPicoUSD       *int64
-	RequiredInputModalities  []string
-	RequiredOutputModalities []string
+	Protocol                     Protocol
+	LogicalModel                 string
+	LogicalModels                []string
+	RequiredParameters           []string
+	RequireTools                 bool
+	RequireStructured            bool
+	InputTokens                  int64
+	ExpectedOutput               int64
+	MaxContext                   int64
+	MaxOutput                    int64
+	AllowStale                   bool
+	AllowUntrusted               bool
+	AllowedProviders             []string
+	ExcludedProviders            []string
+	MaximumCostPicoUSD           *int64
+	MaximumInputPicoUSDPerToken  *int64
+	MaximumOutputPicoUSDPerToken *int64
+	AllowedBillingClasses        []BillingClass
+	RequiredInputModalities      []string
+	RequiredOutputModalities     []string
 }
 
 type MatchInput struct {
@@ -112,14 +129,14 @@ type RankedRoute struct {
 }
 
 type RouteRejection struct {
-	RouteID string
-	Code    string
-	Detail  string
+	RouteID string `json:"route_id"`
+	Code    string `json:"code"`
+	Detail  string `json:"detail"`
 }
 
 type MatchError struct {
-	Code    string
-	Message string
+	Code    string `json:"code"`
+	Message string `json:"message"`
 }
 
 func (e *MatchError) Error() string { return e.Code + ": " + e.Message }
@@ -199,7 +216,7 @@ func rejectRoute(request MatchRequest, route Route, now time.Time, allowed, excl
 	reject := func(code, detail string) (RouteRejection, bool) {
 		return RouteRejection{RouteID: route.ID, Code: code, Detail: detail}, true
 	}
-	if !sameLogicalModel(route.LogicalModel, request.LogicalModel) {
+	if !modelAllowed(route.LogicalModel, request) {
 		return reject("wrong_model", "route model does not match the requested logical model")
 	}
 	if !route.Capabilities.Protocols[request.Protocol] {
@@ -212,6 +229,26 @@ func rejectRoute(request MatchRequest, route Route, now time.Time, allowed, excl
 	}
 	if _, ok := excluded[strings.ToLower(route.Provider)]; ok {
 		return reject("provider_excluded", "provider is on the deny-list")
+	}
+	if len(request.AllowedBillingClasses) > 0 {
+		billing := route.BillingClass
+		if billing == "" {
+			if route.Free {
+				billing = BillingFree
+			} else {
+				billing = BillingMetered
+			}
+		}
+		allowedBilling := false
+		for _, candidate := range request.AllowedBillingClasses {
+			if candidate == billing {
+				allowedBilling = true
+				break
+			}
+		}
+		if !allowedBilling {
+			return reject("wrong_billing_class", "route billing class is outside the stage policy")
+		}
 	}
 	if request.RequireTools && !route.Capabilities.Tools {
 		return reject("missing_capability", "route does not support tools")
@@ -258,7 +295,25 @@ func rejectRoute(request MatchRequest, route Route, now time.Time, allowed, excl
 	if route.Price.InputPicoUSDPerToken < 0 || route.Price.OutputPicoUSDPerToken < 0 || route.Price.FixedPicoUSD < 0 {
 		return reject("missing_price", "route has invalid negative pricing")
 	}
+	if request.MaximumInputPicoUSDPerToken != nil && route.Price.InputPicoUSDPerToken > *request.MaximumInputPicoUSDPerToken {
+		return reject("over_input_price_limit", "route input price exceeds the stage limit")
+	}
+	if request.MaximumOutputPicoUSDPerToken != nil && route.Price.OutputPicoUSDPerToken > *request.MaximumOutputPicoUSDPerToken {
+		return reject("over_output_price_limit", "route output price exceeds the stage limit")
+	}
 	return RouteRejection{}, false
+}
+
+func modelAllowed(routeModel string, request MatchRequest) bool {
+	if len(request.LogicalModels) == 0 {
+		return sameLogicalModel(routeModel, request.LogicalModel)
+	}
+	for _, model := range request.LogicalModels {
+		if sameLogicalModel(routeModel, model) {
+			return true
+		}
+	}
+	return false
 }
 
 func sameLogicalModel(routeModel, requestedModel string) bool {

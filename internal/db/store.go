@@ -113,6 +113,26 @@ func (s *Store) MarkProviderLimited(ctx context.Context, provider string, next *
 	return s.Repositories.ProviderCredentials.MarkLimited(ctx, provider, next, reason)
 }
 
+func (s *Store) MarkCredentialLimited(ctx context.Context, credentialID string, next *time.Time, reason string) error {
+	if credentialID == "" {
+		return nil
+	}
+	var nextValue any
+	if next != nil {
+		nextValue = next.UTC().Format(time.RFC3339Nano)
+	}
+	now := time.Now().UTC().Format(time.RFC3339Nano)
+	_, err := s.db.ExecContext(ctx, `UPDATE provider_credentials SET subscription_status='limited', next_available_at=?, status_reason=?, last_error=?, last_checked_at=?, updated_at=? WHERE id=?`, nextValue, nullableReason(reason), nullableReason(reason), now, now, credentialID)
+	return err
+}
+
+func nullableReason(value string) any {
+	if strings.TrimSpace(value) == "" {
+		return nil
+	}
+	return value
+}
+
 func (s *Store) ClearExpiredProviderLimits(ctx context.Context, now time.Time) error {
 	return s.Repositories.ProviderCredentials.ClearExpired(ctx, now)
 }

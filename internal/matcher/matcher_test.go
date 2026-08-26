@@ -128,3 +128,18 @@ func TestMatchRejectsMissingRequiredModalities(t *testing.T) {
 		t.Fatalf("unexpected modality result: %#v", result)
 	}
 }
+
+func TestMatchFiltersModelSetBillingAndPerTokenCaps(t *testing.T) {
+	cheap := testRoute("cheap", "model-a", 2, 2)
+	cheap.BillingClass = BillingMetered
+	expensive := testRoute("expensive", "model-b", 3, 3)
+	expensive.BillingClass = BillingSubscription
+	inputCap := int64(2)
+	result := New().Match(MatchInput{Request: MatchRequest{Protocol: ProtocolChatCompletions, LogicalModels: []string{"model-a", "model-b"}, InputTokens: 1, ExpectedOutput: 1, AllowedBillingClasses: []BillingClass{BillingMetered}, MaximumInputPicoUSDPerToken: &inputCap}, Routes: []Route{expensive, cheap}, Now: time.Unix(20, 0)})
+	if result.Selected == nil || result.Selected.Route.ID != "cheap" {
+		t.Fatalf("expected cheap metered route, got %#v", result)
+	}
+	if len(result.Rejections) != 1 || result.Rejections[0].Code != "wrong_billing_class" {
+		t.Fatalf("unexpected rejection: %#v", result.Rejections)
+	}
+}

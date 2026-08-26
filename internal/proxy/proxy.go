@@ -14,10 +14,12 @@ import (
 	"github.com/neverknowerdev/paylessforai/internal/catalog"
 	"github.com/neverknowerdev/paylessforai/internal/db"
 	"github.com/neverknowerdev/paylessforai/internal/db/models"
+	"github.com/neverknowerdev/paylessforai/internal/groups"
 	"github.com/neverknowerdev/paylessforai/internal/ids"
 	"github.com/neverknowerdev/paylessforai/internal/matcher"
 	"github.com/neverknowerdev/paylessforai/internal/providers"
 	"github.com/neverknowerdev/paylessforai/internal/retry"
+	"github.com/neverknowerdev/paylessforai/internal/routing"
 	"github.com/neverknowerdev/paylessforai/internal/usage"
 )
 
@@ -29,11 +31,14 @@ type Proxy struct {
 	Retry            retry.Engine
 	MaximumBody      int64
 	RequireClientKey bool
+	Groups           *groups.Manager
 }
 
 func New(catalogManager *catalog.Manager, dataStore *db.Store) *Proxy {
 	return &Proxy{Catalog: catalogManager, Store: dataStore, Retry: retry.New(), MaximumBody: defaultMaximumBody, RequireClientKey: true}
 }
+
+func (p *Proxy) SetGroups(manager *groups.Manager) { p.Groups = manager }
 
 func (p *Proxy) ServeHTTP(w http.ResponseWriter, r *http.Request, protocol matcher.Protocol) {
 	requestID := ids.New()
@@ -82,18 +87,31 @@ func (p *Proxy) ServeHTTP(w http.ResponseWriter, r *http.Request, protocol match
 		return
 	}
 	snapshot := p.Catalog.Snapshot()
-	match := matcher.New().Match(matcher.MatchInput{Request: request.MatchRequest(protocol), Routes: snapshot.Routes, Now: time.Now().UTC()})
-	if match.Selected == nil {
-		message := "no compatible provider route is available"
-		if match.Error != nil {
-			message = match.Error.Message
+	plan := routing.BuildDirect(request.MatchRequest(protocol), snapshot.Routes, time.Now().UTC())
+	if p.Groups != nil {
+		if definition, ok := p.Groups.FindBySlug(request.Model); ok {
+			plan = routing.BuildGroup(request.MatchRequest(protocol), definition, p.Groups.DefinitionsByID(), snapshot.Routes, time.Now().UTC(), routing.DefaultLimits())
 		}
-		p.finishError(r.Context(), requestID, "no_eligible_route", message)
-		writeError(w, http.StatusServiceUnavailable, "no_eligible_route", message)
+	}
+	if plan.Selected() == nil {
+		message := "no compatible provider route is available"
+		code := "no_eligible_route"
+		if plan.Error != nil {
+			message, code = plan.Error.Message, plan.Error.Code
+		}
+		p.finishError(r.Context(), requestID, code, message)
+		status := http.StatusServiceUnavailable
+		if code == "group_price_limit_exceeded" {
+			status = http.StatusUnprocessableEntity
+		}
+		writeError(w, status, code, message)
 		return
 	}
-	officialPrice, officialExpectedCost := officialPricing(match.Ranked)
-	if err := p.execute(r.Context(), w, requestID, body, request, match.Ranked, officialPrice, officialExpectedCost); err != nil {
+	if p.Store != nil {
+		_ = p.Store.RecordResolution(r.Context(), requestID, plan)
+	}
+	officialPrice, officialExpectedCost := officialPricing(planRanked(plan))
+	if err := p.execute(r.Context(), w, requestID, body, request, plan, officialPrice, officialExpectedCost); err != nil {
 		var partial *partialStreamError
 		if errors.As(err, &partial) {
 			return
@@ -232,55 +250,76 @@ func appendUnique(values []string, additions ...string) []string {
 	return values
 }
 
-func (p *Proxy) execute(ctx context.Context, writer http.ResponseWriter, requestID string, body []byte, request parsedRequest, ranked []matcher.RankedRoute, officialPrice matcher.Price, officialExpectedCost int64) error {
+func planRanked(plan routing.Plan) []matcher.RankedRoute {
+	result := make([]matcher.RankedRoute, 0, len(plan.Entries))
+	for _, entry := range plan.Entries {
+		result = append(result, matcher.RankedRoute{Route: entry.Route, ExpectedCost: entry.ExpectedCost})
+	}
+	return result
+}
+
+func (p *Proxy) execute(ctx context.Context, writer http.ResponseWriter, requestID string, body []byte, request parsedRequest, plan routing.Plan, officialPrice matcher.Price, officialExpectedCost int64) error {
 	current := 0
 	blocked := false
 	policy := retry.DefaultPolicy()
-	for attempt := 1; attempt <= policy.MaximumAttempts; attempt++ {
-		if current >= len(ranked) {
+	policy.MaximumAttempts = routing.DefaultLimits().MaximumAttempts
+	totalAttempts := 0
+	retriesRemaining := -1
+	for totalAttempts < policy.MaximumAttempts {
+		if current >= len(plan.Entries) {
 			if blocked {
 				return &proxyError{status: http.StatusTooManyRequests, code: "all_subscription_quotas_exhausted", message: "all eligible subscription provider accounts are temporarily limited"}
 			}
 			return &proxyError{status: http.StatusServiceUnavailable, code: "no_fallback_route", message: "all eligible routes were exhausted"}
 		}
-		route := ranked[current].Route
-		if p.Catalog.ProviderBlocked(route.Provider, time.Now().UTC()) {
+		entry := plan.Entries[current]
+		route := entry.Route
+		if retriesRemaining < 0 {
+			retriesRemaining = entry.SameRouteRetries
+		}
+		blockKey := route.ExecutionKey
+		if blockKey == "" {
+			blockKey = route.Provider
+		}
+		if p.Catalog.ProviderBlocked(blockKey, time.Now().UTC()) {
 			blocked = true
 			current++
+			retriesRemaining = -1
 			continue
 		}
-		client := p.Catalog.Client(route.Provider)
+		client := p.Catalog.ClientForRoute(route)
 		if client == nil {
 			if p.Store != nil {
-				_ = p.Store.RecordProxyAttempt(ctx, requestID, attempt, route.Provider, route.UpstreamModel, "failed", "provider_not_configured", "Selected provider is not configured.", "selected provider is not configured")
+				_ = p.Store.RecordProxyAttemptRoute(ctx, requestID, totalAttempts+1, route.ID, route.CredentialID, entry.StageID, strings.Join(entry.StagePath, " / "), route.Provider, route.UpstreamModel, "failed", "provider_not_configured", "Selected provider is not configured.", "selected provider is not configured")
 			}
 			return &proxyError{status: http.StatusBadGateway, code: "provider_not_configured", message: "selected provider is not configured"}
 		}
+		totalAttempts++
 		if p.Store != nil {
-			_ = p.Store.RecordProxyAttempt(ctx, requestID, attempt, route.Provider, route.UpstreamModel, "started", "", "")
+			_ = p.Store.RecordProxyAttemptRoute(ctx, requestID, totalAttempts, route.ID, route.CredentialID, entry.StageID, strings.Join(entry.StagePath, " / "), route.Provider, route.UpstreamModel, "started", "", "")
 		}
 		response, err := client.Do(ctx, request.Protocol, route.UpstreamModel, body)
 		if err == nil {
 			if request.Stream || strings.Contains(strings.ToLower(response.Header.Get("Content-Type")), "text/event-stream") {
-				streamErr := p.stream(ctx, writer, requestID, response, ranked[current].ExpectedCost, officialExpectedCost, route.Price, officialPrice)
+				streamErr := p.stream(ctx, writer, requestID, response, entry.ExpectedCost, officialExpectedCost, route.Price, officialPrice)
 				if p.Store != nil {
 					state, code, message := "succeeded", "", ""
 					raw := ""
 					if streamErr != nil {
 						state, code, message, raw = "partial", "stream_error", humanErrorMessage(streamErr), sanitize(streamErr.Error())
 					}
-					_ = p.Store.RecordProxyAttempt(ctx, requestID, attempt, route.Provider, route.UpstreamModel, state, code, message, raw)
+					_ = p.Store.RecordProxyAttemptRoute(ctx, requestID, totalAttempts, route.ID, route.CredentialID, entry.StageID, strings.Join(entry.StagePath, " / "), route.Provider, route.UpstreamModel, state, code, message, raw)
 				}
 				return streamErr
 			}
-			completeErr := p.complete(ctx, writer, requestID, response, ranked[current].ExpectedCost, officialExpectedCost, route.Price, officialPrice)
+			completeErr := p.complete(ctx, writer, requestID, response, entry.ExpectedCost, officialExpectedCost, route.Price, officialPrice)
 			if p.Store != nil {
 				state, code, message := "succeeded", "", ""
 				raw := ""
 				if completeErr != nil {
 					state, code, message, raw = "failed", errorCode(completeErr), humanErrorMessage(completeErr), sanitize(completeErr.Error())
 				}
-				_ = p.Store.RecordProxyAttempt(ctx, requestID, attempt, route.Provider, route.UpstreamModel, state, code, message, raw)
+				_ = p.Store.RecordProxyAttemptRoute(ctx, requestID, totalAttempts, route.ID, route.CredentialID, entry.StageID, strings.Join(entry.StagePath, " / "), route.Provider, route.UpstreamModel, state, code, message, raw)
 			}
 			return completeErr
 		}
@@ -289,21 +328,28 @@ func (p *Proxy) execute(ctx context.Context, writer http.ResponseWriter, request
 			blocked = true
 			var upstream *providers.UpstreamError
 			if errors.As(err, &upstream) {
-				p.Catalog.SetProviderBlocked(route.Provider, upstream.NextAvailableAt)
+				p.Catalog.SetProviderBlocked(blockKey, upstream.NextAvailableAt)
 				if p.Store != nil {
-					_ = p.Store.MarkProviderLimited(ctx, route.Provider, upstream.NextAvailableAt, upstream.Message)
+					if route.CredentialID != "" {
+						_ = p.Store.MarkCredentialLimited(ctx, route.CredentialID, upstream.NextAvailableAt, upstream.Message)
+					} else {
+						_ = p.Store.MarkProviderLimited(ctx, route.Provider, upstream.NextAvailableAt, upstream.Message)
+					}
 				}
 			}
 		}
 		if p.Store != nil {
-			_ = p.Store.RecordProxyAttempt(ctx, requestID, attempt, route.Provider, route.UpstreamModel, "failed", errorCode(err), humanErrorMessage(err), rawErrorMessage(err))
+			_ = p.Store.RecordProxyAttemptRoute(ctx, requestID, totalAttempts, route.ID, route.CredentialID, entry.StageID, strings.Join(entry.StagePath, " / "), route.Provider, route.UpstreamModel, "failed", errorCode(err), humanErrorMessage(err), rawErrorMessage(err))
 		}
-		decision := p.Retry.Decide(retry.Input{Policy: policy, AttemptNumber: attempt, Now: time.Now(), Error: classified, Delivery: retry.NothingSent, SameRouteAvailable: !route.Free, FallbacksRemaining: len(ranked) - current - 1})
+		decision := p.Retry.Decide(retry.Input{Policy: policy, AttemptNumber: totalAttempts, Now: time.Now(), Error: classified, Delivery: retry.NothingSent, SameRouteAvailable: !route.Free, FallbacksRemaining: len(plan.Entries) - current - 1, PlanMode: true, SameRouteRetriesRemaining: retriesRemaining, PlanEntriesRemaining: len(plan.Entries) - current - 1, TotalAttemptsRemaining: policy.MaximumAttempts - totalAttempts})
 		if decision.Action != retry.RetrySameRoute && decision.Action != retry.FailOver {
 			return err
 		}
 		if decision.Action == retry.FailOver {
 			current++
+			retriesRemaining = -1
+		} else if retriesRemaining > 0 {
+			retriesRemaining--
 		}
 		if err := wait(ctx, decision.Delay); err != nil {
 			return err

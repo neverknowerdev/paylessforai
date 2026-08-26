@@ -8,6 +8,7 @@ import (
 	"github.com/neverknowerdev/paylessforai/app/gateway"
 	"github.com/neverknowerdev/paylessforai/internal/catalog"
 	"github.com/neverknowerdev/paylessforai/internal/db"
+	"github.com/neverknowerdev/paylessforai/internal/groups"
 	"github.com/neverknowerdev/paylessforai/internal/providers"
 	proxyservice "github.com/neverknowerdev/paylessforai/internal/proxy"
 	"github.com/neverknowerdev/paylessforai/internal/secrets"
@@ -20,12 +21,14 @@ type Server struct {
 	catalog     *catalog.Manager
 	proxy       *proxyservice.Proxy
 	credentials CredentialDeps
+	groups      *groups.Manager
 }
 
 type CredentialDeps struct {
 	Box      *secrets.Box
 	Registry *providers.Registry
 	Reload   func() error
+	Groups   *groups.Manager
 }
 
 func New(addr string, readHeaderTimeout, idleTimeout time.Duration, db *db.Store) (*Server, error) {
@@ -41,20 +44,28 @@ func NewWithDeps(addr string, readHeaderTimeout, idleTimeout time.Duration, db *
 	if err != nil {
 		return nil, err
 	}
-	server := &Server{db: db, catalog: catalogManager, proxy: proxyHandler, credentials: credentials}
+	groupManager := credentials.Groups
+	if groupManager == nil && db != nil {
+		groupManager = groups.NewManager(db)
+		_ = groupManager.Reload(context.Background())
+	}
+	server := &Server{db: db, catalog: catalogManager, proxy: proxyHandler, credentials: credentials, groups: groupManager}
 	mux := http.NewServeMux()
 	server.registerHealthRoutes(mux)
 	server.registerStatsRoutes(mux)
 	server.registerKeyRoutes(mux)
 	server.registerProviderRoutes(mux)
 	server.registerModelRoutes(mux)
+	server.registerGroupRoutes(mux)
 	mux.Handle("/", ui)
-	public := gateway.NewHandler(catalogManager, proxyHandler)
+	public := gateway.NewHandler(catalogManager, proxyHandler, server.groups)
 	mux.Handle("/v1/", public)
 	mux.Handle("/anthropic/v1/messages", public)
 	server.httpServer = &http.Server{Addr: addr, Handler: withRequestID(mux), ReadHeaderTimeout: readHeaderTimeout, IdleTimeout: idleTimeout}
 	return server, nil
 }
+
+func (s *Server) SetGroups(manager *groups.Manager) { s.groups = manager }
 
 func (s *Server) ListenAndServe() error { return s.httpServer.ListenAndServe() }
 

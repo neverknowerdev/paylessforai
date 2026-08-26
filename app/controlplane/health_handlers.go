@@ -35,5 +35,8 @@ func (s *Server) handleStatus(w http.ResponseWriter, _ *http.Request) {
 		status["model_count"] = len(snapshot.Models)
 		status["route_count"] = len(snapshot.Routes)
 	}
+	if s.groups != nil {
+		status["group_count"] = len(s.groups.Snapshot())
+	}
 	writeJSON(w, http.StatusOK, status)
 }

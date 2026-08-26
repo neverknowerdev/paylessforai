@@ -106,6 +106,19 @@ test('supports Responses and Anthropic Messages contracts', async ({ page, reque
   expect((await messages.json()).type).toBe('message');
 });
 
+test('creates and exposes a callable group alias', async ({ page, request }) => {
+  await page.goto('/#groups');
+  await expect(page.getByRole('main').getByRole('heading', { name: 'Groups' })).toBeVisible();
+  await page.getByRole('button', { name: 'Create group' }).click();
+  await page.locator('#group-name').fill('Coding pool');
+  await page.locator('#group-slug').fill('coding-pool');
+  await page.locator('#group-stage-list .source-value').selectOption('model-a');
+  await page.getByRole('button', { name: 'Save group' }).click();
+  await expect(page.locator('#groups-list')).toContainText('coding-pool');
+  const models = await (await request.get('/v1/models')).json();
+  expect(models.data.some((item: { id: string; paylessforai_type?: string }) => item.id === 'coding-pool' && item.paylessforai_type === 'group')).toBeTruthy();
+});
+
 test('keeps provider verification errors visible and verifies manual models before saving', async ({ page, request }) => {
   await request.post('http://127.0.0.1:19475/__mock/scenario', {
     data: { models: [], response_text: 'manual response' },

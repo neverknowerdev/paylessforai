@@ -141,6 +141,42 @@ var ProxyRequests = Table[
 			Generated: false,
 			AutoIncr:  false,
 		},
+		ResolvedGroupID: column{
+			Name:      "resolved_group_id",
+			DBType:    "TEXT",
+			Default:   "NULL",
+			Comment:   "",
+			Nullable:  true,
+			Generated: false,
+			AutoIncr:  false,
+		},
+		ResolvedGroupRevision: column{
+			Name:      "resolved_group_revision",
+			DBType:    "INTEGER",
+			Default:   "NULL",
+			Comment:   "",
+			Nullable:  true,
+			Generated: false,
+			AutoIncr:  false,
+		},
+		ResolvedPlanJSON: column{
+			Name:      "resolved_plan_json",
+			DBType:    "TEXT",
+			Default:   "NULL",
+			Comment:   "",
+			Nullable:  true,
+			Generated: false,
+			AutoIncr:  false,
+		},
+		SelectedLogicalModel: column{
+			Name:      "selected_logical_model",
+			DBType:    "TEXT",
+			Default:   "NULL",
+			Comment:   "",
+			Nullable:  true,
+			Generated: false,
+			AutoIncr:  false,
+		},
 	},
 	Indexes: proxyRequestIndexes{
 		SqliteAutoindexProxyRequests1: index{
@@ -182,11 +218,15 @@ type proxyRequestColumns struct {
 	ErrorCode             column
 	ErrorMessage          column
 	StatsDisposition      column
+	ResolvedGroupID       column
+	ResolvedGroupRevision column
+	ResolvedPlanJSON      column
+	SelectedLogicalModel  column
 }
 
 func (c proxyRequestColumns) AsSlice() []column {
 	return []column{
-		c.ID, c.ClientKeyID, c.Protocol, c.LogicalModel, c.State, c.ReceivedAt, c.CompletedAt, c.SelectedProvider, c.SelectedUpstreamModel, c.AttemptCount, c.DurationMS, c.ErrorCode, c.ErrorMessage, c.StatsDisposition,
+		c.ID, c.ClientKeyID, c.Protocol, c.LogicalModel, c.State, c.ReceivedAt, c.CompletedAt, c.SelectedProvider, c.SelectedUpstreamModel, c.AttemptCount, c.DurationMS, c.ErrorCode, c.ErrorMessage, c.StatsDisposition, c.ResolvedGroupID, c.ResolvedGroupRevision, c.ResolvedPlanJSON, c.SelectedLogicalModel,
 	}
 }
 

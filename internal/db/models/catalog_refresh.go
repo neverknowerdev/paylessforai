@@ -1,6 +1,10 @@
 package models
 
 type CatalogRefresh struct {
-	ID, Provider, Status, StartedAt string
-	CompletedAt, Error              *string
+	ID          string
+	Provider    string
+	Status      string
+	StartedAt   string
+	CompletedAt *string
+	Error       *string
 }

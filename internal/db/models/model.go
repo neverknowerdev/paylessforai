@@ -1,7 +1,10 @@
 package models
 
 type ModelRecord struct {
-	ID, DisplayName                string
-	ContextLength, MaxOutputTokens int64
-	MetadataJSON, ObservedAt       string
+	ID              string
+	DisplayName     string
+	ContextLength   int64
+	MaxOutputTokens int64
+	MetadataJSON    string
+	ObservedAt      string
 }

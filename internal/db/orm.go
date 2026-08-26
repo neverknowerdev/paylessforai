@@ -7,6 +7,7 @@ import (
 	"strings"
 
 	"github.com/stephenafamo/bob"
+	"github.com/stephenafamo/scan"
 )
 
 type SQLDialect uint8
@@ -49,7 +50,48 @@ func (o *ORM) QueryRowContext(ctx context.Context, query string, args ...any) *s
 // reflection-free scanning while legacy reporting queries continue to use the
 // database/sql facade above.
 func (o *ORM) BobExecutor() bob.Executor {
-	return bob.NewDB(o.DB)
+	return bobExecutor{db: o.DB, dialect: o.dialect}
+}
+
+type bobExecutor struct {
+	db      *sql.DB
+	dialect SQLDialect
+}
+
+func (e bobExecutor) ExecContext(ctx context.Context, query string, args ...any) (sql.Result, error) {
+	return e.db.ExecContext(ctx, rebindBob(query, e.dialect), args...)
+}
+
+func (e bobExecutor) QueryContext(ctx context.Context, query string, args ...any) (scan.Rows, error) {
+	return e.db.QueryContext(ctx, rebindBob(query, e.dialect), args...)
+}
+
+func rebindBob(query string, dialect SQLDialect) string {
+	if dialect != PostgresDialect || !strings.Contains(query, "?") {
+		return query
+	}
+	var result strings.Builder
+	result.Grow(len(query) + 8)
+	placeholder := 0
+	for index := 0; index < len(query); index++ {
+		if query[index] != '?' {
+			result.WriteByte(query[index])
+			continue
+		}
+		result.WriteByte('$')
+		if index+1 < len(query) && query[index+1] >= '0' && query[index+1] <= '9' {
+			start := index + 1
+			index++
+			for index+1 < len(query) && query[index+1] >= '0' && query[index+1] <= '9' {
+				index++
+			}
+			result.WriteString(query[start : index+1])
+			continue
+		}
+		placeholder++
+		result.WriteString(strconv.Itoa(placeholder))
+	}
+	return result.String()
 }
 
 func rebind(query string, dialect SQLDialect) string {

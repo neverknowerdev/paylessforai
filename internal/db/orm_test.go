@@ -16,3 +16,11 @@ func TestRebindLeavesSQLitePlaceholdersUnchanged(t *testing.T) {
 		t.Fatalf("rebind() = %q, want %q", got, query)
 	}
 }
+
+func TestRebindBobPostgresNumberedPlaceholders(t *testing.T) {
+	query := `INSERT INTO "models" ("id") VALUES (?1) ON CONFLICT ("id") DO UPDATE SET "id" = ?1`
+	want := `INSERT INTO "models" ("id") VALUES ($1) ON CONFLICT ("id") DO UPDATE SET "id" = $1`
+	if got := rebindBob(query, PostgresDialect); got != want {
+		t.Fatalf("rebindBob() = %q, want %q", got, want)
+	}
+}

@@ -429,11 +429,18 @@ func loadMigrations() ([]migration, error) {
 }
 
 func (s *Store) Migrate(ctx context.Context) error {
-	if _, err := s.db.ExecContext(ctx, `CREATE TABLE IF NOT EXISTS schema_migrations (
+	return MigrateDatabase(ctx, s.db, s.orm.dialect)
+}
+
+// MigrateDatabase applies the embedded migration files to an existing SQL
+// connection. It is used by production stores and database integration tests
+// so both exercise exactly the same schema history.
+func MigrateDatabase(ctx context.Context, database *sql.DB, dialect SQLDialect) error {
+	if _, err := database.ExecContext(ctx, rebind(`CREATE TABLE IF NOT EXISTS schema_migrations (
 		name TEXT PRIMARY KEY,
 		checksum TEXT NOT NULL,
 		applied_at TEXT NOT NULL
-	)`); err != nil {
+	)`, dialect)); err != nil {
 		return fmt.Errorf("create migration table: %w", err)
 	}
 	migrations, err := loadMigrations()
@@ -442,7 +449,7 @@ func (s *Store) Migrate(ctx context.Context) error {
 	}
 	for _, migration := range migrations {
 		var appliedChecksum string
-		err := s.db.QueryRowContext(ctx, `SELECT checksum FROM schema_migrations WHERE name = ?`, migration.name).Scan(&appliedChecksum)
+		err := database.QueryRowContext(ctx, rebind(`SELECT checksum FROM schema_migrations WHERE name = ?`, dialect), migration.name).Scan(&appliedChecksum)
 		if err == nil {
 			if appliedChecksum != migration.checksum {
 				return fmt.Errorf("migration checksum mismatch for %s", migration.name)
@@ -452,15 +459,22 @@ func (s *Store) Migrate(ctx context.Context) error {
 		if !errors.Is(err, sql.ErrNoRows) {
 			return fmt.Errorf("read migration %s: %w", migration.name, err)
 		}
-		tx, err := s.db.BeginTx(ctx, nil)
+		tx, err := database.BeginTx(ctx, nil)
 		if err != nil {
 			return fmt.Errorf("begin migration %s: %w", migration.name, err)
 		}
-		if _, err = tx.ExecContext(ctx, migration.contents); err != nil {
+		contents := migration.contents
+		if dialect == PostgresDialect {
+			// SQLite's BLOB affinity is represented by BYTEA in PostgreSQL.
+			// Keep the migration bytes/checksum unchanged while adapting the
+			// one dialect-specific type at execution time.
+			contents = strings.ReplaceAll(contents, " BLOB ", " BYTEA ")
+		}
+		if _, err = tx.ExecContext(ctx, contents); err != nil {
 			tx.Rollback()
 			return fmt.Errorf("apply migration %s: %w", migration.name, err)
 		}
-		if _, err = tx.ExecContext(ctx, `INSERT INTO schema_migrations(name, checksum, applied_at) VALUES(?, ?, ?)`, migration.name, migration.checksum, time.Now().UTC().Format(time.RFC3339Nano)); err != nil {
+		if _, err = tx.ExecContext(ctx, rebind(`INSERT INTO schema_migrations(name, checksum, applied_at) VALUES(?, ?, ?)`, dialect), migration.name, migration.checksum, time.Now().UTC().Format(time.RFC3339Nano)); err != nil {
 			tx.Rollback()
 			return fmt.Errorf("record migration %s: %w", migration.name, err)
 		}

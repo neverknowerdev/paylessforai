@@ -86,7 +86,9 @@ func (s *Server) Run(ctx context.Context) error {
 		errCh <- s.admin.ListenAndServe()
 	}()
 	go s.scheduler(ctx)
-	if err := s.Refresh(ctx); err != nil {
+	if s.cfg.SkipInitialRefresh {
+		log.Printf("initial refresh skipped by configuration")
+	} else if err := s.Refresh(ctx); err != nil {
 		log.Printf("initial refresh degraded: %v", err)
 	}
 	select {

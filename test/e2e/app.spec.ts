@@ -116,7 +116,9 @@ test('creates and exposes a callable group alias', async ({ page, request }) => 
   await expect(page.getByText('Description', { exact: true })).toHaveCount(0);
   await expect(page.getByText('Enabled', { exact: true })).toHaveCount(0);
   await expect(page.locator('#group-stage-list .source-candidates')).toBeHidden();
-  await expect(page.getByText('Retry whole try block', { exact: true })).toBeVisible();
+  await expect(page.getByText('Retry route block', { exact: true })).toBeVisible();
+  await expect(page.getByRole('button', { name: '+ Add route block' })).toBeVisible();
+  await expect(page.locator('#group-stage-list .source-kind')).toBeHidden();
   await expect(page.locator('#group-stage-list .stage-billing')).toHaveCount(0);
   await expect(page.locator('#group-stage-list .stage-limit-grid')).toHaveCount(0);
   await page.locator('#group-stage-list .source-search-toggle').click();
@@ -163,7 +165,11 @@ test('creates and exposes a callable group alias', async ({ page, request }) => 
   await page.locator('#retry-count').fill('2');
   await page.getByRole('button', { name: 'Save retries' }).click();
   await expect(page.locator('#group-stage-list .retry-summary').first()).toContainText('2');
-  await page.locator('#group-stage-list .try-retries').fill('2');
+  await page.locator('#group-stage-list .try-retry-summary').click();
+  await expect(page.locator('#retry-modal-title')).toHaveText('Retry this route block');
+  await page.locator('#retry-count').fill('2');
+  await page.getByRole('button', { name: 'Save retries' }).click();
+  await expect(page.locator('#group-stage-list .try-retry-summary')).toContainText('2');
   await page.getByRole('button', { name: 'Save group' }).click();
   await expect(page.locator('#groups-list')).toContainText('coding-pool');
   const groupToggle = page.locator('#groups-list [data-toggle-group]').first();

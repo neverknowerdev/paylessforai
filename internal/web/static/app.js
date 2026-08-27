@@ -528,6 +528,193 @@
 
   const stageSourceOptionsV4Original = stageSourceOptionsV4;
   stageSourceOptionsV4 = function(stage, index) { const card = stageSourceOptionsV4Original(stage, index); const stageName = card.querySelector('.stage-name'); if (stageName) { stageName.type = 'hidden'; stageName.closest('label')?.replaceWith(stageName); } card.addEventListener('click', (event) => { const route = event.target.closest('[data-add-provider]'); if (route) { event.stopImmediatePropagation(); const modelID = route.dataset.addModel; const provider = route.dataset.addProvider; if (!modelID || !provider) return; card._sources.push({ kind: 'model', model_id: modelID, provider_name: provider, retries: 1 }); closeSourcePickerV4(card); renderSelectedSourcesV4(card); renderCandidatesV4(card); previewCurrentGroup(); return; } const retry = event.target.closest('[data-retry-source]'); if (retry) { event.preventDefault(); openRetryModalV6(card, Number(retry.dataset.retrySource)); } }, true); card.addEventListener('dragstart', (event) => { if (!event.target.closest('.drag-handle')) event.stopImmediatePropagation(); }, true); return card; };
+
+  // The route block searches one combined catalog. Keep the source-kind
+  // select as an internal compatibility field, but do not make users choose
+  // a mode before they can search.
+  function renderCandidatesV8(card) {
+    const list = card.querySelector('.source-candidates');
+    if (!list) return;
+    list.replaceChildren();
+    const query = (card.querySelector('.source-search')?.value || '').trim().toLowerCase();
+    list.hidden = !query;
+    if (!query) return;
+    modelCandidates().filter((model) => `${model.name} ${model.id} ${model.routes.map((route) => route.provider).join(' ')}`.toLowerCase().includes(query)).forEach((model) => {
+      const item = document.createElement('div');
+      item.className = 'source-candidate';
+      item.dataset.modelId = model.id;
+      if ((card._sources || []).some((source) => source.kind === 'model' && source.model_id === model.id)) item.classList.add('selected');
+      const main = document.createElement('div');
+      main.className = 'source-candidate-main';
+      const titleRow = document.createElement('div');
+      titleRow.className = 'source-candidate-title-row';
+      const strong = document.createElement('strong');
+      strong.textContent = model.name;
+      const add = document.createElement('button');
+      add.type = 'button';
+      add.className = 'candidate-add';
+      add.dataset.addModel = model.id;
+      add.textContent = item.classList.contains('selected') ? 'Add all routes again' : 'Add all routes';
+      titleRow.append(strong, add);
+      const small = document.createElement('small');
+      small.textContent = model.id;
+      main.append(titleRow, small);
+      const routes = document.createElement('div');
+      routes.className = 'source-route-list';
+      model.routes.forEach((route) => {
+        const option = document.createElement('button');
+        option.type = 'button';
+        option.className = `source-route-option ${routeBilling(route)}`;
+        option.dataset.addModel = model.id;
+        option.dataset.addProvider = route.provider;
+        option.title = `Add ${providerName(route.provider)} route`;
+        appendRoutePriceV7(option, route);
+        const action = document.createElement('span');
+        action.className = 'source-route-option-action';
+        action.textContent = 'Add';
+        option.append(action);
+        routes.append(option);
+      });
+      main.append(routes);
+      item.append(main);
+      list.append(item);
+    });
+    state.groups.filter((group) => group.id !== $('#group-id').value && `${group.name} ${group.slug}`.toLowerCase().includes(query)).forEach((group) => {
+      const item = document.createElement('div');
+      item.className = 'source-candidate source-group-candidate';
+      item.dataset.groupId = group.id;
+      const main = document.createElement('div');
+      main.className = 'source-candidate-main';
+      const titleRow = document.createElement('div');
+      titleRow.className = 'source-candidate-title-row';
+      const strong = document.createElement('strong');
+      strong.textContent = group.name;
+      const add = document.createElement('button');
+      add.type = 'button';
+      add.className = 'candidate-add';
+      add.dataset.addGroup = group.id;
+      add.textContent = 'Add group';
+      titleRow.append(strong, add);
+      const small = document.createElement('small');
+      small.textContent = group.slug;
+      main.append(titleRow, small);
+      item.append(main);
+      list.append(item);
+    });
+    if (!list.children.length) {
+      const empty = document.createElement('small');
+      empty.className = 'source-empty';
+      empty.textContent = 'No matching models or groups.';
+      list.append(empty);
+    }
+  }
+  renderCandidatesV4 = renderCandidatesV8;
+  renderCandidatesV5 = renderCandidatesV8;
+
+  function setRetryModalCopyV8(kind) {
+    const title = $('#retry-modal-title');
+    const note = $('#retry-modal')?.querySelector('.modal-note');
+    if (kind === 'block') {
+      if (title) title.textContent = 'Retry this route block';
+      if (note) note.textContent = 'Repeat the complete route block after its provider routes are exhausted.';
+    } else {
+      if (title) title.textContent = 'Retry this route';
+      if (note) note.textContent = 'Retry the same provider route before moving to the next route. Most routes work well with the default.';
+    }
+  }
+  function openTryRetryModalV8(card) {
+    const modal = ensureRetryModalV6();
+    const input = $('#retry-count');
+    const current = card.querySelector('.try-retries');
+    if (!modal || !input || !current) return;
+    state.retryTarget = null;
+    state.tryRetryTarget = card;
+    setRetryModalCopyV8('block');
+    input.value = Math.max(1, Math.min(5, Number(current.value || 1)));
+    openModal('retry-modal');
+  }
+  const openRetryModalV6OriginalV8 = openRetryModalV6;
+  openRetryModalV6 = function(card, sourceIndex) {
+    state.tryRetryTarget = null;
+    setRetryModalCopyV8('route');
+    return openRetryModalV6OriginalV8(card, sourceIndex);
+  };
+  $('#retry-form')?.addEventListener('submit', (event) => {
+    const card = state.tryRetryTarget;
+    if (!card) return;
+    event.preventDefault();
+    event.stopImmediatePropagation();
+    const input = $('#retry-count');
+    const target = card.querySelector('.try-retries');
+    if (input && target) {
+      const retries = Math.max(1, Math.min(5, Number(input.value || 1)));
+      target.value = retries;
+      const summary = card.querySelector('.try-retry-summary');
+      if (summary) {
+        summary.querySelector('.retry-count-value').textContent = retries;
+        summary.setAttribute('aria-label', `Configure route block retries, currently ${retries}`);
+      }
+    }
+    previewCurrentGroup();
+    closeModal('retry-modal');
+    state.tryRetryTarget = null;
+    setRetryModalCopyV8('route');
+  }, true);
+
+  const stageSourceOptionsV8Original = stageSourceOptionsV4;
+  stageSourceOptionsV4 = function(stage, index) {
+    const card = stageSourceOptionsV8Original(stage, index);
+    const heading = card.querySelector('.stage-card-heading > strong');
+    if (heading) heading.textContent = `ROUTE BLOCK ${index + 1}`;
+    const removeStage = card.querySelector('.remove-stage');
+    if (removeStage) {
+      removeStage.classList.add('route-icon-button');
+      removeStage.setAttribute('aria-label', 'Remove route block');
+      removeStage.title = 'Remove route block';
+      removeStage.textContent = '×';
+    }
+    const modeRow = card.querySelector('.source-mode-row');
+    const modeLabel = modeRow?.querySelector('label');
+    const modeSelect = modeRow?.querySelector('.source-kind');
+    if (modeRow && modeLabel && modeSelect) {
+      modeRow.classList.add('compact-search-mode');
+      modeLabel.hidden = true;
+      modeLabel.setAttribute('aria-hidden', 'true');
+      modeSelect.hidden = true;
+      const helper = modeRow.querySelector('small');
+      if (helper) helper.textContent = 'Search models and groups by name or provider.';
+    }
+    const sourceSearch = card.querySelector('.source-search');
+    if (sourceSearch) sourceSearch.placeholder = 'Search models or groups…';
+    const retryPanel = card.querySelector('.try-settings-bottom');
+    const retryInput = retryPanel?.querySelector('.try-retries');
+    if (retryPanel && retryInput) {
+      const retries = Math.max(1, Math.min(5, Number(retryInput.value || 1)));
+      retryPanel.replaceChildren();
+      retryPanel.classList.add('route-block-retry');
+      const label = document.createElement('span');
+      label.className = 'route-block-retry-label';
+      label.textContent = 'Retry route block';
+      const summary = document.createElement('button');
+      summary.type = 'button';
+      summary.className = 'retry-summary try-retry-summary';
+      summary.setAttribute('aria-label', `Configure route block retries, currently ${retries}`);
+      summary.title = 'Configure route block retries';
+      summary.innerHTML = '<span aria-hidden="true">↻</span><span class="retry-count-value"></span>';
+      summary.querySelector('.retry-count-value').textContent = retries;
+      summary.addEventListener('click', () => openTryRetryModalV8(card));
+      retryInput.hidden = true;
+      retryInput.value = retries;
+      retryPanel.append(label, summary, retryInput);
+    }
+    card.addEventListener('click', (event) => {
+      const model = event.target.closest('[data-add-model], .source-candidate[data-model-id]');
+      const group = event.target.closest('[data-add-group], .source-group-candidate');
+      const select = card.querySelector('.source-kind');
+      if (select && (model || group)) select.value = group ? 'group' : 'model';
+    }, true);
+    return card;
+  };
   renderGroupStages = function(definition) { const container = $('#group-stage-list'); if (!container) return; container.replaceChildren(); const stages = definition.stages?.length ? definition.stages : blankGroup().stages; stages.forEach((stage, index) => container.append(stageSourceOptionsV4(stage, index))); };
   if (!window.__groupPickerOutsideClickV5) { document.addEventListener('click', (event) => { if (event.target.closest('.source-picker')) return; document.querySelectorAll('.source-search-popover:not([hidden])').forEach((popover) => closeSourcePickerV4(popover.closest('.group-stage-card'))); }); window.__groupPickerOutsideClickV5 = true; }
   // The editor below intentionally models one selected provider route per

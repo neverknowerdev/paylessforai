@@ -14,6 +14,13 @@ func TestCatalogRepositorySQL(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	second := catalogRecord()
+	second.SourceID = "fixture/model-openrouter"
+	second.ProviderModel = "deepseek/deepseek-v4-pro"
+	second.PriceSource = "OpenRouter"
+	if _, err := f.repos.Catalog.UpsertRecord(f.ctx, "openrouter", second); err != nil {
+		t.Fatal(err)
+	}
 	if count, err := f.repos.Catalog.Count(f.ctx); err != nil || count != 1 {
 		t.Fatalf("count=%d err=%v", count, err)
 	}
@@ -30,7 +37,7 @@ func TestCatalogRepositorySQL(t *testing.T) {
 		t.Fatalf("resolve=%+v err=%v", resolved, err)
 	}
 	detail, err := f.repos.Catalog.Detail(f.ctx, list[0].CanonicalSlug)
-	if err != nil || len(detail.Offerings) != 1 || len(detail.Benchmarks) != 1 {
+	if err != nil || len(detail.Offerings) != 2 || len(detail.Benchmarks) != 2 {
 		t.Fatalf("detail=%+v err=%v", detail, err)
 	}
 	if got, err := f.repos.Catalog.ModelID(f.ctx, list[0].CanonicalSlug); err != nil || got != id {

@@ -19,7 +19,7 @@ test('requires admin authentication and renders the private console', async ({ p
   await expect(page.getByRole('heading', { name: 'Stat Server Administration' })).toBeVisible();
   await expect(page.locator('#profiles')).toContainText('Programming');
   await expect(page.locator('#sources')).toBeVisible();
-  await page.getByRole('textbox', { name: 'Filter models or providers' }).fill('deepseek-v4-pro');
+  await page.getByRole('textbox', { name: 'Filter models' }).fill('deepseek-v4-pro');
   await page.getByRole('button', { name: 'Search pricing' }).click();
   await expect(page.locator('#pricing')).toContainText('DeepSeek V4 Pro');
   await expect(page.locator('#pricing')).toContainText('OpenRouter');

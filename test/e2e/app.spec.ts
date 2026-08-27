@@ -115,6 +115,19 @@ test('creates and exposes a callable group alias', async ({ page, request }) => 
   await page.locator('#group-stage-list .source-value').selectOption('model-a');
   await page.getByRole('button', { name: 'Save group' }).click();
   await expect(page.locator('#groups-list')).toContainText('coding-pool');
+  const groupSurface = await page.locator('.group-row').first().evaluate((element) => {
+    const style = getComputedStyle(element);
+    return { color: style.color, backgroundImage: style.backgroundImage };
+  });
+  expect(groupSurface.color).toBe('rgb(244, 247, 251)');
+  expect(groupSurface.backgroundImage).toContain('linear-gradient');
+  await page.getByRole('button', { name: 'Create group' }).click();
+  const groupInputSurface = await page.locator('#group-name').evaluate((element) => {
+    const style = getComputedStyle(element);
+    return { color: style.color, backgroundColor: style.backgroundColor };
+  });
+  expect(groupInputSurface).toEqual({ color: 'rgb(244, 247, 251)', backgroundColor: 'rgb(10, 17, 34)' });
+  await page.getByRole('button', { name: 'Close' }).click();
   const models = await (await request.get('/v1/models')).json();
   expect(models.data.some((item: { id: string; paylessforai_type?: string }) => item.id === 'coding-pool' && item.paylessforai_type === 'group')).toBeTruthy();
 });

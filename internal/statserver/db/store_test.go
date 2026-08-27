@@ -22,10 +22,9 @@ func TestMigrationsAreOrderedAndTableScoped(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		if strings.Contains(file, "extensions") || strings.Contains(file, "seed_") {
-			continue
-		}
-		if count := strings.Count(strings.ToUpper(string(contents)), "CREATE TABLE"); count != 1 {
+		if count := strings.Count(strings.ToUpper(string(contents)), "CREATE TABLE"); count == 0 {
+			continue // extensions, seed data, and forward-compatible ALTER migrations
+		} else if count != 1 {
 			t.Fatalf("%s must create exactly one table, got %d", file, count)
 		}
 	}

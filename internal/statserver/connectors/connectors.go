@@ -49,7 +49,7 @@ func artificialAnalysis(ctx context.Context, key string) ([]models.CatalogRecord
 	records := make([]models.CatalogRecord, 0, len(response.Data))
 	for _, item := range response.Data {
 		input, output := item.Pricing.Input, item.Pricing.Output
-		records = append(records, models.CatalogRecord{SourceID: item.ID, Name: item.Name, Creator: item.ModelCreator.Name, ProviderModel: item.Slug, Input: &input, Output: &output, Benchmarks: item.Evaluations, Metadata: map[string]any{"slug": item.Slug, "performance": item.Performance}})
+		records = append(records, models.CatalogRecord{SourceID: item.ID, Name: item.Name, Creator: item.ModelCreator.Name, ProviderModel: item.Slug, PriceSource: "Artificial Analysis", PriceSourceURL: "https://artificialanalysis.ai/api/v2/language/models/free", Input: &input, Output: &output, Benchmarks: item.Evaluations, Metadata: map[string]any{"slug": item.Slug, "performance": item.Performance}})
 	}
 	return records, nil
 }
@@ -75,7 +75,7 @@ func openRouter(ctx context.Context, key string) ([]models.CatalogRecord, error)
 		pricing, _ := item["pricing"].(map[string]any)
 		input, output := number(pricing["prompt"])*1e6, number(pricing["completion"])*1e6
 		cacheRead, cacheWrite := millionPointer(pricing["cache_read"]), millionPointer(pricing["cache_write"])
-		records = append(records, models.CatalogRecord{SourceID: id, Name: name, Creator: creator, ProviderModel: id, Input: &input, Output: &output, CacheRead: cacheRead, CacheWrite: cacheWrite, Context: int64(number(item["context_length"])), Metadata: item})
+		records = append(records, models.CatalogRecord{SourceID: id, Name: name, Creator: creator, ProviderModel: id, PriceSource: "OpenRouter", PriceSourceURL: "https://openrouter.ai/api/v1/models", Input: &input, Output: &output, CacheRead: cacheRead, CacheWrite: cacheWrite, Context: int64(number(item["context_length"])), Metadata: item})
 	}
 	return records, nil
 }
@@ -116,7 +116,7 @@ func surplus(ctx context.Context, key string) ([]models.CatalogRecord, error) {
 			name = id
 		}
 		input, output := number(item["input_price"]), number(item["output_price"])
-		records = append(records, models.CatalogRecord{SourceID: id, Name: name, ProviderModel: id, Input: floatPointer(input), Output: floatPointer(output), Metadata: item})
+		records = append(records, models.CatalogRecord{SourceID: id, Name: name, ProviderModel: id, PriceSource: "Surplus Intelligence", PriceSourceURL: "https://api.surplusintelligence.ai/v1/models", Input: floatPointer(input), Output: floatPointer(output), Metadata: item})
 	}
 	return records, nil
 }

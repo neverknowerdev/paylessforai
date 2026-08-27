@@ -5,12 +5,56 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
+	"strconv"
 	"strings"
 
 	"github.com/neverknowerdev/paylessforai/internal/statserver/models"
 )
 
 type CatalogRepository struct{ db *sql.DB }
+
+func (r *CatalogRepository) ListPricing(ctx context.Context, query string, limit, offset int) ([]models.PricingRow, int, error) {
+	args := []any{}
+	where := ""
+	if query != "" {
+		args = append(args, "%"+models.Normalize(query)+"%")
+		where = "WHERE m.normalized_name ILIKE $1 OR m.display_name ILIKE $1 OR o.provider_model_id ILIKE $1 OR o.provider ILIKE $1"
+	}
+	countQuery := `SELECT count(*) FROM models m LEFT JOIN provider_offerings o ON o.model_id=m.id ` + where
+	var total int
+	if err := r.db.QueryRowContext(ctx, countQuery, args...).Scan(&total); err != nil {
+		return nil, 0, err
+	}
+	args = append(args, limit, offset)
+	limitPlaceholder, offsetPlaceholder := len(args)-1, len(args)
+	rows, err := r.db.QueryContext(ctx, `SELECT m.id,COALESCE(o.id,0),m.canonical_slug,m.display_name,COALESCE(o.provider,''),COALESCE(o.provider_model_id,''),COALESCE(o.override_input_usd_per_million,o.official_input_usd_per_million,o.input_usd_per_million),COALESCE(o.override_output_usd_per_million,o.official_output_usd_per_million,o.output_usd_per_million),COALESCE(o.override_cache_read_usd_per_million,o.official_cache_read_usd_per_million,o.cache_read_usd_per_million),COALESCE(o.override_cache_write_usd_per_million,o.official_cache_write_usd_per_million,o.cache_write_usd_per_million),o.official_input_usd_per_million,o.official_output_usd_per_million,o.official_cache_read_usd_per_million,o.official_cache_write_usd_per_million,COALESCE(o.official_price_source,''),COALESCE(o.official_price_source_url,''),o.official_price_observed_at,o.override_input_usd_per_million,o.override_output_usd_per_million,o.override_cache_read_usd_per_million,o.override_cache_write_usd_per_million,o.override_updated_at FROM models m LEFT JOIN provider_offerings o ON o.model_id=m.id `+where+` ORDER BY m.display_name,o.provider LIMIT $`+strconv.Itoa(limitPlaceholder)+` OFFSET $`+strconv.Itoa(offsetPlaceholder), args...)
+	if err != nil {
+		return nil, 0, err
+	}
+	defer rows.Close()
+	items := []models.PricingRow{}
+	for rows.Next() {
+		item, err := scanPricing(rows)
+		if err != nil {
+			return nil, 0, err
+		}
+		items = append(items, item)
+	}
+	return items, total, rows.Err()
+}
+
+func (r *CatalogRepository) UpdatePriceOverride(ctx context.Context, offeringID, userID int64, override models.PriceOverride) error {
+	result, err := r.db.ExecContext(ctx, `UPDATE provider_offerings SET override_input_usd_per_million=$1,override_output_usd_per_million=$2,override_cache_read_usd_per_million=$3,override_cache_write_usd_per_million=$4,override_updated_at=now(),override_updated_by=$5 WHERE id=$6`, override.InputUSDPerMillion, override.OutputUSDPerMillion, override.CacheReadUSDPerMillion, override.CacheWriteUSDPerMillion, userID, offeringID)
+	if err != nil {
+		return err
+	}
+	if affected, err := result.RowsAffected(); err != nil {
+		return err
+	} else if affected != 1 {
+		return sql.ErrNoRows
+	}
+	return nil
+}
 
 func (r *CatalogRepository) Count(ctx context.Context) (int, error) {
 	var count int
@@ -158,7 +202,11 @@ func (r *CatalogRepository) UpsertRecord(ctx context.Context, source string, rec
 		return 0, err
 	}
 	if record.ProviderModel != "" {
-		if _, err = r.db.ExecContext(ctx, `INSERT INTO provider_offerings(model_id,provider,provider_model_id,input_usd_per_million,output_usd_per_million,cache_read_usd_per_million,cache_write_usd_per_million,context_length,metadata,observed_at) VALUES($1,$2,$3,$4,$5,$6,$7,NULLIF($8,0),$9,now()) ON CONFLICT(provider,provider_model_id) DO UPDATE SET model_id=EXCLUDED.model_id,input_usd_per_million=EXCLUDED.input_usd_per_million,output_usd_per_million=EXCLUDED.output_usd_per_million,cache_read_usd_per_million=EXCLUDED.cache_read_usd_per_million,cache_write_usd_per_million=EXCLUDED.cache_write_usd_per_million,context_length=EXCLUDED.context_length,metadata=EXCLUDED.metadata,observed_at=now(),status='active'`, modelID, source, record.ProviderModel, record.Input, record.Output, record.CacheRead, record.CacheWrite, record.Context, jsonBytes(record.Metadata)); err != nil {
+		priceSource := record.PriceSource
+		if priceSource == "" {
+			priceSource = source
+		}
+		if _, err = r.db.ExecContext(ctx, `INSERT INTO provider_offerings(model_id,provider,provider_model_id,input_usd_per_million,output_usd_per_million,cache_read_usd_per_million,cache_write_usd_per_million,context_length,metadata,observed_at,official_input_usd_per_million,official_output_usd_per_million,official_cache_read_usd_per_million,official_cache_write_usd_per_million,official_price_source,official_price_source_url,official_price_observed_at) VALUES($1,$2,$3,$4,$5,$6,$7,NULLIF($8,0),$9,now(),$4,$5,$6,$7,$10,$11,now()) ON CONFLICT(provider,provider_model_id) DO UPDATE SET model_id=EXCLUDED.model_id,input_usd_per_million=EXCLUDED.input_usd_per_million,output_usd_per_million=EXCLUDED.output_usd_per_million,cache_read_usd_per_million=EXCLUDED.cache_read_usd_per_million,cache_write_usd_per_million=EXCLUDED.cache_write_usd_per_million,context_length=EXCLUDED.context_length,metadata=EXCLUDED.metadata,observed_at=now(),official_input_usd_per_million=EXCLUDED.official_input_usd_per_million,official_output_usd_per_million=EXCLUDED.official_output_usd_per_million,official_cache_read_usd_per_million=EXCLUDED.official_cache_read_usd_per_million,official_cache_write_usd_per_million=EXCLUDED.official_cache_write_usd_per_million,official_price_source=EXCLUDED.official_price_source,official_price_source_url=EXCLUDED.official_price_source_url,official_price_observed_at=now(),status='active'`, modelID, source, record.ProviderModel, record.Input, record.Output, record.CacheRead, record.CacheWrite, record.Context, jsonBytes(record.Metadata), priceSource, record.PriceSourceURL); err != nil {
 			return 0, err
 		}
 	}
@@ -178,6 +226,26 @@ func scanSummary(row scanner) (models.ModelSummary, error) {
 	err := row.Scan(&item.ID, &item.CanonicalSlug, &item.DisplayName, &item.Creator, &item.Family, &item.Revision, &item.Description, &contextLength, &item.UpdatedAt, &item.OfferingCount, &item.BenchmarkCount)
 	if contextLength.Valid {
 		item.ContextLength = &contextLength.Int64
+	}
+	return item, err
+}
+
+func scanPricing(row scanner) (models.PricingRow, error) {
+	var item models.PricingRow
+	var in, out, read, write, officialIn, officialOut, officialRead, officialWrite, overrideIn, overrideOut, overrideRead, overrideWrite sql.NullFloat64
+	var officialAt, overrideAt sql.NullTime
+	err := row.Scan(&item.ModelID, &item.OfferingID, &item.CanonicalSlug, &item.DisplayName, &item.Provider, &item.ProviderModelID, &in, &out, &read, &write, &officialIn, &officialOut, &officialRead, &officialWrite, &item.OfficialPriceSource, &item.OfficialPriceSourceURL, &officialAt, &overrideIn, &overrideOut, &overrideRead, &overrideWrite, &overrideAt)
+	item.InputUSDPerMillion, item.OutputUSDPerMillion = nullableFloat(in), nullableFloat(out)
+	item.CacheReadUSDPerMillion, item.CacheWriteUSDPerMillion = nullableFloat(read), nullableFloat(write)
+	item.OfficialInputUSDPerMillion, item.OfficialOutputUSDPerMillion = nullableFloat(officialIn), nullableFloat(officialOut)
+	item.OfficialCacheReadUSDPerMillion, item.OfficialCacheWriteUSDPerMillion = nullableFloat(officialRead), nullableFloat(officialWrite)
+	item.OverrideInputUSDPerMillion, item.OverrideOutputUSDPerMillion = nullableFloat(overrideIn), nullableFloat(overrideOut)
+	item.OverrideCacheReadUSDPerMillion, item.OverrideCacheWriteUSDPerMillion = nullableFloat(overrideRead), nullableFloat(overrideWrite)
+	if officialAt.Valid {
+		item.OfficialPriceObservedAt = &officialAt.Time
+	}
+	if overrideAt.Valid {
+		item.OverrideUpdatedAt = &overrideAt.Time
 	}
 	return item, err
 }

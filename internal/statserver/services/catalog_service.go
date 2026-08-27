@@ -80,3 +80,12 @@ func (s *CatalogService) Detail(ctx context.Context, slug string) (models.ModelD
 func (s *CatalogService) Sources(ctx context.Context) ([]models.Source, error) {
 	return s.repositories.Sources.List(ctx)
 }
+func (s *CatalogService) Pricing(ctx context.Context, query string, limit, offset int) ([]models.PricingRow, int, error) {
+	return s.repositories.Catalog.ListPricing(ctx, query, limit, offset)
+}
+func (s *CatalogService) OverridePricing(ctx context.Context, offeringID, userID int64, override models.PriceOverride) error {
+	if err := validatePriceOverride(override); err != nil {
+		return err
+	}
+	return s.repositories.Catalog.UpdatePriceOverride(ctx, offeringID, userID, override)
+}

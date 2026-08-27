@@ -40,3 +40,14 @@ func TestJoinErrors(t *testing.T) {
 		t.Fatal("joined errors should be non-nil")
 	}
 }
+
+func TestPriceOverrideValidation(t *testing.T) {
+	negative := -1.0
+	if err := validatePriceOverride(models.PriceOverride{InputUSDPerMillion: &negative}); !errors.Is(err, ErrInvalidPriceOverride) {
+		t.Fatalf("negative price err=%v", err)
+	}
+	valid := 1.25
+	if err := validatePriceOverride(models.PriceOverride{InputUSDPerMillion: &valid}); err != nil {
+		t.Fatalf("valid price err=%v", err)
+	}
+}

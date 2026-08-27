@@ -194,6 +194,14 @@ func parseLimit(value string) int {
 	}
 	return limit
 }
+func parseOffset(value string) int {
+	var offset int
+	_, _ = fmt.Sscanf(value, "%d", &offset)
+	if offset < 0 {
+		return 0
+	}
+	return offset
+}
 func decodeTelemetry(r *http.Request) (models.TelemetryBatch, error) {
 	var batch models.TelemetryBatch
 	err := json.NewDecoder(io.LimitReader(r.Body, 2<<20)).Decode(&batch)

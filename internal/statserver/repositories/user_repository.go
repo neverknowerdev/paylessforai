@@ -34,3 +34,12 @@ func (r *UserRepository) SessionIsAdmin(ctx context.Context, tokenHash string) (
 	err := r.db.QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM admin_sessions session JOIN users user_record ON user_record.id=session.user_id WHERE session.token_hash=$1 AND session.expires_at>now() AND user_record.is_admin AND user_record.disabled_at IS NULL)`, tokenHash).Scan(&ok)
 	return ok, err
 }
+
+func (r *UserRepository) SessionUserID(ctx context.Context, tokenHash string) (int64, bool, error) {
+	var id int64
+	err := r.db.QueryRowContext(ctx, `SELECT user_record.id FROM admin_sessions session JOIN users user_record ON user_record.id=session.user_id WHERE session.token_hash=$1 AND session.expires_at>now() AND user_record.is_admin AND user_record.disabled_at IS NULL`, tokenHash).Scan(&id)
+	if err == sql.ErrNoRows {
+		return 0, false, nil
+	}
+	return id, err == nil, err
+}

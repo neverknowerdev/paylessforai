@@ -41,6 +41,11 @@ func (s *AuthService) IsAdmin(ctx context.Context, token string) bool {
 	return err == nil && ok
 }
 
+func (s *AuthService) UserID(ctx context.Context, token string) (int64, bool) {
+	id, ok, err := s.repositories.Users.SessionUserID(ctx, hashString(token))
+	return id, err == nil && ok
+}
+
 func randomToken() string {
 	bytes := make([]byte, 32)
 	_, _ = rand.Read(bytes)

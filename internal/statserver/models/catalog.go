@@ -6,6 +6,7 @@ type CatalogRecord struct {
 	SourceID, Name, Creator, Family, Revision, Description string
 	Context                                                int64
 	ProviderModel                                          string
+	PriceSource, PriceSourceURL                            string
 	Input, Output, CacheRead, CacheWrite                   *float64
 	Benchmarks                                             map[string]float64
 	Metadata                                               map[string]any
@@ -44,6 +45,38 @@ type ModelDetail struct {
 	ModelSummary
 	Offerings  []Offering        `json:"offerings"`
 	Benchmarks []BenchmarkResult `json:"benchmarks"`
+}
+
+type PricingRow struct {
+	ModelID                         int64      `json:"model_id"`
+	OfferingID                      int64      `json:"offering_id"`
+	CanonicalSlug                   string     `json:"canonical_slug"`
+	DisplayName                     string     `json:"display_name"`
+	Provider                        string     `json:"provider"`
+	ProviderModelID                 string     `json:"provider_model_id"`
+	InputUSDPerMillion              *float64   `json:"input_usd_per_million"`
+	OutputUSDPerMillion             *float64   `json:"output_usd_per_million"`
+	CacheReadUSDPerMillion          *float64   `json:"cache_read_usd_per_million"`
+	CacheWriteUSDPerMillion         *float64   `json:"cache_write_usd_per_million"`
+	OfficialInputUSDPerMillion      *float64   `json:"official_input_usd_per_million"`
+	OfficialOutputUSDPerMillion     *float64   `json:"official_output_usd_per_million"`
+	OfficialCacheReadUSDPerMillion  *float64   `json:"official_cache_read_usd_per_million"`
+	OfficialCacheWriteUSDPerMillion *float64   `json:"official_cache_write_usd_per_million"`
+	OfficialPriceSource             string     `json:"official_price_source"`
+	OfficialPriceSourceURL          string     `json:"official_price_source_url"`
+	OfficialPriceObservedAt         *time.Time `json:"official_price_observed_at"`
+	OverrideInputUSDPerMillion      *float64   `json:"override_input_usd_per_million"`
+	OverrideOutputUSDPerMillion     *float64   `json:"override_output_usd_per_million"`
+	OverrideCacheReadUSDPerMillion  *float64   `json:"override_cache_read_usd_per_million"`
+	OverrideCacheWriteUSDPerMillion *float64   `json:"override_cache_write_usd_per_million"`
+	OverrideUpdatedAt               *time.Time `json:"override_updated_at"`
+}
+
+type PriceOverride struct {
+	InputUSDPerMillion      *float64 `json:"input_usd_per_million"`
+	OutputUSDPerMillion     *float64 `json:"output_usd_per_million"`
+	CacheReadUSDPerMillion  *float64 `json:"cache_read_usd_per_million"`
+	CacheWriteUSDPerMillion *float64 `json:"cache_write_usd_per_million"`
 }
 
 type Offering struct {

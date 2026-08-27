@@ -43,6 +43,25 @@ func TestCatalogRepositorySQL(t *testing.T) {
 	if value, err := f.repos.Catalog.LatestBenchmark(f.ctx, id, "MMLU-Pro"); err != nil || value != .82 {
 		t.Fatalf("benchmark=%v err=%v", value, err)
 	}
+	pricing, total, err := f.repos.Catalog.ListPricing(f.ctx, "deepseek", 10, 0)
+	if err != nil || total != 1 || len(pricing) != 1 || pricing[0].OfficialPriceSource == "" || pricing[0].InputUSDPerMillion == nil {
+		t.Fatalf("pricing=%+v total=%d err=%v", pricing, total, err)
+	}
+	if err := f.repos.Users.BootstrapAdmin(f.ctx, "pricing@example.test", "sha256$pricing"); err != nil {
+		t.Fatal(err)
+	}
+	userID, _, err := f.repos.Users.AuthenticateAdmin(f.ctx, "pricing@example.test")
+	if err != nil {
+		t.Fatal(err)
+	}
+	input, output := 9.5, 11.5
+	if err := f.repos.Catalog.UpdatePriceOverride(f.ctx, pricing[0].OfferingID, userID, models.PriceOverride{InputUSDPerMillion: &input, OutputUSDPerMillion: &output}); err != nil {
+		t.Fatal(err)
+	}
+	pricing, _, err = f.repos.Catalog.ListPricing(f.ctx, "deepseek", 10, 0)
+	if err != nil || pricing[0].OverrideInputUSDPerMillion == nil || *pricing[0].InputUSDPerMillion != input || *pricing[0].OutputUSDPerMillion != output {
+		t.Fatalf("override pricing=%+v err=%v", pricing, err)
+	}
 	if _, err := f.repos.Catalog.ModelID(f.ctx, "missing"); !errors.Is(err, sql.ErrNoRows) {
 		t.Fatalf("missing model error=%v", err)
 	}

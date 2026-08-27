@@ -56,6 +56,8 @@ jobs:
           VALUES ('fixture-deepseek-v4-pro', 'DeepSeek V4 Pro', 'deepseek v4 pro', 'DeepSeek', 'DeepSeek', '0423', 'Browser fixture model', 128000, 'fixture', 'fixture-deepseek-v4-pro', '{}');
           INSERT INTO model_aliases (model_id, alias, normalized_alias, source_key, evidence)
           SELECT id, 'deepseek-v4-pro', 'deepseek v4 pro', 'fixture', '{"fixture":true}' FROM models WHERE source_key='fixture' AND source_id='fixture-deepseek-v4-pro';
+          INSERT INTO provider_offerings (model_id, provider, provider_model_id, input_usd_per_million, output_usd_per_million, official_input_usd_per_million, official_output_usd_per_million, official_price_source, official_price_source_url)
+          SELECT id, 'OpenRouter', 'deepseek/deepseek-v4-pro', 1.25, 4.50, 1.25, 4.50, 'OpenRouter', 'https://openrouter.ai/api/v1/models' FROM models WHERE source_key='fixture' AND source_id='fixture-deepseek-v4-pro';
           SQL
       - uses: actions/setup-node@v4
         with:

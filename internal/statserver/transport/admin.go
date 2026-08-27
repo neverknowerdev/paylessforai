@@ -30,6 +30,8 @@ func (h *AdminHandler) Handler() http.Handler {
 	mux.Handle("POST /admin/api/v1/capability-profiles/create", h.requireAdmin(http.HandlerFunc(h.profileCreate)))
 	mux.Handle("POST /admin/api/v1/manual-signals", h.requireAdmin(http.HandlerFunc(h.signalCreate)))
 	mux.Handle("GET /admin/api/v1/sources", h.requireAdmin(http.HandlerFunc(h.sources)))
+	mux.Handle("GET /admin/api/v1/pricing", h.requireAdmin(http.HandlerFunc(h.pricingList)))
+	mux.Handle("PUT /admin/api/v1/pricing/", h.requireAdmin(http.HandlerFunc(h.pricingUpdate)))
 	mux.Handle("POST /admin/api/v1/profile-versions/", h.requireAdmin(http.HandlerFunc(h.profileVersion)))
 	return Chain(mux, Recovery, SecurityHeaders, RequestLog)
 }
@@ -100,6 +102,43 @@ func (h *AdminHandler) sources(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	JSON(w, 200, map[string]any{"data": items})
+}
+func (h *AdminHandler) pricingList(w http.ResponseWriter, r *http.Request) {
+	limit := parseLimit(r.URL.Query().Get("limit"))
+	offset := parseOffset(r.URL.Query().Get("offset"))
+	items, total, err := h.catalog.Pricing(r.Context(), r.URL.Query().Get("q"), limit, offset)
+	if err != nil {
+		Error(w, 500, "list pricing failed")
+		return
+	}
+	JSON(w, 200, map[string]any{"data": items, "total": total, "limit": limit, "offset": offset})
+}
+func (h *AdminHandler) pricingUpdate(w http.ResponseWriter, r *http.Request) {
+	offeringID, err := strconv.ParseInt(strings.Trim(strings.TrimPrefix(r.URL.Path, "/admin/api/v1/pricing/"), "/"), 10, 64)
+	if err != nil || offeringID < 1 {
+		Error(w, 400, "invalid offering id")
+		return
+	}
+	var input models.PriceOverride
+	if err := json.NewDecoder(r.Body).Decode(&input); err != nil {
+		Error(w, 400, "invalid price override")
+		return
+	}
+	cookie, err := r.Cookie("stat_admin")
+	if err != nil {
+		Error(w, 403, "forbidden")
+		return
+	}
+	userID, ok := h.auth.UserID(r.Context(), cookie.Value)
+	if !ok {
+		Error(w, 403, "forbidden")
+		return
+	}
+	if err := h.catalog.OverridePricing(r.Context(), offeringID, userID, input); err != nil {
+		Error(w, 400, err.Error())
+		return
+	}
+	JSON(w, 200, map[string]any{"updated": true, "offering_id": offeringID})
 }
 func (h *AdminHandler) profileVersion(w http.ResponseWriter, r *http.Request) {
 	parts := strings.Split(strings.Trim(strings.TrimPrefix(r.URL.Path, "/admin/api/v1/profile-versions/"), "/"), "/")

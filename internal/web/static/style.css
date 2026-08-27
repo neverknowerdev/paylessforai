@@ -242,7 +242,7 @@ code { display: inline-block; max-width: 100%; overflow: hidden; padding: 10px 1
 .route-price-provider { color:#dce7ff; }
 .route-access-label { padding:2px 5px; border-radius:999px; color:#e3d4ff; background:#362454; font-size:9px; font-weight:800; letter-spacing:.03em; }
 .route-access-label.free { color:#c9f7dc; background:#123c31; }
-.route-discount { padding:2px 6px; border-radius:999px; color:#0b1526; background:var(--lime); font-size:10px; font-weight:900; }
+.route-discount { display:inline-flex; align-items:center; justify-content:center; min-width:34px; padding:3px 7px; border:1px solid #efffc9; border-radius:999px; color:#08111f !important; background:#c7f36a !important; box-shadow:0 0 0 1px #c7f36a55, 0 2px 7px #0005; font-size:11px; font-weight:950; line-height:1; text-shadow:none; }
 .route-setting-section { display:grid; gap:7px; padding-top:10px; border-top:1px solid #2d3c5c; }
 .route-setting-heading { display:flex; align-items:center; justify-content:space-between; color:var(--muted); font-size:10px; font-weight:800; letter-spacing:.04em; text-transform:uppercase; }
 .route-setting-heading .discount-value { color:var(--lime); font-size:14px; font-weight:900; }

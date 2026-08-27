@@ -112,6 +112,7 @@ test('creates and exposes a callable group alias', async ({ page, request }) => 
   await page.getByRole('button', { name: 'Create group' }).click();
   await page.locator('#group-name').fill('Coding pool');
   await page.locator('#group-slug').fill('coding-pool');
+  await expect(page.getByText('Try name', { exact: true })).toHaveCount(0);
   await expect(page.locator('#group-stage-list .source-candidates')).toBeHidden();
   await expect(page.getByText('Retry whole try block', { exact: true })).toBeVisible();
   await expect(page.locator('#group-stage-list .stage-billing')).toHaveCount(0);

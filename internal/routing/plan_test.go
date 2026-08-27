@@ -38,6 +38,16 @@ func TestBuildGroupReportsPriceLimit(t *testing.T) {
 	}
 }
 
+func TestBuildGroupRepeatsTryBlockAndKeepsSourceOrder(t *testing.T) {
+	sourceRetries := 0
+	definition := groups.Definition{ID: "g", Slug: "g", Enabled: true, Stages: []groups.Stage{{Position: 0, Name: "auction", TryRetries: intPtr(1), Sources: []groups.Source{{Kind: groups.SourceModel, ModelID: "model-a", Retries: &sourceRetries}, {Kind: groups.SourceModel, ModelID: "model-b", Retries: &sourceRetries}}, BillingClasses: []groups.BillingClass{groups.BillingMetered}}}}
+	routes := []matcher.Route{route("a", "model-a", 1, 1, matcher.BillingMetered), route("b", "model-b", 2, 2, matcher.BillingMetered)}
+	plan := BuildGroup(matcher.MatchRequest{Protocol: matcher.ProtocolChatCompletions, LogicalModel: "g", InputTokens: 1, ExpectedOutput: 1}, definition, map[string]groups.Definition{"g": definition}, routes, time.Unix(2, 0), DefaultLimits())
+	if plan.Error != nil || len(plan.Entries) != 4 || plan.Entries[0].Route.ID != "a" || plan.Entries[1].Route.ID != "b" || plan.Entries[2].Route.ID != "a" || plan.Entries[3].Route.ID != "b" {
+		t.Fatalf("expected repeated ordered try block, got %#v", plan)
+	}
+}
+
 func TestPlanJSONUsesStableLowercaseFields(t *testing.T) {
 	definition := groups.Definition{ID: "g", Slug: "g", Enabled: true, Stages: []groups.Stage{{Position: 0, Sources: []groups.Source{{Kind: groups.SourceModel, ModelID: "model-a"}}, BillingClasses: []groups.BillingClass{groups.BillingFree}}}}
 	plan := BuildGroup(matcher.MatchRequest{Protocol: matcher.ProtocolChatCompletions, LogicalModel: "g"}, definition, map[string]groups.Definition{"g": definition}, []matcher.Route{route("free", "model-a", 0, 0, matcher.BillingFree)}, time.Unix(2, 0), DefaultLimits())

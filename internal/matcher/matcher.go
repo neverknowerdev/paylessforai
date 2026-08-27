@@ -112,6 +112,7 @@ type MatchRequest struct {
 	MaximumCostPicoUSD           *int64
 	MaximumInputPicoUSDPerToken  *int64
 	MaximumOutputPicoUSDPerToken *int64
+	MaximumOfficialPricePercent  *int
 	AllowedBillingClasses        []BillingClass
 	RequiredInputModalities      []string
 	RequiredOutputModalities     []string
@@ -162,6 +163,10 @@ func (Engine) Match(input MatchInput) MatchResult {
 	}
 	if input.Request.MaximumCostPicoUSD != nil && *input.Request.MaximumCostPicoUSD < 0 {
 		result.Error = &MatchError{Code: "invalid_cost_limit", Message: "maximum cost must be non-negative"}
+		return result
+	}
+	if input.Request.MaximumOfficialPricePercent != nil && (*input.Request.MaximumOfficialPricePercent < 0 || *input.Request.MaximumOfficialPricePercent > 100) {
+		result.Error = &MatchError{Code: "invalid_price_percent", Message: "official price percentage must be between 0 and 100"}
 		return result
 	}
 
@@ -295,6 +300,20 @@ func rejectRoute(request MatchRequest, route Route, now time.Time, allowed, excl
 	if route.Price.InputPicoUSDPerToken < 0 || route.Price.OutputPicoUSDPerToken < 0 || route.Price.FixedPicoUSD < 0 {
 		return reject("missing_price", "route has invalid negative pricing")
 	}
+	if request.MaximumOfficialPricePercent != nil && strings.EqualFold(route.Provider, "surplus") {
+		if !route.OfficialPriceAvailable || route.OfficialPrice.InputPicoUSDPerToken < 0 || route.OfficialPrice.OutputPicoUSDPerToken < 0 {
+			return reject("missing_official_price", "auction route does not expose an official price")
+		}
+		percent := int64(*request.MaximumOfficialPricePercent)
+		if percent > 0 && (route.OfficialPrice.InputPicoUSDPerToken > maxInt64/percent || route.OfficialPrice.OutputPicoUSDPerToken > maxInt64/percent) {
+			return reject("invalid_official_price", "official price is too large for auction percentage")
+		}
+		inputCap := route.OfficialPrice.InputPicoUSDPerToken * percent / 100
+		outputCap := route.OfficialPrice.OutputPicoUSDPerToken * percent / 100
+		if route.Price.InputPicoUSDPerToken > inputCap || route.Price.OutputPicoUSDPerToken > outputCap {
+			return reject("over_official_price_limit", "auction price exceeds the allowed percentage of official price")
+		}
+	}
 	if request.MaximumInputPicoUSDPerToken != nil && route.Price.InputPicoUSDPerToken > *request.MaximumInputPicoUSDPerToken {
 		return reject("over_input_price_limit", "route input price exceeds the stage limit")
 	}
@@ -303,6 +322,8 @@ func rejectRoute(request MatchRequest, route Route, now time.Time, allowed, excl
 	}
 	return RouteRejection{}, false
 }
+
+const maxInt64 = int64(^uint64(0) >> 1)
 
 func modelAllowed(routeModel string, request MatchRequest) bool {
 	if len(request.LogicalModels) == 0 {

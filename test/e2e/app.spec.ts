@@ -112,7 +112,11 @@ test('creates and exposes a callable group alias', async ({ page, request }) => 
   await page.getByRole('button', { name: 'Create group' }).click();
   await page.locator('#group-name').fill('Coding pool');
   await page.locator('#group-slug').fill('coding-pool');
-  await page.locator('#group-stage-list .source-value').selectOption('model-a');
+  await page.locator('#group-stage-list .source-search').fill('model-a');
+  await page.locator('#group-stage-list .source-candidate[data-model-id="model-a"] .candidate-add').click();
+  await expect(page.locator('#group-stage-list .selected-source')).toContainText('model-a');
+  await page.locator('#group-stage-list .try-retries').fill('2');
+  await page.locator('#group-stage-list .source-retries').fill('2');
   await page.getByRole('button', { name: 'Save group' }).click();
   await expect(page.locator('#groups-list')).toContainText('coding-pool');
   const groupSurface = await page.locator('.group-row').first().evaluate((element) => {

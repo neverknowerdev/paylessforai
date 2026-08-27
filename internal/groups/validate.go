@@ -50,6 +50,15 @@ func ValidateDefinition(def Definition, all map[string]Definition) []ValidationI
 		groupSources := 0
 		for j, source := range stage.Sources {
 			sourcePath := fmt.Sprintf("%s.sources[%d]", path, j)
+			if source.ProviderName != "" && strings.TrimSpace(source.ProviderName) == "" {
+				issues = append(issues, issue(sourcePath+".provider_name", "invalid_provider", "provider name cannot be empty", "error"))
+			}
+			if source.Retries != nil && (*source.Retries < 0 || *source.Retries > 5) {
+				issues = append(issues, issue(sourcePath+".retries", "invalid_retry_count", "model retries must be between 0 and 5", "error"))
+			}
+			if source.MaximumOfficialPricePercent != nil && (*source.MaximumOfficialPricePercent < 0 || *source.MaximumOfficialPricePercent > 100) {
+				issues = append(issues, issue(sourcePath+".maximum_official_price_percent", "invalid_price_percent", "auction price percentage must be between 0 and 100", "error"))
+			}
 			if source.Kind == SourceModel && strings.TrimSpace(source.ModelID) != "" && source.GroupID == "" {
 				continue
 			}
@@ -61,6 +70,9 @@ func ValidateDefinition(def Definition, all map[string]Definition) []ValidationI
 				continue
 			}
 			issues = append(issues, issue(sourcePath, "invalid_group_source", "source must contain exactly one model_id or group_id", "error"))
+		}
+		if stage.TryRetries != nil && (*stage.TryRetries < 0 || *stage.TryRetries > 5) {
+			issues = append(issues, issue(path+".try_retries", "invalid_retry_count", "try retries must be between 0 and 5", "error"))
 		}
 		if groupSources > 0 && (groupSources != 1 || len(stage.Sources) != 1) {
 			issues = append(issues, issue(path+".sources", "invalid_group_source", "a nested stage must contain exactly one group source", "error"))
@@ -144,6 +156,7 @@ func normalizeStage(stage Stage) Stage {
 	for i := range stage.Sources {
 		stage.Sources[i].ModelID = strings.TrimSpace(stage.Sources[i].ModelID)
 		stage.Sources[i].GroupID = strings.TrimSpace(stage.Sources[i].GroupID)
+		stage.Sources[i].ProviderName = strings.ToLower(strings.TrimSpace(stage.Sources[i].ProviderName))
 	}
 	return stage
 }

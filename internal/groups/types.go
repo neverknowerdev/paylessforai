@@ -20,9 +20,12 @@ const (
 )
 
 type Source struct {
-	Kind    SourceKind `json:"kind"`
-	ModelID string     `json:"model_id,omitempty"`
-	GroupID string     `json:"group_id,omitempty"`
+	Kind                        SourceKind `json:"kind"`
+	ModelID                     string     `json:"model_id,omitempty"`
+	GroupID                     string     `json:"group_id,omitempty"`
+	ProviderName                string     `json:"provider_name,omitempty"`
+	Retries                     *int       `json:"retries,omitempty"`
+	MaximumOfficialPricePercent *int       `json:"maximum_official_price_percent,omitempty"`
 }
 
 type PriceLimits struct {
@@ -43,6 +46,7 @@ type Stage struct {
 	MaximumOutputPicoUSDPerToken *int64         `json:"maximum_output_pico_usd_per_token,omitempty"`
 	MaximumExpectedCostPicoUSD   *int64         `json:"maximum_expected_cost_pico_usd,omitempty"`
 	SameRouteRetries             *int           `json:"same_route_retries,omitempty"`
+	TryRetries                   *int           `json:"try_retries,omitempty"`
 }
 
 type Definition struct {
@@ -68,6 +72,7 @@ func (i ValidationIssue) Error() string { return i.Code + ": " + i.Message }
 
 type EffectiveStage struct {
 	Path                         []string       `json:"path"`
+	TryKey                       string         `json:"try_key"`
 	Name                         string         `json:"name"`
 	LogicalModelIDs              []string       `json:"logical_model_ids"`
 	ProviderNames                []string       `json:"provider_names,omitempty"`
@@ -77,6 +82,8 @@ type EffectiveStage struct {
 	MaximumOutputPicoUSDPerToken *int64         `json:"maximum_output_pico_usd_per_token,omitempty"`
 	MaximumExpectedCostPicoUSD   *int64         `json:"maximum_expected_cost_pico_usd,omitempty"`
 	SameRouteRetries             int            `json:"same_route_retries"`
+	TryRetries                   int            `json:"try_retries"`
+	MaximumOfficialPricePercent  *int           `json:"maximum_official_price_percent,omitempty"`
 }
 
 type CompileResult struct {

@@ -74,32 +74,45 @@ func BuildGroup(request matcher.MatchRequest, definition groups.Definition, defi
 			return result
 		}
 	}
-	seen := map[string]bool{}
-	for _, stage := range compiled.Stages {
-		stageRequest := request
-		stageRequest.LogicalModel = ""
-		stageRequest.LogicalModels = append([]string(nil), stage.LogicalModelIDs...)
-		stageRequest.AllowedProviders = append([]string(nil), stage.ProviderNames...)
-		stageRequest.AllowedBillingClasses = make([]matcher.BillingClass, 0, len(stage.BillingClasses))
-		for _, value := range stage.BillingClasses {
-			stageRequest.AllowedBillingClasses = append(stageRequest.AllowedBillingClasses, matcher.BillingClass(value))
+	for index := 0; index < len(compiled.Stages); {
+		blockEnd := index + 1
+		tryKey := compiled.Stages[index].TryKey
+		for blockEnd < len(compiled.Stages) && tryKey != "" && compiled.Stages[blockEnd].TryKey == tryKey {
+			blockEnd++
 		}
-		stageRequest.MaximumInputPicoUSDPerToken = stage.MaximumInputPicoUSDPerToken
-		stageRequest.MaximumOutputPicoUSDPerToken = stage.MaximumOutputPicoUSDPerToken
-		stageRequest.MaximumCostPicoUSD = stage.MaximumExpectedCostPicoUSD
-		matched := matcher.New().Match(matcher.MatchInput{Request: stageRequest, Routes: routes, Now: now})
-		result.Rejections = append(result.Rejections, matched.Rejections...)
-		for _, ranked := range matched.Ranked {
-			if seen[ranked.Route.ID] {
-				continue
-			}
-			seen[ranked.Route.ID] = true
-			result.Entries = append(result.Entries, Entry{StageID: stage.Name, StagePath: append([]string(nil), stage.Path...), Route: ranked.Route, ExpectedCost: ranked.ExpectedCost, SameRouteRetries: stage.SameRouteRetries})
-			if len(result.Entries) >= limits.MaximumRoutes {
-				result.Error = &matcher.MatchError{Code: "group_plan_too_large", Message: "resolved group has too many routes"}
-				return result
+		repeats := 1 + compiled.Stages[index].TryRetries
+		for repetition := 0; repetition < repeats; repetition++ {
+			seenCycle := map[string]bool{}
+			for stageIndex := index; stageIndex < blockEnd; stageIndex++ {
+				stage := compiled.Stages[stageIndex]
+				stageRequest := request
+				stageRequest.LogicalModel = ""
+				stageRequest.LogicalModels = append([]string(nil), stage.LogicalModelIDs...)
+				stageRequest.AllowedProviders = append([]string(nil), stage.ProviderNames...)
+				stageRequest.AllowedBillingClasses = make([]matcher.BillingClass, 0, len(stage.BillingClasses))
+				for _, value := range stage.BillingClasses {
+					stageRequest.AllowedBillingClasses = append(stageRequest.AllowedBillingClasses, matcher.BillingClass(value))
+				}
+				stageRequest.MaximumInputPicoUSDPerToken = stage.MaximumInputPicoUSDPerToken
+				stageRequest.MaximumOutputPicoUSDPerToken = stage.MaximumOutputPicoUSDPerToken
+				stageRequest.MaximumCostPicoUSD = stage.MaximumExpectedCostPicoUSD
+				stageRequest.MaximumOfficialPricePercent = stage.MaximumOfficialPricePercent
+				matched := matcher.New().Match(matcher.MatchInput{Request: stageRequest, Routes: routes, Now: now})
+				result.Rejections = append(result.Rejections, matched.Rejections...)
+				for _, ranked := range matched.Ranked {
+					if seenCycle[ranked.Route.ID] {
+						continue
+					}
+					seenCycle[ranked.Route.ID] = true
+					result.Entries = append(result.Entries, Entry{StageID: stage.Name, StagePath: append([]string(nil), stage.Path...), Route: ranked.Route, ExpectedCost: ranked.ExpectedCost, SameRouteRetries: stage.SameRouteRetries})
+					if len(result.Entries) >= limits.MaximumRoutes {
+						result.Error = &matcher.MatchError{Code: "group_plan_too_large", Message: "resolved group has too many routes"}
+						return result
+					}
+				}
 			}
 		}
+		index = blockEnd
 	}
 	if len(result.Entries) == 0 {
 		capOnly := len(result.Rejections) > 0

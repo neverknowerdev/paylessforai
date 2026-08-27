@@ -108,7 +108,7 @@ func (s *Store) SaveGroup(ctx context.Context, definition groups.Definition, exp
 		if stage.Selection == "" {
 			stage.Selection = groups.SelectionLowestExpectedCost
 		}
-		if _, err = tx.ExecContext(ctx, `INSERT INTO routing_group_stages(id,group_id,position,name,selection_strategy,maximum_input_pico_usd_per_token,maximum_output_pico_usd_per_token,maximum_expected_cost_pico_usd,same_route_retries) VALUES(?,?,?,?,?,?,?,?,?)`, stage.ID, definition.ID, stage.Position, stage.Name, stage.Selection, nullableGroupInt(stage.MaximumInputPicoUSDPerToken), nullableGroupInt(stage.MaximumOutputPicoUSDPerToken), nullableGroupInt(stage.MaximumExpectedCostPicoUSD), nullableGroupRetry(stage.SameRouteRetries)); err != nil {
+		if _, err = tx.ExecContext(ctx, `INSERT INTO routing_group_stages(id,group_id,position,name,selection_strategy,maximum_input_pico_usd_per_token,maximum_output_pico_usd_per_token,maximum_expected_cost_pico_usd,same_route_retries,try_retries) VALUES(?,?,?,?,?,?,?,?,?,?)`, stage.ID, definition.ID, stage.Position, stage.Name, stage.Selection, nullableGroupInt(stage.MaximumInputPicoUSDPerToken), nullableGroupInt(stage.MaximumOutputPicoUSDPerToken), nullableGroupInt(stage.MaximumExpectedCostPicoUSD), nullableGroupRetry(stage.SameRouteRetries), nullableGroupRetry(stage.TryRetries)); err != nil {
 			return groups.Definition{}, err
 		}
 		billing := stage.BillingClasses
@@ -123,7 +123,7 @@ func (s *Store) SaveGroup(ctx context.Context, definition groups.Definition, exp
 					source.Kind = groups.SourceModel
 				}
 			}
-			if _, err = tx.ExecContext(ctx, `INSERT INTO routing_group_sources(id,stage_id,position,source_kind,model_id,nested_group_id) VALUES(?,?,?,?,?,?)`, ids.New(), stage.ID, j, source.Kind, nullableStringGroup(source.ModelID), nullableStringGroup(source.GroupID)); err != nil {
+			if _, err = tx.ExecContext(ctx, `INSERT INTO routing_group_sources(id,stage_id,position,source_kind,model_id,nested_group_id,provider_name,retries,maximum_official_price_percent) VALUES(?,?,?,?,?,?,?,?,?)`, ids.New(), stage.ID, j, source.Kind, nullableStringGroup(source.ModelID), nullableStringGroup(source.GroupID), nullableStringGroup(strings.ToLower(strings.TrimSpace(source.ProviderName))), nullableGroupRetry(source.Retries), nullableGroupRetry(source.MaximumOfficialPricePercent)); err != nil {
 				return groups.Definition{}, err
 			}
 		}
@@ -157,15 +157,15 @@ func (s *Store) DeleteGroup(ctx context.Context, id string, expectedRevision int
 }
 
 func (s *Store) loadGroupStages(ctx context.Context, groupID string) ([]groups.Stage, error) {
-	rows, err := s.db.QueryContext(ctx, `SELECT id,position,name,selection_strategy,maximum_input_pico_usd_per_token,maximum_output_pico_usd_per_token,maximum_expected_cost_pico_usd,same_route_retries FROM routing_group_stages WHERE group_id=? ORDER BY position`, groupID)
+	rows, err := s.db.QueryContext(ctx, `SELECT id,position,name,selection_strategy,maximum_input_pico_usd_per_token,maximum_output_pico_usd_per_token,maximum_expected_cost_pico_usd,same_route_retries,try_retries FROM routing_group_stages WHERE group_id=? ORDER BY position`, groupID)
 	if err != nil {
 		return nil, err
 	}
 	result := []groups.Stage{}
 	for rows.Next() {
 		var stage groups.Stage
-		var in, out, total, retries sql.NullInt64
-		if err := rows.Scan(&stage.ID, &stage.Position, &stage.Name, &stage.Selection, &in, &out, &total, &retries); err != nil {
+		var in, out, total, retries, tryRetries sql.NullInt64
+		if err := rows.Scan(&stage.ID, &stage.Position, &stage.Name, &stage.Selection, &in, &out, &total, &retries, &tryRetries); err != nil {
 			return nil, err
 		}
 		stage.MaximumInputPicoUSDPerToken = nullGroupInt(in)
@@ -174,6 +174,10 @@ func (s *Store) loadGroupStages(ctx context.Context, groupID string) ([]groups.S
 		if retries.Valid {
 			value := int(retries.Int64)
 			stage.SameRouteRetries = &value
+		}
+		if tryRetries.Valid {
+			value := int(tryRetries.Int64)
+			stage.TryRetries = &value
 		}
 		result = append(result, stage)
 	}
@@ -186,15 +190,24 @@ func (s *Store) loadGroupStages(ctx context.Context, groupID string) ([]groups.S
 	}
 	for index := range result {
 		stage := &result[index]
-		sourceRows, err := s.db.QueryContext(ctx, `SELECT source_kind,COALESCE(model_id,''),COALESCE(nested_group_id,'') FROM routing_group_sources WHERE stage_id=? ORDER BY position`, stage.ID)
+		sourceRows, err := s.db.QueryContext(ctx, `SELECT source_kind,COALESCE(model_id,''),COALESCE(nested_group_id,''),COALESCE(provider_name,''),retries,maximum_official_price_percent FROM routing_group_sources WHERE stage_id=? ORDER BY position`, stage.ID)
 		if err != nil {
 			return nil, err
 		}
 		for sourceRows.Next() {
 			var source groups.Source
-			if err := sourceRows.Scan(&source.Kind, &source.ModelID, &source.GroupID); err != nil {
+			var retries, percent sql.NullInt64
+			if err := sourceRows.Scan(&source.Kind, &source.ModelID, &source.GroupID, &source.ProviderName, &retries, &percent); err != nil {
 				sourceRows.Close()
 				return nil, err
+			}
+			if retries.Valid {
+				value := int(retries.Int64)
+				source.Retries = &value
+			}
+			if percent.Valid {
+				value := int(percent.Int64)
+				source.MaximumOfficialPricePercent = &value
 			}
 			stage.Sources = append(stage.Sources, source)
 		}

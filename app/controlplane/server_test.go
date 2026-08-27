@@ -3,6 +3,7 @@ package controlplane
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -168,13 +169,13 @@ func TestProviderCredentialManagementAPI(t *testing.T) {
 		providers.Definition{Name: "openrouter", DisplayName: "OpenRouter", DefaultBaseURL: "http://provider.invalid/v1", NewClient: func(string, string) providers.Client { return credentialTestClient{provider: "openrouter"} }},
 		providers.Definition{Name: "local-llm", DisplayName: "Local LLM", DefaultBaseURL: "http://provider.invalid/v1", NewClient: func(string, string) providers.Client { return credentialTestClient{provider: "local-llm"} }},
 	)
-	server, err := NewWithDeps("127.0.0.1:0", time.Second, time.Second, db, nil, nil, CredentialDeps{Box: box, Registry: registry})
+	server, err := NewWithDeps("127.0.0.1:0", time.Second, time.Second, db, nil, nil, CredentialDeps{Box: box, Registry: registry, Reload: func() error { return errors.New("partial provider catalog refresh: subscription-mock unavailable") }})
 	if err != nil {
 		t.Fatal(err)
 	}
 	create := httptest.NewRecorder()
 	server.httpServer.Handler.ServeHTTP(create, httptest.NewRequest(http.MethodPost, "/api/providers/credentials", strings.NewReader(`{"provider":"openrouter","label":"main","api_key":"secret-value"}`)))
-	if create.Code != http.StatusCreated || strings.Contains(create.Body.String(), "secret-value") || strings.Contains(create.Body.String(), "ciphertext") {
+	if create.Code != http.StatusCreated || !strings.Contains(create.Body.String(), "catalog_refresh_warning") || strings.Contains(create.Body.String(), "secret-value") || strings.Contains(create.Body.String(), "ciphertext") {
 		t.Fatalf("unexpected credential response: %d %s", create.Code, create.Body.String())
 	}
 	list := httptest.NewRecorder()

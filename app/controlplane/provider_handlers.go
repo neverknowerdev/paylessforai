@@ -166,14 +166,17 @@ func (s *Server) createProviderCredential(w http.ResponseWriter, r *http.Request
 		writeError(w, http.StatusInternalServerError, "credential_store_failed", "could not store provider credential")
 		return
 	}
+	response := map[string]any{"data": item, "models_discovered": len(discovered), "models_verified": len(verifiedManual), "models_found": len(discovered) + len(verifiedManual)}
 	if s.credentials.Reload != nil {
 		if err := s.credentials.Reload(); err != nil {
-			_ = s.db.DeleteProviderCredential(r.Context(), item.ID)
-			writeJSON(w, http.StatusBadGateway, map[string]any{"error": map[string]any{"code": "provider_catalog_refresh_failed", "message": sanitizeError(err.Error()), "provider": input.Provider}})
-			return
+			// The credential has already passed its own verification. Keep it
+			// persisted when another configured provider is unavailable: the
+			// catalog manager retains successful routes and reports the partial
+			// refresh as a warning for the operator.
+			response["catalog_refresh_warning"] = sanitizeError(err.Error())
 		}
 	}
-	writeJSON(w, http.StatusCreated, map[string]any{"data": item, "models_discovered": len(discovered), "models_verified": len(verifiedManual), "models_found": len(discovered) + len(verifiedManual)})
+	writeJSON(w, http.StatusCreated, response)
 }
 
 func (s *Server) findDuplicateProviderCredential(ctx context.Context, apiKey string) (*models.ProviderCredential, error) {

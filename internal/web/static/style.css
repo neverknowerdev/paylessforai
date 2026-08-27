@@ -267,3 +267,26 @@ code { display: inline-block; max-width: 100%; overflow: hidden; padding: 10px 1
 .drag-handle:active { cursor:grabbing; }
 .auction-pricing .route-setting-heading { text-transform:none; letter-spacing:0; }
 @media (max-width: 520px) { .source-candidate-title-row { align-items:flex-start; flex-direction:column; } .source-route-option { align-items:flex-start; } }
+
+/* Compact selected route cards: route identity first, settings underneath. */
+.selected-source { grid-template-columns:22px minmax(0,1fr) auto; align-items:start; padding:14px; }
+.selected-source-main { min-width:0; padding-right:0; }
+.selected-source-header { display:flex; align-items:center; justify-content:space-between; gap:10px; width:100%; }
+.selected-source-header > strong { color:var(--ink); font-size:20px; line-height:1.15; overflow-wrap:anywhere; }
+.selected-source-header-actions { display:flex; align-items:center; gap:6px; flex:0 0 auto; }
+.retry-summary { display:inline-flex; align-items:center; gap:4px; min-width:40px; justify-content:center; padding:6px 8px; border:1px solid #4569a5; border-radius:999px; color:#cbdcff; background:#10203d; cursor:pointer; font-size:12px; font-weight:800; }
+.retry-summary:hover { border-color:var(--blue-bright); background:#1a3158; }
+.retry-summary span:first-child { font-size:14px; line-height:1; }
+.source-duplicate { min-height:30px; padding:5px 8px; font-size:10px; }
+.selected-route-provider { margin-top:4px; font-size:17px; line-height:1.2; }
+.selected-route-summary { margin-top:7px; width:100%; box-sizing:border-box; padding:8px 10px; border:1px solid #38517d; border-radius:9px; color:#dce7ff; background:#223554; font-size:13px; line-height:1.35; }
+.selected-route-summary .route-price-values { font-weight:700; }
+.selected-source-controls { grid-column:2 / -1; width:100%; display:block; }
+.auction-pricing { margin-top:10px; padding:12px; border:1px solid #45669b; border-radius:10px; background:linear-gradient(135deg,#1d3154,#182944); }
+.auction-pricing .route-setting-heading { align-items:center; font-size:11px; }
+.auction-pricing .route-setting-heading .discount-value { display:inline-flex; align-items:center; min-width:54px; justify-content:center; padding:4px 9px; border:1px solid #a5e94a; border-radius:999px; color:#07101c; background:var(--lime); font-size:15px; font-weight:900; }
+.auction-pricing input[type="range"] { height:8px; margin:5px 0 2px; border-radius:999px; background:#40516e; }
+.auction-cap { display:block; padding-top:2px; font-size:11px; }
+.source-remove { z-index:1; }
+.retry-modal { max-width:420px; }
+@media (max-width: 520px) { .selected-source { grid-template-columns:18px minmax(0,1fr) auto; } .selected-source-header > strong { font-size:17px; } .selected-route-provider { font-size:15px; } .selected-source-header-actions { flex-wrap:wrap; justify-content:flex-end; } }

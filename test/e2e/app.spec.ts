@@ -148,9 +148,15 @@ test('creates and exposes a callable group alias', async ({ page, request }) => 
   await auctionSlider.evaluate((element) => { const input = element as HTMLInputElement; input.value = '90'; input.dispatchEvent(new Event('input', { bubbles: true })); });
   await expect(page.locator('#group-stage-list .discount-value').first()).toHaveText('90%');
   await expect(page.locator('#group-stage-list .auction-cap')).toBeVisible();
-  await expect(page.locator('#group-stage-list .source-retries').first()).toHaveValue('1');
+  const retrySummary = page.locator('#group-stage-list .retry-summary').first();
+  await expect(retrySummary).toContainText('1');
+  await retrySummary.click();
+  await expect(page.locator('#retry-modal')).toBeVisible();
+  await expect(page.locator('#retry-count')).toHaveValue('1');
+  await page.locator('#retry-count').fill('2');
+  await page.getByRole('button', { name: 'Save retries' }).click();
+  await expect(page.locator('#group-stage-list .retry-summary').first()).toContainText('2');
   await page.locator('#group-stage-list .try-retries').fill('2');
-  await page.locator('#group-stage-list .source-retries').first().fill('2');
   await page.getByRole('button', { name: 'Save group' }).click();
   await expect(page.locator('#groups-list')).toContainText('coding-pool');
   const groupSurface = await page.locator('.group-row').first().evaluate((element) => {

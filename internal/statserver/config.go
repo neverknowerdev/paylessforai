@@ -26,7 +26,14 @@ func ConfigFromEnv() Config {
 			interval = d
 		}
 	}
-	return Config{ListenAddr: getenvDefault("STAT_SERVER_LISTEN", "127.0.0.1:9580"), AdminListenAddr: getenvDefault("STAT_SERVER_ADMIN_LISTEN", "127.0.0.1:9581"), DatabaseURL: os.Getenv("STAT_SERVER_DATABASE_URL"), RefreshInterval: interval, ArtificialKey: os.Getenv("ARTIFICIAL_ANALYSIS_API_KEY"), OpenRouterKey: os.Getenv("OPENROUTER_API_KEY"), HuggingFaceToken: os.Getenv("HUGGINGFACE_TOKEN"), SurplusKey: os.Getenv("SURPLUS_API_KEY"), BootstrapEmail: os.Getenv("STAT_SERVER_BOOTSTRAP_ADMIN_EMAIL"), BootstrapPassword: os.Getenv("STAT_SERVER_BOOTSTRAP_ADMIN_PASSWORD")}
+	return Config{ListenAddr: envOr("STAT_SERVER_LISTEN", "127.0.0.1:9580"), AdminListenAddr: envOr("STAT_SERVER_ADMIN_LISTEN", "127.0.0.1:9581"), DatabaseURL: os.Getenv("STAT_SERVER_DATABASE_URL"), RefreshInterval: interval, ArtificialKey: os.Getenv("ARTIFICIAL_ANALYSIS_API_KEY"), OpenRouterKey: os.Getenv("OPENROUTER_API_KEY"), HuggingFaceToken: os.Getenv("HUGGINGFACE_TOKEN"), SurplusKey: os.Getenv("SURPLUS_API_KEY"), BootstrapEmail: os.Getenv("STAT_SERVER_BOOTSTRAP_ADMIN_EMAIL"), BootstrapPassword: os.Getenv("STAT_SERVER_BOOTSTRAP_ADMIN_PASSWORD")}
+}
+
+func envOr(key, fallback string) string {
+	if value := os.Getenv(key); value != "" {
+		return value
+	}
+	return fallback
 }
 
 func (c Config) Validate() error {

@@ -1,27 +1,30 @@
 package statserver
 
-// Package statserver contains the complete single-process catalog service.
-// Each file owns one responsibility: lifecycle, source ingestion, identity,
-// public APIs, telemetry, scoring, authentication, or administration.
+// Package statserver assembles the single-binary stat-server application.
 
 import (
 	"context"
 	"database/sql"
-	_ "embed"
 	"errors"
 	"log"
 	"net/http"
 	"sync"
 	"time"
-)
 
-//go:embed migrations/001_init.sql
-var migrationSQL string
+	"github.com/neverknowerdev/paylessforai/internal/statserver/connectors"
+	statdb "github.com/neverknowerdev/paylessforai/internal/statserver/db"
+	"github.com/neverknowerdev/paylessforai/internal/statserver/repositories"
+	"github.com/neverknowerdev/paylessforai/internal/statserver/services"
+	"github.com/neverknowerdev/paylessforai/internal/statserver/transport"
+	"github.com/neverknowerdev/paylessforai/internal/statserver/views"
+)
 
 type Server struct {
 	cfg            Config
-	db             *sql.DB
+	database       *sql.DB
 	public, admin  *http.Server
+	catalog        *services.CatalogService
+	profiles       *services.ProfileService
 	mu             sync.Mutex
 	refreshRunning bool
 }
@@ -30,22 +33,36 @@ func New(cfg Config) (*Server, error) {
 	if err := cfg.Validate(); err != nil {
 		return nil, err
 	}
-	db, err := openDB(cfg.DatabaseURL)
+	database, err := statdb.Open(context.Background(), cfg.DatabaseURL)
 	if err != nil {
 		return nil, err
 	}
-	if err = migrate(db); err != nil {
-		_ = db.Close()
+	if err = statdb.Migrate(context.Background(), database); err != nil {
+		_ = database.Close()
 		return nil, err
 	}
-	s := &Server{cfg: cfg, db: db}
-	if cfg.BootstrapEmail != "" && cfg.BootstrapPassword != "" {
-		if err := s.bootstrapAdmin(); err != nil {
-			_ = db.Close()
-			return nil, err
-		}
+	repos := repositories.New(database)
+	catalog := services.NewCatalog(repos, connectors.Default(cfg.ArtificialKey, cfg.OpenRouterKey, cfg.HuggingFaceToken, cfg.SurplusKey))
+	profiles := services.NewProfiles(repos)
+	auth := services.NewAuth(repos)
+	if err := auth.Bootstrap(context.Background(), cfg.BootstrapEmail, cfg.BootstrapPassword); err != nil {
+		_ = database.Close()
+		return nil, err
 	}
-	return s, nil
+	renderer, err := views.New()
+	if err != nil {
+		_ = database.Close()
+		return nil, err
+	}
+	telemetry := services.NewTelemetry(repos)
+	return &Server{
+		cfg:      cfg,
+		database: database,
+		catalog:  catalog,
+		profiles: profiles,
+		public:   &http.Server{Addr: cfg.ListenAddr, Handler: transport.NewPublic(catalog, telemetry, profiles, renderer).Handler(), ReadHeaderTimeout: 10 * time.Second},
+		admin:    &http.Server{Addr: cfg.AdminListenAddr, Handler: transport.NewAdmin(catalog, profiles, auth, renderer).Handler(), ReadHeaderTimeout: 10 * time.Second},
+	}, nil
 }
 
 func (s *Server) Close() error {
@@ -55,12 +72,10 @@ func (s *Server) Close() error {
 	if s.admin != nil {
 		_ = s.admin.Close()
 	}
-	return s.db.Close()
+	return s.database.Close()
 }
 
 func (s *Server) Run(ctx context.Context) error {
-	s.public = &http.Server{Addr: s.cfg.ListenAddr, Handler: s.publicMux(), ReadHeaderTimeout: 10 * time.Second}
-	s.admin = &http.Server{Addr: s.cfg.AdminListenAddr, Handler: s.adminMux(), ReadHeaderTimeout: 10 * time.Second}
 	errCh := make(chan error, 2)
 	go func() {
 		log.Printf("public stat-server listening on %s", s.cfg.ListenAddr)
@@ -111,25 +126,7 @@ func (s *Server) Refresh(ctx context.Context) error {
 	s.refreshRunning = true
 	s.mu.Unlock()
 	defer func() { s.mu.Lock(); s.refreshRunning = false; s.mu.Unlock() }()
-	if _, err := s.db.ExecContext(ctx, `SELECT pg_advisory_lock(873491)`); err != nil {
-		return err
-	}
-	defer s.db.ExecContext(context.Background(), `SELECT pg_advisory_unlock(873491)`)
-	connectors := s.connectors()
-	var errs []string
-	for _, c := range connectors {
-		if c.key == "" && c.name != "huggingface" && c.name != "surplus" {
-			continue
-		}
-		if err := s.runConnector(ctx, c); err != nil {
-			errs = append(errs, c.name+": "+err.Error())
-		}
-	}
-	if err := s.computeScores(ctx); err != nil {
-		errs = append(errs, "scores: "+err.Error())
-	}
-	if len(errs) > 0 {
-		return errors.New(joinErrors(errs))
-	}
-	return nil
+	refreshErr := s.catalog.Refresh(ctx)
+	scoreErr := s.profiles.Compute(ctx)
+	return errors.Join(refreshErr, scoreErr)
 }

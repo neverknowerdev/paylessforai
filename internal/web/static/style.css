@@ -254,3 +254,16 @@ code { display: inline-block; max-width: 100%; overflow: hidden; padding: 10px 1
 .route-reliability label { display:grid; gap:4px; color:var(--muted); font-size:10px; }
 .route-reliability .source-action { min-height:34px; }
 @media (max-width: 520px) { .route-reliability { grid-template-columns:1fr; } .route-reliability .source-action { width:100%; } }
+
+/* Provider routes are individually selectable inside the model result. */
+.source-candidate-main { width:100%; }
+.source-candidate-title-row { display:flex; align-items:center; justify-content:space-between; gap:10px; }
+.source-route-list { display:grid; gap:6px; margin-top:8px; }
+.source-route-option { display:flex; align-items:center; justify-content:flex-start; gap:8px; width:100%; padding:7px 9px; border:1px solid #33496f; border-radius:8px; color:inherit; background:#162541; cursor:pointer; text-align:left; }
+.source-route-option:hover { border-color:var(--blue-bright); background:#1b3157; }
+.source-route-option .route-price-line { flex:1; min-width:0; }
+.source-route-option-action { flex:0 0 auto; color:var(--blue-bright); font-size:10px; font-weight:800; text-transform:uppercase; }
+.drag-handle { cursor:grab; user-select:none; }
+.drag-handle:active { cursor:grabbing; }
+.auction-pricing .route-setting-heading { text-transform:none; letter-spacing:0; }
+@media (max-width: 520px) { .source-candidate-title-row { align-items:flex-start; flex-direction:column; } .source-route-option { align-items:flex-start; } }

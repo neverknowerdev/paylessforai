@@ -113,6 +113,8 @@ test('creates and exposes a callable group alias', async ({ page, request }) => 
   await page.locator('#group-name').fill('Coding pool');
   await page.locator('#group-slug').fill('coding-pool');
   await expect(page.getByText('Try name', { exact: true })).toHaveCount(0);
+  await expect(page.getByText('Description', { exact: true })).toHaveCount(0);
+  await expect(page.getByText('Enabled', { exact: true })).toHaveCount(0);
   await expect(page.locator('#group-stage-list .source-candidates')).toBeHidden();
   await expect(page.getByText('Retry whole try block', { exact: true })).toBeVisible();
   await expect(page.locator('#group-stage-list .stage-billing')).toHaveCount(0);
@@ -160,6 +162,14 @@ test('creates and exposes a callable group alias', async ({ page, request }) => 
   await page.locator('#group-stage-list .try-retries').fill('2');
   await page.getByRole('button', { name: 'Save group' }).click();
   await expect(page.locator('#groups-list')).toContainText('coding-pool');
+  const groupToggle = page.locator('#groups-list [data-toggle-group]').first();
+  await expect(groupToggle).toHaveText('Enabled');
+  await groupToggle.click();
+  await expect(page.locator('#groups-list [data-toggle-group]').first()).toHaveText('Disabled');
+  const disabledGroup = await (await request.get('/api/groups')).json();
+  expect(disabledGroup.data.find((item: { slug: string }) => item.slug === 'coding-pool').enabled).toBeFalsy();
+  await page.locator('#groups-list [data-toggle-group]').first().click();
+  await expect(page.locator('#groups-list [data-toggle-group]').first()).toHaveText('Enabled');
   const groupSurface = await page.locator('.group-row').first().evaluate((element) => {
     const style = getComputedStyle(element);
     return { color: style.color, backgroundImage: style.backgroundImage };

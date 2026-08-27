@@ -132,6 +132,17 @@ func (s *Server) saveGroup(w http.ResponseWriter, r *http.Request, base groups.D
 	}
 	compiled := groups.Compile(input, all, groups.DefaultCompileLimits())
 	issues = append(issues, compiled.Issues...)
+	// A disabled group is intentionally not compilable for routing, but it is
+	// still a valid persisted definition so users can toggle it back on later.
+	if !input.Enabled {
+		filtered := issues[:0]
+		for _, item := range issues {
+			if item.Code != "group_disabled" {
+				filtered = append(filtered, item)
+			}
+		}
+		issues = filtered
+	}
 	if hasGroupErrors(issues) {
 		writeJSON(w, http.StatusUnprocessableEntity, map[string]any{"error": map[string]any{"code": "invalid_group", "message": "group definition is invalid", "issues": issues}})
 		return

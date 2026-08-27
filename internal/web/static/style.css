@@ -146,6 +146,12 @@ code { display: inline-block; max-width: 100%; overflow: hidden; padding: 10px 1
 .group-main small,.group-summary { color:var(--muted); font-size:12px; }
 .group-summary { overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
 .group-actions { display:flex; gap:6px; }
+.group-toggle { display:inline-flex; align-items:center; justify-content:center; min-width:76px; padding:8px 10px; border:1px solid #70a044; border-radius:8px; color:#07111b; background:var(--lime); cursor:pointer; font-size:10px; font-weight:850; }
+.group-toggle:hover { filter:brightness(1.08); }
+.group-toggle.disabled { border-color:#6f7891; color:#d7deef; background:#27324b; }
+.group-toggle:disabled { cursor:wait; opacity:.65; }
+.group-row.is-disabled { border-color:#3a435b; background:linear-gradient(135deg,#151c2e,#101625); }
+.group-row.is-disabled .group-main strong { color:#c3cada; }
 .group-editor-card { position:sticky; top:20px; }
 .group-form { display:grid; gap:10px; padding:0 20px 20px; }
 .group-form > label:not(.check-row) { display:grid; gap:5px; color:var(--muted); font-size:12px; }

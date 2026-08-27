@@ -47,6 +47,17 @@ func TestGroupManagementAPIAndModelAlias(t *testing.T) {
 	if list.Code != http.StatusOK || !strings.Contains(list.Body.String(), "coding") {
 		t.Fatalf("list: %d %s", list.Code, list.Body.String())
 	}
+	disableBody := strings.Replace(createBody, `"enabled":true`, `"enabled":false`, 1)
+	disable := httptest.NewRecorder()
+	handler.ServeHTTP(disable, httptest.NewRequest(http.MethodPut, "/api/groups/"+envelope.Data.ID+"?revision=1", strings.NewReader(disableBody)))
+	if disable.Code != http.StatusOK || !strings.Contains(disable.Body.String(), `"enabled":false`) {
+		t.Fatalf("disable: %d %s", disable.Code, disable.Body.String())
+	}
+	enable := httptest.NewRecorder()
+	handler.ServeHTTP(enable, httptest.NewRequest(http.MethodPut, "/api/groups/"+envelope.Data.ID+"?revision=2", strings.NewReader(createBody)))
+	if enable.Code != http.StatusOK || !strings.Contains(enable.Body.String(), `"enabled":true`) {
+		t.Fatalf("re-enable: %d %s", enable.Code, enable.Body.String())
+	}
 	models := httptest.NewRecorder()
 	handler.ServeHTTP(models, httptest.NewRequest(http.MethodGet, "/v1/models", nil))
 	if models.Code != http.StatusOK || !strings.Contains(models.Body.String(), `"id":"coding"`) || !strings.Contains(models.Body.String(), `"paylessforai_type":"group"`) {

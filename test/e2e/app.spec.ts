@@ -141,6 +141,10 @@ test('creates and exposes a callable group alias', async ({ page, request }) => 
   await expect(page.locator('#group-stage-list .selected-source')).toHaveCount(2);
   await expect(page.locator('#group-stage-list .selected-source').first()).toHaveAttribute('draggable', 'false');
   await expect(page.locator('#group-stage-list .selected-source').first().locator('.drag-handle')).toHaveAttribute('draggable', 'true');
+  await expect(page.locator('#group-stage-list .source-duplicate').first()).toHaveAttribute('aria-label', 'Duplicate provider route');
+  await expect(page.locator('#group-stage-list .source-duplicate').first()).toHaveAttribute('title', 'Duplicate provider route');
+  await expect(page.locator('#group-stage-list .source-remove').first()).toHaveAttribute('aria-label', 'Remove provider route');
+  await expect(page.locator('#group-stage-list .source-remove').first()).toHaveAttribute('title', 'Remove provider route');
   const selectedPrices = await page.locator('#group-stage-list .route-price-line').allTextContents();
   expect(selectedPrices.every((text) => !text.includes('official'))).toBeTruthy();
   const selectedProviders = await page.locator('#group-stage-list .selected-route-provider').allTextContents();

@@ -248,7 +248,8 @@ code { display: inline-block; max-width: 100%; overflow: hidden; padding: 10px 1
 .route-price-provider { color:#dce7ff; }
 .route-access-label { padding:2px 5px; border-radius:999px; color:#e3d4ff; background:#362454; font-size:9px; font-weight:800; letter-spacing:.03em; }
 .route-access-label.free { color:#c9f7dc; background:#123c31; }
-.route-discount { display:inline-flex; align-items:center; justify-content:center; min-width:34px; padding:3px 7px; border:1px solid #efffc9; border-radius:999px; color:#08111f !important; background:#c7f36a !important; box-shadow:0 0 0 1px #c7f36a55, 0 2px 7px #0005; font-size:11px; font-weight:950; line-height:1; text-shadow:none; }
+.route-discount { display:inline-flex; align-items:center; justify-content:center; min-width:34px; margin-left:auto; padding:3px 8px; border:1px solid #5d806f; border-radius:999px; color:#d8f0dd !important; background:#263c35 !important; box-shadow:none; font-size:10px; font-weight:850; line-height:1; text-shadow:none; white-space:nowrap; }
+.route-discount.official { border-color:#5a6a88; color:#d7e0f3 !important; background:#2b3650 !important; }
 .route-setting-section { display:grid; gap:7px; padding-top:10px; border-top:1px solid #2d3c5c; }
 .route-setting-heading { display:flex; align-items:center; justify-content:space-between; color:var(--muted); font-size:10px; font-weight:800; letter-spacing:.04em; text-transform:uppercase; }
 .route-setting-heading .discount-value { color:var(--lime); font-size:14px; font-weight:900; }
@@ -275,7 +276,7 @@ code { display: inline-block; max-width: 100%; overflow: hidden; padding: 10px 1
 @media (max-width: 520px) { .source-candidate-title-row { align-items:flex-start; flex-direction:column; } .source-route-option { align-items:flex-start; } }
 
 /* Compact selected route cards: route identity first, settings underneath. */
-.selected-source { grid-template-columns:22px minmax(0,1fr) max-content; align-items:start; padding:14px; }
+.selected-source { grid-template-columns:22px minmax(0,1fr); align-items:start; padding:14px; }
 .selected-source-main { min-width:0; padding-right:0; }
 .selected-source-header { display:flex; align-items:center; justify-content:space-between; gap:10px; width:100%; }
 .selected-source-header > strong { color:var(--ink); font-size:20px; line-height:1.15; overflow-wrap:anywhere; }
@@ -284,6 +285,11 @@ code { display: inline-block; max-width: 100%; overflow: hidden; padding: 10px 1
 .retry-summary:hover { border-color:var(--blue-bright); background:#1a3158; }
 .retry-summary span:first-child { font-size:14px; line-height:1; }
 .source-duplicate { min-height:30px; padding:5px 8px; font-size:10px; }
+.route-icon-button { display:inline-grid; place-items:center; width:32px; height:32px; min-width:32px; min-height:32px; padding:0; border-radius:8px; font-size:17px; line-height:1; }
+.source-duplicate.route-icon-button { border-color:#4569a5; color:#cbdcff; background:#10203d; }
+.source-duplicate.route-icon-button:hover, .source-duplicate.route-icon-button:focus-visible { border-color:var(--blue-bright); background:#1a3158; }
+.source-remove.route-icon-button { position:static; border-color:#7d4e65; color:#ffb9c6; background:#2b182a; }
+.source-remove.route-icon-button:hover, .source-remove.route-icon-button:focus-visible { border-color:#ff8ea7; background:#3a1d32; }
 .selected-route-provider { margin-top:4px; font-size:17px; line-height:1.2; }
 .selected-route-summary { margin-top:7px; width:100%; box-sizing:border-box; padding:8px 10px; border:1px solid #38517d; border-radius:9px; color:#dce7ff; background:#223554; font-size:13px; line-height:1.35; }
 .selected-route-summary .route-price-values { font-weight:700; }
@@ -295,4 +301,4 @@ code { display: inline-block; max-width: 100%; overflow: hidden; padding: 10px 1
 .auction-cap { display:block; padding-top:2px; font-size:11px; }
 .source-remove { position:static; z-index:1; align-self:start; white-space:nowrap; }
 .retry-modal { max-width:420px; }
-@media (max-width: 520px) { .selected-source { grid-template-columns:18px minmax(0,1fr) max-content; } .selected-source-header > strong { font-size:17px; } .selected-route-provider { font-size:15px; } .selected-source-header-actions { flex-wrap:wrap; justify-content:flex-end; } }
+@media (max-width: 520px) { .selected-source { grid-template-columns:18px minmax(0,1fr); } .selected-source-header > strong { font-size:17px; } .selected-route-provider { font-size:15px; } .selected-source-header-actions { flex-wrap:wrap; justify-content:flex-end; } }

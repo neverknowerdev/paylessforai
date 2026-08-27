@@ -505,6 +505,7 @@
   // Keep route controls compact and discoverable without text-heavy buttons.
   const renderSelectedSourcesV6Original = renderSelectedSourcesV6;
   function decorateRouteActionsV7(card) {
+    card.querySelector('.selected-sources .source-empty')?.remove();
     card.querySelectorAll('.source-duplicate').forEach((button) => {
       button.classList.add('route-icon-button');
       button.setAttribute('aria-label', 'Duplicate provider route');
@@ -674,27 +675,22 @@
       removeStage.textContent = '×';
     }
     const modeRow = card.querySelector('.source-mode-row');
-    const modeLabel = modeRow?.querySelector('label');
     const modeSelect = modeRow?.querySelector('.source-kind');
-    if (modeRow && modeLabel && modeSelect) {
-      modeRow.classList.add('compact-search-mode');
-      modeLabel.hidden = true;
-      modeLabel.setAttribute('aria-hidden', 'true');
+    if (modeSelect) {
       modeSelect.hidden = true;
-      const helper = modeRow.querySelector('small');
-      if (helper) helper.textContent = 'Search models and groups by name or provider.';
+      card.append(modeSelect);
     }
+    modeRow?.remove();
     const sourceSearch = card.querySelector('.source-search');
     if (sourceSearch) sourceSearch.placeholder = 'Search models or groups…';
+    card.querySelector('.selected-route-heading')?.remove();
+    card.querySelector('.stage-explanation')?.remove();
     const retryPanel = card.querySelector('.try-settings-bottom');
     const retryInput = retryPanel?.querySelector('.try-retries');
     if (retryPanel && retryInput) {
       const retries = Math.max(1, Math.min(5, Number(retryInput.value || 1)));
       retryPanel.replaceChildren();
-      retryPanel.classList.add('route-block-retry');
-      const label = document.createElement('span');
-      label.className = 'route-block-retry-label';
-      label.textContent = 'Retry route block';
+      retryPanel.hidden = true;
       const summary = document.createElement('button');
       summary.type = 'button';
       summary.className = 'retry-summary try-retry-summary';
@@ -705,7 +701,13 @@
       summary.addEventListener('click', () => openTryRetryModalV8(card));
       retryInput.hidden = true;
       retryInput.value = retries;
-      retryPanel.append(label, summary, retryInput);
+      retryPanel.append(retryInput);
+      const headingRow = card.querySelector('.stage-card-heading');
+      const stageActions = document.createElement('div');
+      stageActions.className = 'stage-card-actions';
+      stageActions.append(summary);
+      if (removeStage) stageActions.append(removeStage);
+      headingRow?.append(stageActions);
     }
     card.addEventListener('click', (event) => {
       const model = event.target.closest('[data-add-model], .source-candidate[data-model-id]');

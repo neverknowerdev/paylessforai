@@ -116,7 +116,8 @@ test('creates and exposes a callable group alias', async ({ page, request }) => 
   await expect(page.getByText('Description', { exact: true })).toHaveCount(0);
   await expect(page.getByText('Enabled', { exact: true })).toHaveCount(0);
   await expect(page.locator('#group-stage-list .source-candidates')).toBeHidden();
-  await expect(page.getByText('Retry route block', { exact: true })).toBeVisible();
+  await expect(page.locator('#group-stage-list .selected-sources .source-empty')).toHaveCount(0);
+  await expect(page.locator('#group-stage-list .try-retry-summary')).toBeVisible();
   await expect(page.getByRole('button', { name: '+ Add route block' })).toBeVisible();
   await expect(page.locator('#group-stage-list .source-kind')).toBeHidden();
   await expect(page.locator('#group-stage-list .stage-billing')).toHaveCount(0);
@@ -139,7 +140,7 @@ test('creates and exposes a callable group alias', async ({ page, request }) => 
   await page.locator('#group-name').click();
   await expect(page.locator('#group-stage-list .source-search-popover')).toBeHidden();
   await expect(page.locator('#group-stage-list .selected-source').first()).toContainText('model-a');
-  await expect(page.locator('#group-stage-list .selected-route-heading')).toContainText('All routes are selected');
+  await expect(page.locator('#group-stage-list .selected-route-heading')).toHaveCount(0);
   await expect(page.locator('#group-stage-list .selected-source')).toHaveCount(2);
   await expect(page.locator('#group-stage-list .selected-source').first()).toHaveAttribute('draggable', 'false');
   await expect(page.locator('#group-stage-list .selected-source').first().locator('.drag-handle')).toHaveAttribute('draggable', 'true');

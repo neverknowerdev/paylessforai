@@ -310,3 +310,5 @@ code { display: inline-block; max-width: 100%; overflow: hidden; padding: 10px 1
 .route-block-retry-label { color:var(--muted); font-size:11px; }
 .route-block-retry .try-retries { display:none; }
 .try-retry-summary { flex:0 0 auto; }
+.stage-card-actions { display:flex; align-items:center; gap:7px; }
+.stage-card-actions .try-retry-summary { min-width:40px; }

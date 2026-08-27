@@ -110,6 +110,8 @@ test('creates and exposes a callable group alias', async ({ page, request }) => 
   await page.goto('/#groups');
   await expect(page.getByRole('main').getByRole('heading', { name: 'Groups' })).toBeVisible();
   await page.getByRole('button', { name: 'Create group' }).click();
+  await expect(page.locator('#group-stage-list .source-search-popover')).toBeVisible();
+  await expect(page.locator('#group-stage-list .source-search-toggle')).toBeHidden();
   await page.locator('#group-name').fill('Coding pool');
   await page.locator('#group-slug').fill('coding-pool');
   await expect(page.getByText('Try name', { exact: true })).toHaveCount(0);
@@ -122,7 +124,6 @@ test('creates and exposes a callable group alias', async ({ page, request }) => 
   await expect(page.locator('#group-stage-list .source-kind')).toBeHidden();
   await expect(page.locator('#group-stage-list .stage-billing')).toHaveCount(0);
   await expect(page.locator('#group-stage-list .stage-limit-grid')).toHaveCount(0);
-  await page.locator('#group-stage-list .source-search-toggle').click();
   await page.locator('#group-stage-list .source-search').fill('model-a');
   await expect(page.locator('#group-stage-list .source-candidate[data-model-id="model-a"] .candidate-add')).toContainText('Add all routes');
   await expect(page.locator('#group-stage-list .source-candidate[data-model-id="model-a"] .source-route-option')).toHaveCount(2);

@@ -715,6 +715,11 @@
       const select = card.querySelector('.source-kind');
       if (select && (model || group)) select.value = group ? 'group' : 'model';
     }, true);
+    // The picker is the primary action for a new route block, so expose the
+    // search field immediately instead of requiring a second reveal click.
+    // Defer past the editor-opening click so the global outside-click handler
+    // does not immediately close the newly revealed picker.
+    setTimeout(() => openSourcePickerV4(card), 0);
     return card;
   };
   renderGroupStages = function(definition) { const container = $('#group-stage-list'); if (!container) return; container.replaceChildren(); const stages = definition.stages?.length ? definition.stages : blankGroup().stages; stages.forEach((stage, index) => container.append(stageSourceOptionsV4(stage, index))); };

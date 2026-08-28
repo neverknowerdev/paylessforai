@@ -109,6 +109,8 @@ test('supports Responses and Anthropic Messages contracts', async ({ page, reque
 test('creates and exposes a callable group alias', async ({ page, request }) => {
   await page.goto('/#groups');
   await expect(page.getByRole('main').getByRole('heading', { name: 'Groups' })).toBeVisible();
+  await expect(page.locator('#group-preview')).toHaveCount(0);
+  await expect(page.getByText('CALLING A GROUP', { exact: true })).toHaveCount(0);
   await page.getByRole('button', { name: 'Create group' }).click();
   await expect(page.locator('#group-stage-list .source-search-popover')).toBeHidden();
   await expect(page.locator('#group-stage-list .source-search-toggle')).toBeVisible();

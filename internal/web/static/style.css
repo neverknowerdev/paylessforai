@@ -183,7 +183,6 @@ code { display: inline-block; max-width: 100%; overflow: hidden; padding: 10px 1
 .stage-limit-grid { display:grid; grid-template-columns:repeat(3,minmax(0,1fr)); gap:8px; }
 @media (max-width: 720px) { .stage-limit-grid { grid-template-columns:1fr; } }
 .stage-explanation { color:var(--faint); font-size:11px; }
-.group-preview { padding:12px; border:1px solid #3a4c73; border-radius:10px; background:#111f3d; color:var(--blue-bright); font-size:12px; }
 .try-settings { display:grid; grid-template-columns:minmax(140px,.35fr) 1fr; gap:10px; align-items:end; }
 .try-settings small { color:var(--faint); line-height:1.4; padding-bottom:10px; }
 .source-picker { display:grid; gap:8px; }

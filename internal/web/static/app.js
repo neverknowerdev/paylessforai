@@ -520,6 +520,14 @@
     form.insertBefore(fields, preview);
   }
   arrangeGroupIdentityFields();
+  function removeRedundantGroupUI() {
+    $('#group-preview')?.remove();
+    const groupsPanel = document.querySelector('[data-view-panel="groups"]');
+    const callingCard = [...(groupsPanel?.querySelectorAll('.summary-item') || [])]
+      .find((item) => item.querySelector('span')?.textContent.trim() === 'CALLING A GROUP');
+    callingCard?.remove();
+  }
+  removeRedundantGroupUI();
   const groupNameInput = $('#group-name');
   const groupSlugInput = $('#group-slug');
   groupNameInput?.addEventListener('input', () => {

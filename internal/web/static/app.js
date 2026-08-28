@@ -458,11 +458,8 @@
       const track = document.createElement('span');
       track.className = 'group-toggle-track';
       track.setAttribute('aria-hidden', 'true');
-      const status = document.createElement('span');
-      status.className = 'group-toggle-label';
-      status.textContent = group.enabled ? 'Enabled' : 'Disabled';
-      toggle.append(track, status);
-      titleRow.append(toggle, title);
+      toggle.append(track);
+      titleRow.append(title, toggle);
       main.append(titleRow, slugRow, connect, note);
       row.append(main);
 

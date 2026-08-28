@@ -247,7 +247,7 @@ test('creates and exposes a callable group alias', async ({ page, request }) => 
   expect(savedSource.provider_name).toBeUndefined();
   expect(savedSource.provider_names).toEqual(expect.arrayContaining(['surplus', 'openrouter']));
   const groupToggle = page.locator('#groups-list [data-toggle-group]').first();
-  await expect(groupToggle).toHaveText('Enabled');
+  await expect(groupToggle).toHaveText('');
   await expect(groupToggle).toHaveAttribute('role', 'switch');
   await expect(groupToggle).toHaveAttribute('aria-checked', 'true');
   const groupCopy = page.locator('#groups-list .group-slug-row .group-copy');
@@ -282,17 +282,17 @@ test('creates and exposes a callable group alias', async ({ page, request }) => 
   const titleToggleLayout = await page.locator('#groups-list .group-title-row').first().evaluate((row) => {
     const title = row.querySelector('strong')?.getBoundingClientRect();
     const toggle = row.querySelector('.group-toggle')?.getBoundingClientRect();
-    return { gap: title && toggle ? title.left - toggle.right : Number.POSITIVE_INFINITY };
+    return { gap: title && toggle ? toggle.left - title.right : Number.POSITIVE_INFINITY };
   });
   expect(titleToggleLayout.gap).toBeGreaterThanOrEqual(0);
   expect(titleToggleLayout.gap).toBeLessThan(32);
   await groupToggle.click();
-  await expect(page.locator('#groups-list [data-toggle-group]').first()).toHaveText('Disabled');
+  await expect(page.locator('#groups-list [data-toggle-group]').first()).toHaveText('');
   await expect(page.locator('#groups-list [data-toggle-group]').first()).toHaveAttribute('aria-checked', 'false');
   const disabledGroup = await (await request.get('/api/groups')).json();
   expect(disabledGroup.data.find((item: { slug: string }) => item.slug === 'coding-pool').enabled).toBeFalsy();
   await page.locator('#groups-list [data-toggle-group]').first().click();
-  await expect(page.locator('#groups-list [data-toggle-group]').first()).toHaveText('Enabled');
+  await expect(page.locator('#groups-list [data-toggle-group]').first()).toHaveText('');
   await expect(page.locator('#groups-list [data-toggle-group]').first()).toHaveAttribute('aria-checked', 'true');
   const groupSurface = await page.locator('.group-row').first().evaluate((element) => {
     const style = getComputedStyle(element);

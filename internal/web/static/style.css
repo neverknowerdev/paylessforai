@@ -142,7 +142,7 @@ code { display: inline-block; max-width: 100%; overflow: hidden; padding: 10px 1
 .group-row { display:grid; grid-template-columns:minmax(220px,1fr) auto; gap:16px; align-items:center; padding:16px; border:1px solid var(--line); border-radius:14px; color:var(--ink); background:linear-gradient(135deg, #17213a, #11182a); box-shadow:0 12px 30px #00000022; }
 .group-main { display:grid; gap:4px; min-width:0; }
 .group-main strong { color:var(--ink); font-size:16px; line-height:1.15; }
-.group-title-row { display:flex; align-items:center; justify-content:space-between; gap:12px; min-width:0; }
+.group-title-row { display:flex; align-items:center; justify-content:flex-start; flex-wrap:wrap; gap:8px 12px; min-width:0; }
 .group-slug-row { position:relative; display:flex; align-items:center; min-width:0; }
 .group-main code { color:var(--blue-bright); font-size:12px; overflow-wrap:anywhere; }
 .group-main small,.group-summary { color:var(--muted); font-size:12px; }

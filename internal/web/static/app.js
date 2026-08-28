@@ -417,6 +417,8 @@
       main.className = 'group-main';
       const title = document.createElement('strong');
       title.textContent = group.name;
+      const titleRow = document.createElement('div');
+      titleRow.className = 'group-title-row';
       const slugRow = document.createElement('div');
       slugRow.className = 'group-slug-row';
       const slug = document.createElement('code');
@@ -425,17 +427,26 @@
       copy.type = 'button';
       copy.className = 'group-copy';
       copy.dataset.copyGroupSlug = group.slug;
-      copy.textContent = 'Copy slug';
+      copy.dataset.copyLabel = '⧉';
+      copy.dataset.copiedLabel = '✓';
+      copy.setAttribute('aria-label', 'Copy group slug');
+      copy.textContent = '⧉';
       copy.title = 'Copy group slug';
       slugRow.append(slug, copy);
+      const connect = document.createElement('button');
+      connect.type = 'button';
+      connect.className = 'group-connect-link';
+      connect.dataset.connectGroup = group.id;
+      connect.setAttribute('aria-label', `Connection instructions for ${group.name}`);
+      connect.title = 'Connection instructions';
+      const connectIcon = document.createElement('span');
+      connectIcon.className = 'group-connect-help';
+      connectIcon.setAttribute('aria-hidden', 'true');
+      connectIcon.textContent = '?';
+      connect.append(connectIcon, document.createTextNode('Connection instructions'));
       const note = document.createElement('small');
       const count = group.stages?.length || 0;
       note.textContent = `${count} route stage${count === 1 ? '' : 's'}`;
-      main.append(title, slugRow, note);
-      row.append(main);
-
-      const actions = document.createElement('div');
-      actions.className = 'group-actions';
       const toggle = document.createElement('button');
       toggle.type = 'button';
       toggle.className = `group-toggle ${group.enabled ? 'enabled' : 'disabled'}`;
@@ -451,18 +462,18 @@
       status.className = 'group-toggle-label';
       status.textContent = group.enabled ? 'Enabled' : 'Disabled';
       toggle.append(track, status);
+      titleRow.append(title, toggle);
+      main.append(titleRow, slugRow, connect, note);
+      row.append(main);
+
+      const actions = document.createElement('div');
+      actions.className = 'group-actions';
       const edit = document.createElement('button');
       edit.type = 'button';
       edit.className = 'quiet-button';
       edit.dataset.editGroup = group.id;
       edit.textContent = 'Edit';
-      const connect = document.createElement('button');
-      connect.type = 'button';
-      connect.className = 'quiet-button group-connect';
-      connect.dataset.connectGroup = group.id;
-      connect.textContent = 'Connect';
-      connect.title = 'Connection instructions';
-      actions.append(toggle, connect, edit);
+      actions.append(edit);
       row.append(actions);
       list.append(row);
     });
@@ -1185,5 +1196,11 @@
   updateProviderFormMode(); setText('#base-url', `${window.location.origin}/v1`); Promise.all([loadStatus(), loadSummary(), loadRequests(), loadModelStats(), loadProviderStats(), loadModels(), loadKeys(), loadProviders(), loadGroups()]);
   const statsPanel = document.querySelector('[data-view-panel="stats"]'); if (statsPanel && !$('#subscription-stats-body')) { const article = document.createElement('article'); article.className = 'panel-card table-card stats-table-card'; article.innerHTML = '<div class="panel-heading stats-heading"><h3>Subscription economics</h3><span class="card-note">Dynamic blended pricing; observed 5h min/max</span></div><div class="table-wrap"><table><thead><tr><th>Provider</th><th>Tokens</th><th>Input / output per 1M</th><th>5h min / max</th></tr></thead><tbody id="subscription-stats-body"></tbody></table></div><div class="empty-state" id="subscription-stats-empty" hidden>No subscription usage yet.</div>'; statsPanel.append(article); }
   loadSubscriptionStats();
+  document.addEventListener('click', (event) => {
+    const copyGroup = event.target.closest('[data-copy-group-slug]');
+    if (!copyGroup) return;
+    copyGroup.textContent = copyGroup.dataset.copiedLabel || '✓';
+    setTimeout(() => { copyGroup.textContent = copyGroup.dataset.copyLabel || '⧉'; }, 1200);
+  });
   $('#refresh-button').addEventListener('click', loadSubscriptionStats);
 })();

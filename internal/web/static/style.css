@@ -142,12 +142,19 @@ code { display: inline-block; max-width: 100%; overflow: hidden; padding: 10px 1
 .group-row { display:grid; grid-template-columns:minmax(220px,1fr) auto; gap:16px; align-items:center; padding:16px; border:1px solid var(--line); border-radius:14px; color:var(--ink); background:linear-gradient(135deg, #17213a, #11182a); box-shadow:0 12px 30px #00000022; }
 .group-main { display:grid; gap:4px; min-width:0; }
 .group-main strong { color:var(--ink); font-size:16px; line-height:1.15; }
-.group-slug-row { display:flex; align-items:center; gap:7px; min-width:0; }
+.group-title-row { display:flex; align-items:center; justify-content:space-between; gap:12px; min-width:0; }
+.group-slug-row { position:relative; display:flex; align-items:center; min-width:0; }
 .group-main code { color:var(--blue-bright); font-size:12px; overflow-wrap:anywhere; }
 .group-main small,.group-summary { color:var(--muted); font-size:12px; }
 .group-summary { overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
-.group-copy { flex:0 0 auto; padding:2px 6px; border:1px solid #45669b; border-radius:5px; color:var(--blue-bright); background:#162645; cursor:pointer; font-size:9px; font-weight:750; }
+.group-slug-row code { width:100%; box-sizing:border-box; padding-right:38px; }
+.group-copy { position:absolute; top:50%; right:7px; display:grid; place-items:center; width:25px; height:25px; padding:0; border:0; border-radius:5px; color:var(--blue-bright); background:transparent; cursor:pointer; font-size:16px; font-weight:800; line-height:1; transform:translateY(-50%); }
 .group-copy:hover,.group-copy:focus-visible { border-color:#9ebaff; color:#fff; outline:0; }
+.group-copy:hover,.group-copy:focus-visible { background:#29436f; }
+.group-connect-link { display:inline-flex; align-items:center; gap:7px; width:max-content; max-width:100%; padding:0; border:0; color:var(--blue-bright); background:transparent; cursor:pointer; font:inherit; font-size:11px; font-weight:750; text-align:left; }
+.group-connect-link:hover,.group-connect-link:focus-visible { color:#fff; outline:0; text-decoration:underline; }
+.group-connect-help { display:inline-grid; place-items:center; width:18px; height:18px; border:1px solid #6f8fd1; border-radius:50%; color:#c7d7ff; background:#132342; font-size:11px; font-weight:850; line-height:1; }
+.group-connect-link:hover .group-connect-help,.group-connect-link:focus-visible .group-connect-help { border-color:#b8c9ff; color:#fff; background:#1d3560; }
 .group-actions { display:flex; align-items:center; justify-content:flex-end; gap:7px; flex-wrap:nowrap; }
 .group-toggle { display:inline-flex; align-items:center; gap:7px; min-width:0; padding:5px 8px; border:1px solid #526b9d; border-radius:999px; color:#dce7ff; background:#162443; cursor:pointer; font-size:10px; font-weight:800; }
 .group-toggle:hover { border-color:#9ebaff; background:#1d3560; }

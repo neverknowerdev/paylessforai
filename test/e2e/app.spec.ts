@@ -250,10 +250,16 @@ test('creates and exposes a callable group alias', async ({ page, request }) => 
   await expect(groupToggle).toHaveText('Enabled');
   await expect(groupToggle).toHaveAttribute('role', 'switch');
   await expect(groupToggle).toHaveAttribute('aria-checked', 'true');
-  await expect(page.locator('#groups-list .group-slug-row .group-copy')).toHaveCount(1);
+  const groupCopy = page.locator('#groups-list .group-slug-row .group-copy');
+  await expect(groupCopy).toHaveCount(1);
+  await expect(groupCopy).toHaveAttribute('aria-label', 'Copy group slug');
+  await expect(groupCopy).toHaveText('⧉');
   const connectGroup = page.locator('#groups-list [data-connect-group]').first();
-  await expect(connectGroup).toHaveText('Connect');
+  await expect(connectGroup).toContainText('Connection instructions');
+  await expect(connectGroup).toHaveClass(/group-connect-link/);
   await expect(connectGroup).toHaveAttribute('title', 'Connection instructions');
+  await expect(page.locator('#groups-list .group-actions [data-connect-group]')).toHaveCount(0);
+  await expect(page.locator('#groups-list .group-title-row .group-toggle')).toHaveCount(1);
   await connectGroup.click();
   const instructions = page.locator('#group-instructions-modal');
   await expect(instructions).toBeVisible();

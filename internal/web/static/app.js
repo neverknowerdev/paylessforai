@@ -770,6 +770,32 @@
     if (value) value.textContent = `${percent}% of official${percent < 100 ? ` (−${100 - percent}%)` : ''}`;
     const slider = pricing.querySelector('.source-max-price-percent');
     if (slider) slider.style.setProperty('--slider-percent', `${percent}%`);
+    const routes = sourceRoutesForModel(source);
+    const providerRows = [...row.querySelectorAll('.selected-provider-routes .route-price-line')];
+    const routeUnderCap = (route) => {
+      if (!route || route.provider !== 'surplus' || !route.official_pricing) return true;
+      const officialInput = Number(route.official_pricing.input);
+      const officialOutput = Number(route.official_pricing.output);
+      const currentInput = Number(route.pricing?.input);
+      const currentOutput = Number(route.pricing?.output);
+      if (![officialInput, officialOutput, currentInput, currentOutput].every(Number.isFinite)) return false;
+      return currentInput <= officialInput * percent / 100 && currentOutput <= officialOutput * percent / 100;
+    };
+    routes.forEach((route, index) => {
+      const providerRow = providerRows[index];
+      if (!providerRow) return;
+      const capped = route?.provider === 'surplus' && route.official_pricing;
+      providerRow.classList.toggle('cap-included', Boolean(capped && routeUnderCap(route)));
+      providerRow.classList.toggle('cap-excluded', Boolean(capped && !routeUnderCap(route)));
+      providerRow.classList.toggle('cap-not-applicable', !capped);
+    });
+    const includedCount = auctionRoutes.filter(routeUnderCap).length;
+    const status = pricing.querySelector('.auction-cap-status');
+    if (status) {
+      status.textContent = includedCount === 0
+        ? 'No providers included under this max price setting'
+        : `${includedCount} provider${includedCount === 1 ? '' : 's'} included under this max price setting`;
+    }
     const caps = pricing.querySelector('.auction-cap-list');
     if (!caps) return;
     caps.replaceChildren();
@@ -911,9 +937,12 @@
         slider.step = '1';
         slider.className = 'source-auction-percent source-max-price-percent';
         slider.value = source.maximum_official_price_percent ?? 100;
+        const status = document.createElement('small');
+        status.className = 'auction-cap-status';
+        status.setAttribute('aria-live', 'polite');
         const caps = document.createElement('div');
         caps.className = 'auction-cap-list';
-        pricing.append(heading, slider, caps);
+        pricing.append(heading, slider, status, caps);
         controls.append(pricing);
         row.dataset.hasAuctionPricing = 'true';
       }

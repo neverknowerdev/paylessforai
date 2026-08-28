@@ -313,7 +313,10 @@ code { display: inline-block; max-width: 100%; overflow: hidden; padding: 10px 1
 .stage-card-actions { display:flex; align-items:center; gap:7px; }
 .stage-card-actions .try-retry-summary { min-width:40px; }
 .selected-provider-routes { display:grid; gap:4px; margin-top:6px; }
-.selected-provider-routes .route-price-line { padding:5px 8px; border:1px solid #30466f; border-radius:7px; background:#142342; }
+.selected-provider-routes .route-price-line { padding:5px 8px; border:1px solid #30466f; border-radius:7px; background:#142342; transition:border-color .16s ease,box-shadow .16s ease,opacity .16s ease,background .16s ease; }
+.selected-provider-routes .route-price-line.cap-included { border-color:#78a8e5; background:#183052; box-shadow:0 0 0 1px #78a8e544,0 0 14px #78a8e51f; }
+.selected-provider-routes .route-price-line.cap-excluded { border-color:#46526c; background:#121d34; opacity:.52; box-shadow:none; }
+.selected-provider-routes .route-price-line.cap-not-applicable { border-color:#30466f; }
 .selected-provider-routes .selected-route-provider { display:inline; color:#dce7ff; font-size:11px; }
 .provider-scope-note { display:block; margin-top:6px; color:var(--muted); font-size:10px; }
 .include-new-providers { display:flex; align-items:center; gap:6px; color:var(--muted); font-size:11px; }
@@ -323,6 +326,7 @@ code { display: inline-block; max-width: 100%; overflow: hidden; padding: 10px 1
 .all-provider-pricing input[type="range"] { width:100%; accent-color:var(--blue-bright); }
 .auction-cap-list { display:grid; gap:2px; color:#bce8d0; }
 .auction-cap-line { font-size:10px; }
+.auction-cap-status { display:block; margin-top:5px; color:#b7c8e7; font-size:10px; font-weight:700; }
 
 /* Keep the max-price track flush with its pricing panel and preserve the
    filled portion while allowing the thumb to be dragged end to end. */

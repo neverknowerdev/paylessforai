@@ -315,7 +315,7 @@
   function updateModelFilterIndicators() { $$('.table-filter').forEach((button) => { const key = button.dataset.filterKey; const count = key === 'modalities' ? state.modelFilters.input.length + state.modelFilters.output.length : state.modelFilters[key]?.length || 0; button.classList.toggle('active', count > 0); const badge = button.querySelector('.filter-count'); if (badge) { badge.textContent = count || ''; badge.hidden = count === 0; } }); const clear = $('#models-clear-filters'); if (clear) clear.disabled = !Object.values(state.modelFilters).some((values) => values.length); }
   function clearModelFilters() { Object.keys(state.modelFilters).forEach((key) => { state.modelFilters[key] = []; }); closeModelFilter(); updateModelFilterIndicators(); renderModels(); }
   function appendCompactPrice(container, route) {
-    const line = document.createElement('div'); line.className = 'compact-price-line'; const part = (key, label) => { const wrapper = document.createElement('span'); wrapper.className = 'compact-price-part'; const name = document.createElement('small'); name.textContent = label; const current = Number(route.pricing?.[key] || 0); const official = Number(route.official_pricing?.[key] || 0); if (!route.price_available) { wrapper.append(name, document.createTextNode('—')); return wrapper; } if (official > current) { const original = document.createElement('s'); original.textContent = formatUSDPerMillion(official); const arrow = document.createElement('span'); arrow.className = 'price-arrow'; arrow.textContent = '→'; const discounted = document.createElement('strong'); discounted.textContent = formatUSDPerMillion(current); wrapper.append(name, original, arrow, discounted); } else { const value = document.createElement('strong'); value.textContent = formatUSDPerMillion(current); wrapper.append(name, value); } return wrapper; }; line.append(part('input', 'in'), part('output', 'out')); const discount = document.createElement('span'); discount.className = 'compact-discount'; discount.textContent = route.discount_percent_bps == null ? '—' : discountPercent(route.discount_percent_bps); line.append(discount); container.append(line);
+    const line = document.createElement('div'); line.className = 'compact-price-line'; const part = (key, label) => { const wrapper = document.createElement('span'); wrapper.className = 'compact-price-part'; const name = document.createElement('small'); name.textContent = label; const current = Number(route.pricing?.[key] || 0); const official = Number(route.official_pricing?.[key] || 0); if (!route.price_available) { wrapper.append(name, document.createTextNode('—')); return wrapper; } if (official > current) { const original = document.createElement('s'); original.textContent = formatUSDPerMillion(official); const arrow = document.createElement('span'); arrow.className = 'price-arrow'; arrow.textContent = '→'; const discounted = document.createElement('strong'); discounted.textContent = formatUSDPerMillion(current); wrapper.append(name, original, arrow, discounted); } else { const value = document.createElement('strong'); value.textContent = formatUSDPerMillion(current); wrapper.append(name, value); } return wrapper; }; line.append(part('input', 'in'), part('output', 'out')); const discount = document.createElement('span'); discount.className = 'compact-discount'; discount.textContent = route.discount_percent_bps == null ? '—' : Number(route.discount_percent_bps) > 0 ? `-${discountPercent(route.discount_percent_bps)}` : '0%'; line.append(discount); container.append(line);
   }
   function renderModels() {
     const body = $('#models-table-body'); const empty = $('#models-empty'); if (!body) return; const models = filteredModels(); body.replaceChildren(); setText('#catalog-count', `${formatNumber(models.length)} model${models.length === 1 ? '' : 's'}`); setText('#catalog-free-count', `${formatNumber(state.models.length)} routes`); setText('#catalog-free-note', `${formatNumber(state.models.filter((model) => model.free).length)} free routes`); setText('#models-saved', formatUSD(state.summary?.saved_cost_pico_usd)); setText('#models-saved-percent', state.summary?.saved_percent_bps == null ? 'No baseline' : `${discountPercent(state.summary.saved_percent_bps)} saved`);
@@ -427,7 +427,7 @@
     }
     if (percent == null || !Number.isFinite(percent)) return null;
     percent = Math.max(0, Math.min(100, percent));
-    return { percent, label: percent === 0 && samePrice ? 'Official price' : `${percent}%` };
+    return { percent, label: percent === 0 && samePrice ? 'Official price' : percent > 0 ? `-${percent}%` : '0%' };
   }
 
   function appendRoutePriceV7(container, route) {
@@ -768,6 +768,8 @@
     const percent = Math.max(0, Math.min(100, Number(source.maximum_official_price_percent ?? 100)));
     const value = pricing.querySelector('.max-price-value');
     if (value) value.textContent = `${percent}% of official${percent < 100 ? ` (−${100 - percent}%)` : ''}`;
+    const slider = pricing.querySelector('.source-max-price-percent');
+    if (slider) slider.style.setProperty('--slider-percent', `${percent}%`);
     const caps = pricing.querySelector('.auction-cap-list');
     if (!caps) return;
     caps.replaceChildren();
@@ -776,7 +778,7 @@
       const output = Number(route.official_pricing?.output || 0) * percent / 100;
       const line = document.createElement('small');
       line.className = 'auction-cap-line';
-      line.textContent = `${providerName(route.provider)} · ${displayPrice(input)} in / ${displayPrice(output)} out`;
+      line.textContent = `${displayPrice(input)} in / ${displayPrice(output)} out`;
       caps.append(line);
     });
   }
@@ -845,12 +847,6 @@
           providerList.append(empty);
         }
         main.append(providerList);
-        if (!source.provider_name) {
-          const scope = document.createElement('small');
-          scope.className = 'provider-scope-note';
-          scope.textContent = source.include_new_providers === false ? 'Pinned to these providers' : 'All current providers';
-          main.append(scope);
-        }
       }
       const remove = document.createElement('button');
       remove.type = 'button';
@@ -863,19 +859,38 @@
       const controls = document.createElement('div');
       controls.className = 'selected-source-controls';
       if (kind === 'model' && !source.provider_name) {
-        const include = document.createElement('label');
+        const include = document.createElement('div');
         include.className = 'include-new-providers';
+        const includeLabel = document.createElement('label');
+        includeLabel.className = 'include-new-toggle';
         const checkbox = document.createElement('input');
         checkbox.type = 'checkbox';
         checkbox.className = 'source-include-new';
         checkbox.checked = source.include_new_providers !== false;
+        const checkmark = document.createElement('span');
+        checkmark.className = 'include-checkbox-mark';
         const text = document.createElement('span');
         text.textContent = 'Include new providers';
-        const help = document.createElement('span');
+        includeLabel.append(checkbox, checkmark, text);
+        const help = document.createElement('button');
+        help.type = 'button';
         help.className = 'tooltip-help';
         help.textContent = '?';
+        help.setAttribute('aria-label', 'Explain include new providers');
+        help.setAttribute('aria-expanded', 'false');
         help.title = 'When a new provider with this model is added, it is automatically added to this group.';
-        include.append(checkbox, text, help);
+        const helpText = document.createElement('span');
+        helpText.className = 'tooltip-help-text';
+        helpText.hidden = true;
+        helpText.textContent = help.title;
+        help.addEventListener('click', (event) => {
+          event.preventDefault();
+          event.stopPropagation();
+          const expanded = help.getAttribute('aria-expanded') === 'true';
+          help.setAttribute('aria-expanded', String(!expanded));
+          helpText.hidden = expanded;
+        });
+        include.append(includeLabel, help, helpText);
         controls.append(include);
       }
       const auctionRoutes = kind === 'model' ? sourceRoutesForModel(source).filter((route) => route.provider === 'surplus' && route.official_pricing) : [];

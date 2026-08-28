@@ -127,6 +127,8 @@ test('creates and exposes a callable group alias', async ({ page, request }) => 
   await page.locator('#group-stage-list .source-search').fill('model-a');
   await expect(page.locator('#group-stage-list .source-candidate[data-model-id="model-a"] .candidate-add')).toContainText('Add all routes');
   await expect(page.locator('#group-stage-list .source-candidate[data-model-id="model-a"] .source-route-option')).toHaveCount(2);
+  const candidateDiscounts = await page.locator('#group-stage-list .source-route-option .route-discount').allTextContents();
+  expect(candidateDiscounts.filter((text) => text.endsWith('%')).every((text) => text.startsWith('-') || text === '0%')).toBeTruthy();
   await page.locator('#group-stage-list .source-candidate[data-model-id="model-a"] .source-route-option[data-add-provider="surplus"]').click();
   await expect(page.locator('#group-stage-list .selected-source')).toHaveCount(1);
   await page.locator('#group-stage-list .source-remove').click();
@@ -147,7 +149,14 @@ test('creates and exposes a callable group alias', async ({ page, request }) => 
   await expect(page.locator('#group-stage-list .selected-source').first().locator('.drag-handle')).toHaveAttribute('draggable', 'true');
   await expect(page.locator('#group-stage-list .selected-provider-routes .route-price-line')).toHaveCount(2);
   await expect(page.locator('#group-stage-list .source-include-new').first()).toBeChecked();
-  await expect(page.locator('#group-stage-list .provider-scope-note').first()).toHaveText('All current providers');
+  await expect(page.locator('#group-stage-list .provider-scope-note')).toHaveCount(0);
+  const includeHelp = page.locator('#group-stage-list .tooltip-help').first();
+  await expect(includeHelp).toHaveAttribute('type', 'button');
+  await includeHelp.click();
+  await expect(page.locator('#group-stage-list .source-include-new').first()).toBeChecked();
+  await expect(page.locator('#group-stage-list .tooltip-help-text').first()).toBeVisible();
+  await includeHelp.click();
+  await expect(page.locator('#group-stage-list .tooltip-help-text').first()).toBeHidden();
   await expect(page.locator('#group-stage-list .source-duplicate').first()).toHaveAttribute('aria-label', 'Duplicate provider route');
   await expect(page.locator('#group-stage-list .source-duplicate').first()).toHaveAttribute('title', 'Duplicate provider route');
   await expect(page.locator('#group-stage-list .selected-source-header-actions .source-remove')).toHaveCount(1);
@@ -157,6 +166,8 @@ test('creates and exposes a callable group alias', async ({ page, request }) => 
   expect(selectedPrices.every((text) => !text.includes('official'))).toBeTruthy();
   const selectedProviders = await page.locator('#group-stage-list .selected-route-provider').allTextContents();
   expect(selectedProviders).toContain('Surplus Intelligence');
+  const auctionCapText = await page.locator('#group-stage-list .auction-cap-line').allTextContents();
+  expect(auctionCapText.every((text) => !text.includes('Surplus Intelligence'))).toBeTruthy();
   const auctionSlider = page.locator('#group-stage-list .source-auction-percent').first();
   await expect(page.locator('#group-stage-list .max-price-value').first()).toHaveText('100% of official');
   await auctionSlider.scrollIntoViewIfNeeded();
@@ -172,7 +183,7 @@ test('creates and exposes a callable group alias', async ({ page, request }) => 
   const selectedPricePercent = Number(await auctionSlider.inputValue());
   await expect(page.locator('#group-stage-list .auction-cap-list')).toBeVisible();
   await page.locator('#group-stage-list .source-include-new').first().uncheck();
-  await expect(page.locator('#group-stage-list .provider-scope-note').first()).toHaveText('Pinned to these providers');
+  await expect(page.locator('#group-stage-list .provider-scope-note')).toHaveCount(0);
   await page.locator('#group-stage-list .source-include-new').first().check();
   const retrySummary = page.locator('#group-stage-list .retry-summary').first();
   await expect(retrySummary).toContainText('1');

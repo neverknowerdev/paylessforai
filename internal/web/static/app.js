@@ -799,19 +799,26 @@
     const caps = pricing.querySelector('.auction-cap-list');
     if (!caps) return;
     caps.replaceChildren();
-    capRoutes.forEach((route) => {
-      const input = Number(route.official_pricing?.input || 0) * percent / 100;
-      const output = Number(route.official_pricing?.output || 0) * percent / 100;
+    // Show one provider-neutral expectation: the cap applied to the cheapest
+    // official baseline, which is the route the group is trying to prefer.
+    const expectedRoute = capRoutes.reduce((best, route) => {
+      if (!best) return route;
+      const routeCost = Number(route.official_pricing?.input || 0) + Number(route.official_pricing?.output || 0);
+      const bestCost = Number(best.official_pricing?.input || 0) + Number(best.official_pricing?.output || 0);
+      return routeCost < bestCost ? route : best;
+    }, null);
+    if (expectedRoute) {
+      const input = Number(expectedRoute.official_pricing?.input || 0) * percent / 100;
+      const output = Number(expectedRoute.official_pricing?.output || 0) * percent / 100;
       const line = document.createElement('small');
-      line.className = 'auction-cap-line';
-      const provider = document.createElement('strong');
-      provider.className = 'auction-cap-provider';
-      provider.textContent = providerName(route.provider);
-      const values = document.createElement('span');
-      values.textContent = `max ${displayPrice(input)} in / ${displayPrice(output)} out`;
-      line.append(provider, values);
+      line.className = 'auction-cap-line expected-price';
+      const label = document.createElement('span');
+      label.textContent = 'Expected pricing';
+      const values = document.createElement('strong');
+      values.textContent = `${displayPrice(input)} in / ${displayPrice(output)} out`;
+      line.append(label, document.createTextNode(' · '), values);
       caps.append(line);
-    });
+    }
   }
   function renderSelectedSourcesV9(card) {
     const list = card.querySelector('.selected-sources');

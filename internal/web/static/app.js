@@ -836,11 +836,6 @@
       renderSelectedSourcesV4(card);
       previewCurrentGroup();
     }, true);
-    // The picker is the primary action for a new route block, so expose the
-    // search field immediately instead of requiring a second reveal click.
-    // Defer past the editor-opening click so the global outside-click handler
-    // does not immediately close the newly revealed picker.
-    setTimeout(() => openSourcePickerV4(card), 0);
     return card;
   };
   function modelOfficialPricing(routes) {

@@ -799,13 +799,13 @@
     const caps = pricing.querySelector('.auction-cap-list');
     if (!caps) return;
     caps.replaceChildren();
-    // Show one provider-neutral expectation: the cap applied to the cheapest
-    // official baseline, which is the route the group is trying to prefer.
+    // Show one provider-neutral expectation: the cap applied to the highest
+    // official baseline, which represents the maximum price this setting allows.
     const expectedRoute = capRoutes.reduce((best, route) => {
       if (!best) return route;
       const routeCost = Number(route.official_pricing?.input || 0) + Number(route.official_pricing?.output || 0);
       const bestCost = Number(best.official_pricing?.input || 0) + Number(best.official_pricing?.output || 0);
-      return routeCost < bestCost ? route : best;
+      return routeCost > bestCost ? route : best;
     }, null);
     if (expectedRoute) {
       const input = Number(expectedRoute.official_pricing?.input || 0) * percent / 100;

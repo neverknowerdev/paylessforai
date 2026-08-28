@@ -282,7 +282,7 @@ test('creates and exposes a callable group alias', async ({ page, request }) => 
   const titleToggleLayout = await page.locator('#groups-list .group-title-row').first().evaluate((row) => {
     const title = row.querySelector('strong')?.getBoundingClientRect();
     const toggle = row.querySelector('.group-toggle')?.getBoundingClientRect();
-    return { gap: title && toggle ? toggle.left - title.right : Number.POSITIVE_INFINITY };
+    return { gap: title && toggle ? title.left - toggle.right : Number.POSITIVE_INFINITY };
   });
   expect(titleToggleLayout.gap).toBeGreaterThanOrEqual(0);
   expect(titleToggleLayout.gap).toBeLessThan(32);

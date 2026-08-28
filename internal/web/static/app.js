@@ -462,7 +462,7 @@
       status.className = 'group-toggle-label';
       status.textContent = group.enabled ? 'Enabled' : 'Disabled';
       toggle.append(track, status);
-      titleRow.append(title, toggle);
+      titleRow.append(toggle, title);
       main.append(titleRow, slugRow, connect, note);
       row.append(main);
 

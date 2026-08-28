@@ -736,7 +736,11 @@
       if (!source) return;
       event.stopImmediatePropagation();
       source.maximum_official_price_percent = Math.max(0, Math.min(100, Number(slider.value || 0)));
-      renderSelectedSourcesV4(card);
+      // Keep the native range input mounted while the pointer is dragging.
+      // Re-rendering the selected-source list here detaches the input after
+      // the first `input` event, which makes a drag stop at the first pixel.
+      const auctionRoutes = sourceRoutesForModel(source).filter((route) => route.provider === 'surplus' && route.official_pricing);
+      if (auctionRoutes.length) renderAllProviderPriceCapV9(row, source, auctionRoutes);
       previewCurrentGroup();
     }, true);
     card.addEventListener('change', (event) => {

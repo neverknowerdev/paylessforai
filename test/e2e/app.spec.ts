@@ -159,9 +159,17 @@ test('creates and exposes a callable group alias', async ({ page, request }) => 
   expect(selectedProviders).toContain('Surplus Intelligence');
   const auctionSlider = page.locator('#group-stage-list .source-auction-percent').first();
   await expect(page.locator('#group-stage-list .max-price-value').first()).toHaveText('100% of official');
-  await auctionSlider.evaluate((element) => { const input = element as HTMLInputElement; input.value = '90'; input.dispatchEvent(new Event('input', { bubbles: true })); });
-  await expect(page.locator('#group-stage-list .max-price-value').first()).toContainText('90% of official');
-  await expect(page.locator('#group-stage-list .max-price-value').first()).toContainText('−10%');
+  await auctionSlider.scrollIntoViewIfNeeded();
+  const sliderBox = await auctionSlider.boundingBox();
+  expect(sliderBox).not.toBeNull();
+  if (!sliderBox) throw new Error('auction slider is not measurable');
+  await page.mouse.move(sliderBox.x + sliderBox.width - 3, sliderBox.y + sliderBox.height / 2);
+  await page.mouse.down();
+  await page.mouse.move(sliderBox.x + sliderBox.width * 0.55, sliderBox.y + sliderBox.height / 2, { steps: 12 });
+  await page.mouse.up();
+  await expect(auctionSlider).not.toHaveValue('100');
+  await expect(page.locator('#group-stage-list .max-price-value').first()).toContainText('of official');
+  const selectedPricePercent = Number(await auctionSlider.inputValue());
   await expect(page.locator('#group-stage-list .auction-cap-list')).toBeVisible();
   await page.locator('#group-stage-list .source-include-new').first().uncheck();
   await expect(page.locator('#group-stage-list .provider-scope-note').first()).toHaveText('Pinned to these providers');
@@ -183,7 +191,7 @@ test('creates and exposes a callable group alias', async ({ page, request }) => 
   await expect(page.locator('#groups-list')).toContainText('coding-pool');
   const savedGroup = await (await request.get('/api/groups')).json();
   const savedSource = savedGroup.data.find((item: { slug: string }) => item.slug === 'coding-pool').stages[0].sources[0];
-  expect(savedSource).toMatchObject({ model_id: 'model-a', include_new_providers: true, maximum_official_price_percent: 90 });
+  expect(savedSource).toMatchObject({ model_id: 'model-a', include_new_providers: true, maximum_official_price_percent: selectedPricePercent });
   expect(savedSource.provider_name).toBeUndefined();
   expect(savedSource.provider_names).toEqual(expect.arrayContaining(['surplus', 'openrouter']));
   const groupToggle = page.locator('#groups-list [data-toggle-group]').first();
@@ -206,7 +214,7 @@ test('creates and exposes a callable group alias', async ({ page, request }) => 
     return { color: style.color, backgroundColor: style.backgroundColor };
   });
   expect(groupInputSurface).toEqual({ color: 'rgb(244, 247, 251)', backgroundColor: 'rgb(10, 17, 34)' });
-  await page.getByRole('button', { name: 'Close' }).click();
+  await page.locator('#close-group-editor').click();
   const models = await (await request.get('/v1/models')).json();
   expect(models.data.some((item: { id: string; paylessforai_type?: string }) => item.id === 'coding-pool' && item.paylessforai_type === 'group')).toBeTruthy();
 });

@@ -173,7 +173,7 @@ test('creates and exposes a callable group alias', async ({ page, request }) => 
   expect(auctionCapText[0]).not.toContain('Surplus Intelligence');
   expect(auctionCapText[0]).toMatch(/\$[0-9.]+ in \/ \$[0-9.]+ out/);
   const auctionSlider = page.locator('#group-stage-list .source-auction-percent').first();
-  await expect(page.locator('#group-stage-list .max-price-value').first()).toHaveText('100% of official');
+  await expect(page.locator('#group-stage-list .max-price-value').first()).toHaveText('100% of model official');
   const capStatus = page.locator('#group-stage-list .auction-cap-status').first();
   await expect(capStatus).toHaveText(/(\d+ providers?|No providers) included under this max price setting/);
   await expect(page.locator('#group-stage-list .selected-provider-routes .route-price-line')).toHaveCount(2);
@@ -188,7 +188,7 @@ test('creates and exposes a callable group alias', async ({ page, request }) => 
   await page.mouse.move(sliderBox.x + sliderBox.width * 0.55, sliderBox.y + sliderBox.height / 2, { steps: 12 });
   await page.mouse.up();
   await expect(auctionSlider).not.toHaveValue('100');
-  await expect(page.locator('#group-stage-list .max-price-value').first()).toContainText('of official');
+  await expect(page.locator('#group-stage-list .max-price-value').first()).toContainText('of model official');
   const selectedPricePercent = Number(await auctionSlider.inputValue());
   await expect(page.locator('#group-stage-list .auction-cap-list')).toBeVisible();
   await expect(capStatus).toHaveText(/(\d+ providers?|No providers) included under this max price setting/);

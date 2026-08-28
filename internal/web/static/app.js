@@ -762,12 +762,16 @@
     setTimeout(() => openSourcePickerV4(card), 0);
     return card;
   };
+  function modelOfficialPricing(routes) {
+    const canonical = routes.find((route) => route.provider === 'openrouter' && route.official_pricing);
+    return canonical?.official_pricing || routes.find((route) => route.official_pricing)?.official_pricing || null;
+  }
   function renderAllProviderPriceCapV9(row, source, capRoutes) {
     const pricing = row.querySelector('.all-provider-pricing');
     if (!pricing) return;
     const percent = Math.max(0, Math.min(100, Number(source.maximum_official_price_percent ?? 100)));
     const value = pricing.querySelector('.max-price-value');
-    if (value) value.textContent = `${percent}% of official${percent < 100 ? ` (−${100 - percent}%)` : ''}`;
+    if (value) value.textContent = `${percent}% of model official${percent < 100 ? ` (−${100 - percent}%)` : ''}`;
     const slider = pricing.querySelector('.source-max-price-percent');
     if (slider) slider.style.setProperty('--slider-percent', `${percent}%`);
     const routes = sourceRoutesForModel(source);
@@ -799,17 +803,12 @@
     const caps = pricing.querySelector('.auction-cap-list');
     if (!caps) return;
     caps.replaceChildren();
-    // Show one provider-neutral expectation: the cap applied to the highest
-    // official baseline, which represents the maximum price this setting allows.
-    const expectedRoute = capRoutes.reduce((best, route) => {
-      if (!best) return route;
-      const routeCost = Number(route.official_pricing?.input || 0) + Number(route.official_pricing?.output || 0);
-      const bestCost = Number(best.official_pricing?.input || 0) + Number(best.official_pricing?.output || 0);
-      return routeCost > bestCost ? route : best;
-    }, null);
-    if (expectedRoute) {
-      const input = Number(expectedRoute.official_pricing?.input || 0) * percent / 100;
-      const output = Number(expectedRoute.official_pricing?.output || 0) * percent / 100;
+    // Show one provider-neutral expectation from the model's canonical
+    // reference price, scaled by the selected maximum-price percentage.
+    const officialPricing = modelOfficialPricing(capRoutes);
+    if (officialPricing) {
+      const input = Number(officialPricing.input || 0) * percent / 100;
+      const output = Number(officialPricing.output || 0) * percent / 100;
       const line = document.createElement('small');
       line.className = 'auction-cap-line expected-price';
       const label = document.createElement('span');

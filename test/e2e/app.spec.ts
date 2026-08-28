@@ -112,8 +112,6 @@ test('creates and exposes a callable group alias', async ({ page, request }) => 
   await page.getByRole('button', { name: 'Create group' }).click();
   await expect(page.locator('#group-stage-list .source-search-popover')).toBeHidden();
   await expect(page.locator('#group-stage-list .source-search-toggle')).toBeVisible();
-  await page.locator('#group-name').fill('Coding pool');
-  await page.locator('#group-slug').fill('coding-pool');
   await expect(page.getByText('Try name', { exact: true })).toHaveCount(0);
   await expect(page.getByText('Description', { exact: true })).toHaveCount(0);
   await expect(page.getByText('Enabled', { exact: true })).toHaveCount(0);
@@ -143,6 +141,10 @@ test('creates and exposes a callable group alias', async ({ page, request }) => 
   await expect(page.locator('#group-stage-list .source-search-popover')).toBeVisible();
   await page.locator('#group-name').click();
   await expect(page.locator('#group-stage-list .source-search-popover')).toBeHidden();
+  await expect(page.locator('#group-name')).not.toHaveValue('');
+  await expect(page.locator('#group-slug')).toHaveValue(/^[a-z0-9-]+$/);
+  await page.locator('#group-name').fill('Coding pool');
+  await expect(page.locator('#group-slug')).toHaveValue('coding-pool');
   await expect(page.locator('#group-stage-list .selected-source').first()).toContainText('model-a');
   await expect(page.locator('#group-stage-list .selected-route-heading')).toHaveCount(0);
   await expect(page.locator('#group-stage-list .selected-source')).toHaveCount(1);
@@ -257,6 +259,11 @@ test('creates and exposes a callable group alias', async ({ page, request }) => 
   expect(groupNameBox).not.toBeNull();
   if (!editorHeadingBox || !groupNameBox) throw new Error('group editor alignment is not measurable');
   expect(Math.abs(editorHeadingBox.x - groupNameBox.x)).toBeLessThan(2);
+  const identityOrder = await page.locator('#group-form').evaluate((form) => {
+    const children = [...form.children].map((child) => child.id || child.className);
+    return { stage: children.indexOf('group-stage-list'), identity: children.indexOf('group-identity-fields') };
+  });
+  expect(identityOrder.identity).toBeGreaterThan(identityOrder.stage);
   const groupInputSurface = await page.locator('#group-name').evaluate((element) => {
     const style = getComputedStyle(element);
     return { color: style.color, backgroundColor: style.backgroundColor };

@@ -469,16 +469,84 @@
   }
   renderGroupsV6 = renderGroupsV7;
   renderGroups = renderGroupsV7;
+  function slugifyGroupName(value) {
+    return String(value || '').normalize('NFKD').replace(/[\u0300-\u036f]/g, '').toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '').slice(0, 128);
+  }
+  function suggestedGroupName() {
+    const entries = [];
+    const seen = new Set();
+    $$('#group-stage-list .group-stage-card').forEach((card) => (card._sources || []).forEach((source) => {
+      const key = source.kind === 'group' ? `group:${source.group_id}` : `model:${source.model_id}`;
+      if (seen.has(key)) return;
+      seen.add(key);
+      if (source.kind === 'group') entries.push(state.groups.find((group) => group.id === source.group_id)?.name || source.group_id || 'Group');
+      else entries.push(modelDisplay(source.model_id).name || source.model_id || 'Model');
+    }));
+    if (!entries.length) return '';
+    if (entries.length === 1) return entries[0];
+    const extra = entries.length - 1;
+    return `${entries[0]} + ${extra} other ${extra === 1 ? 'model' : 'models'}`;
+  }
+  function refreshSuggestedGroupIdentity() {
+    const name = $('#group-name');
+    const slug = $('#group-slug');
+    if (!name || !slug || name.dataset.userEdited === 'true') return;
+    const suggestion = suggestedGroupName();
+    if (!suggestion) return;
+    name.dataset.autofill = 'true';
+    name.value = suggestion;
+    delete name.dataset.autofill;
+    if (slug.dataset.userEdited !== 'true') {
+      slug.dataset.autofill = 'true';
+      slug.value = slugifyGroupName(suggestion);
+      delete slug.dataset.autofill;
+    }
+  }
+  function arrangeGroupIdentityFields() {
+    const form = $('#group-form');
+    if (!form || $('#group-identity-fields')) return;
+    const nameLabel = form.querySelector('label[for="group-name"]');
+    const name = $('#group-name');
+    const slugLabel = form.querySelector('label[for="group-slug"]');
+    const slug = $('#group-slug');
+    const note = slug?.nextElementSibling;
+    const preview = $('#group-preview');
+    if (!nameLabel || !name || !slugLabel || !slug || !preview) return;
+    const fields = document.createElement('div');
+    fields.id = 'group-identity-fields';
+    fields.className = 'group-identity-fields';
+    fields.append(nameLabel, name, slugLabel, slug);
+    if (note?.tagName === 'SMALL') fields.append(note);
+    form.insertBefore(fields, preview);
+  }
+  arrangeGroupIdentityFields();
+  const groupNameInput = $('#group-name');
+  const groupSlugInput = $('#group-slug');
+  groupNameInput?.addEventListener('input', () => {
+    if (groupNameInput.dataset.autofill !== 'true') groupNameInput.dataset.userEdited = 'true';
+    if (groupNameInput.dataset.autofill !== 'true' && groupSlugInput?.dataset.userEdited !== 'true') groupSlugInput.value = slugifyGroupName(groupNameInput.value);
+  });
+  groupSlugInput?.addEventListener('input', () => { if (groupSlugInput.dataset.autofill !== 'true') groupSlugInput.dataset.userEdited = 'true'; });
+  document.addEventListener('click', (event) => {
+    if (event.target.closest('#group-stage-list [data-add-model], #group-stage-list [data-add-group], #group-stage-list .source-candidate[data-model-id], #group-stage-list .source-candidate[data-group-id]')) setTimeout(refreshSuggestedGroupIdentity, 0);
+  }, true);
   const openGroupEditorOriginal = openGroupEditor;
   openGroupEditor = function(definition = blankGroup()) {
     const editor = $('#group-editor');
     const creating = !definition.id;
     openGroupEditorOriginal(definition);
     if (editor) {
-      if (creating) editor.dataset.closeAfterCreate = 'true';
-      else if (editor.dataset.closeAfterCreate === 'true') {
-        editor.hidden = true;
-        delete editor.dataset.closeAfterCreate;
+      if (creating) {
+        editor.dataset.closeAfterCreate = 'true';
+        if (groupNameInput) { groupNameInput.dataset.userEdited = 'false'; groupNameInput.value = ''; }
+        if (groupSlugInput) { groupSlugInput.dataset.userEdited = 'false'; groupSlugInput.value = ''; }
+      } else {
+        if (groupNameInput) groupNameInput.dataset.userEdited = 'true';
+        if (groupSlugInput) groupSlugInput.dataset.userEdited = 'true';
+        if (editor.dataset.closeAfterCreate === 'true') {
+          editor.hidden = true;
+          delete editor.dataset.closeAfterCreate;
+        }
       }
     }
   };

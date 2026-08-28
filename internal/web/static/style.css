@@ -246,7 +246,7 @@ code { display: inline-block; max-width: 100%; overflow: hidden; padding: 10px 1
 .source-picker { position:relative; }
 .source-search-toggle { width:100%; padding:11px 12px; border:1px dashed #45629a; border-radius:9px; color:var(--blue-bright); background:#111d35; cursor:pointer; text-align:left; font-size:12px; }
 .source-search-toggle:hover { border-color:var(--blue-bright); background:#17294b; }
-.source-search-popover { position:absolute; z-index:8; top:calc(100% + 8px); left:0; right:0; display:grid; gap:8px; padding:10px; border:1px solid #45629a; border-radius:11px; background:#0d172d; box-shadow:0 22px 50px #0009; }
+.source-search-popover { position:relative; z-index:2; display:grid; gap:8px; margin-top:8px; padding:10px; border:1px solid #45629a; border-radius:11px; background:#0d172d; box-shadow:0 22px 50px #0009; }
 .source-search-popover[hidden] { display:none; }
 .source-search-heading { display:flex; align-items:center; justify-content:space-between; gap:8px; color:var(--ink); font-size:11px; }
 .source-search-close { border:0; color:var(--muted); background:transparent; cursor:pointer; font-size:11px; }

@@ -125,6 +125,17 @@ test('creates and exposes a callable group alias', async ({ page, request }) => 
   await expect(page.locator('#group-stage-list .stage-billing')).toHaveCount(0);
   await expect(page.locator('#group-stage-list .stage-limit-grid')).toHaveCount(0);
   await page.locator('#group-stage-list .source-search-toggle').click();
+  const searchPopoverBounds = await page.locator('#group-stage-list .source-search-popover').evaluate((popover) => {
+    const parent = popover.closest('.group-stage-card');
+    const popoverRect = popover.getBoundingClientRect();
+    const parentRect = parent?.getBoundingClientRect();
+    return {
+      position: getComputedStyle(popover).position,
+      withinParent: Boolean(parentRect && popoverRect.top >= parentRect.top && popoverRect.bottom <= parentRect.bottom),
+    };
+  });
+  expect(searchPopoverBounds.position).toBe('relative');
+  expect(searchPopoverBounds.withinParent).toBeTruthy();
   await page.locator('#group-stage-list .source-search').fill('model-a');
   await expect(page.locator('#group-stage-list .source-candidate[data-model-id="model-a"] .candidate-add')).toContainText('Add all routes');
   await expect(page.locator('#group-stage-list .source-candidate[data-model-id="model-a"] .source-route-option')).toHaveCount(2);

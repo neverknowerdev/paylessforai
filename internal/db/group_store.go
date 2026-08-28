@@ -3,6 +3,7 @@ package db
 import (
 	"context"
 	"database/sql"
+	"encoding/json"
 	"fmt"
 	"strings"
 	"time"
@@ -123,7 +124,17 @@ func (s *Store) SaveGroup(ctx context.Context, definition groups.Definition, exp
 					source.Kind = groups.SourceModel
 				}
 			}
-			if _, err = tx.ExecContext(ctx, `INSERT INTO routing_group_sources(id,stage_id,position,source_kind,model_id,nested_group_id,provider_name,retries,maximum_official_price_percent) VALUES(?,?,?,?,?,?,?,?,?)`, ids.New(), stage.ID, j, source.Kind, nullableStringGroup(source.ModelID), nullableStringGroup(source.GroupID), nullableStringGroup(strings.ToLower(strings.TrimSpace(source.ProviderName))), nullableGroupRetry(source.Retries), nullableGroupRetry(source.MaximumOfficialPricePercent)); err != nil {
+			// A model source without an explicit provider snapshot represents
+			// the dynamic all-provider scope. Persist the opt-in default even
+			// when an older API client omitted the new field.
+			if source.Kind == groups.SourceModel && source.ProviderName == "" && len(source.ProviderNames) == 0 {
+				source.IncludeNewProviders = true
+			}
+			providerNames, marshalErr := json.Marshal(source.ProviderNames)
+			if marshalErr != nil {
+				return groups.Definition{}, marshalErr
+			}
+			if _, err = tx.ExecContext(ctx, `INSERT INTO routing_group_sources(id,stage_id,position,source_kind,model_id,nested_group_id,provider_name,provider_names,include_new_providers,retries,maximum_official_price_percent) VALUES(?,?,?,?,?,?,?,?,?,?,?)`, ids.New(), stage.ID, j, source.Kind, nullableStringGroup(source.ModelID), nullableStringGroup(source.GroupID), nullableStringGroup(strings.ToLower(strings.TrimSpace(source.ProviderName))), string(providerNames), boolInt(source.IncludeNewProviders), nullableGroupRetry(source.Retries), nullableGroupRetry(source.MaximumOfficialPricePercent)); err != nil {
 				return groups.Definition{}, err
 			}
 		}
@@ -190,17 +201,24 @@ func (s *Store) loadGroupStages(ctx context.Context, groupID string) ([]groups.S
 	}
 	for index := range result {
 		stage := &result[index]
-		sourceRows, err := s.db.QueryContext(ctx, `SELECT source_kind,COALESCE(model_id,''),COALESCE(nested_group_id,''),COALESCE(provider_name,''),retries,maximum_official_price_percent FROM routing_group_sources WHERE stage_id=? ORDER BY position`, stage.ID)
+		sourceRows, err := s.db.QueryContext(ctx, `SELECT source_kind,COALESCE(model_id,''),COALESCE(nested_group_id,''),COALESCE(provider_name,''),COALESCE(provider_names,'[]'),COALESCE(include_new_providers,1),retries,maximum_official_price_percent FROM routing_group_sources WHERE stage_id=? ORDER BY position`, stage.ID)
 		if err != nil {
 			return nil, err
 		}
 		for sourceRows.Next() {
 			var source groups.Source
+			var providerNames string
+			var includeNewProviders int
 			var retries, percent sql.NullInt64
-			if err := sourceRows.Scan(&source.Kind, &source.ModelID, &source.GroupID, &source.ProviderName, &retries, &percent); err != nil {
+			if err := sourceRows.Scan(&source.Kind, &source.ModelID, &source.GroupID, &source.ProviderName, &providerNames, &includeNewProviders, &retries, &percent); err != nil {
 				sourceRows.Close()
 				return nil, err
 			}
+			if err := json.Unmarshal([]byte(providerNames), &source.ProviderNames); err != nil {
+				sourceRows.Close()
+				return nil, fmt.Errorf("decode group source provider names: %w", err)
+			}
+			source.IncludeNewProviders = includeNewProviders != 0
 			if retries.Valid {
 				value := int(retries.Int64)
 				source.Retries = &value

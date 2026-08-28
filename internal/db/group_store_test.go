@@ -19,7 +19,7 @@ func TestGroupStoreRoundTripsDefinitionAndRevision(t *testing.T) {
 	tryRetries := 2
 	modelRetries := 4
 	auctionPercent := 50
-	created, err := store.SaveGroup(context.Background(), groups.Definition{Name: "Coding", Slug: "Coding", Enabled: true, Stages: []groups.Stage{{Name: "Try models", Sources: []groups.Source{{Kind: groups.SourceModel, ModelID: "model-a", ProviderName: "Surplus", Retries: &modelRetries, MaximumOfficialPricePercent: &auctionPercent}}, ProviderNames: []string{"OpenRouter"}, BillingClasses: []groups.BillingClass{groups.BillingMetered}, MaximumInputPicoUSDPerToken: &value, SameRouteRetries: &retries, TryRetries: &tryRetries}}}, nil)
+	created, err := store.SaveGroup(context.Background(), groups.Definition{Name: "Coding", Slug: "Coding", Enabled: true, Stages: []groups.Stage{{Name: "Try models", Sources: []groups.Source{{Kind: groups.SourceModel, ModelID: "model-a", ProviderName: "Surplus", ProviderNames: []string{"Surplus", "OpenRouter"}, IncludeNewProviders: false, Retries: &modelRetries, MaximumOfficialPricePercent: &auctionPercent}}, ProviderNames: []string{"OpenRouter"}, BillingClasses: []groups.BillingClass{groups.BillingMetered}, MaximumInputPicoUSDPerToken: &value, SameRouteRetries: &retries, TryRetries: &tryRetries}}}, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -30,7 +30,7 @@ func TestGroupStoreRoundTripsDefinitionAndRevision(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(loaded.Stages) != 1 || loaded.Stages[0].ProviderNames[0] != "openrouter" || loaded.Stages[0].SameRouteRetries == nil || *loaded.Stages[0].SameRouteRetries != 3 || loaded.Stages[0].TryRetries == nil || *loaded.Stages[0].TryRetries != 2 || loaded.Stages[0].Sources[0].ProviderName != "surplus" || loaded.Stages[0].Sources[0].Retries == nil || *loaded.Stages[0].Sources[0].Retries != 4 || loaded.Stages[0].Sources[0].MaximumOfficialPricePercent == nil || *loaded.Stages[0].Sources[0].MaximumOfficialPricePercent != 50 {
+	if len(loaded.Stages) != 1 || loaded.Stages[0].ProviderNames[0] != "openrouter" || loaded.Stages[0].SameRouteRetries == nil || *loaded.Stages[0].SameRouteRetries != 3 || loaded.Stages[0].TryRetries == nil || *loaded.Stages[0].TryRetries != 2 || loaded.Stages[0].Sources[0].ProviderName != "surplus" || len(loaded.Stages[0].Sources[0].ProviderNames) != 2 || loaded.Stages[0].Sources[0].IncludeNewProviders || loaded.Stages[0].Sources[0].Retries == nil || *loaded.Stages[0].Sources[0].Retries != 4 || loaded.Stages[0].Sources[0].MaximumOfficialPricePercent == nil || *loaded.Stages[0].Sources[0].MaximumOfficialPricePercent != 50 {
 		t.Fatalf("round trip mismatch: %#v", loaded)
 	}
 	updated, err := store.SaveGroup(context.Background(), groups.Definition{ID: created.ID, Name: "Coding v2", Slug: "coding-v2", Enabled: true, Stages: loaded.Stages}, &created.Revision)

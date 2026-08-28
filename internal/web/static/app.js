@@ -713,7 +713,43 @@
       const model = event.target.closest('[data-add-model], .source-candidate[data-model-id]');
       const group = event.target.closest('[data-add-group], .source-group-candidate');
       const select = card.querySelector('.source-kind');
+      if (model) {
+        const modelID = model.dataset.addModel || model.dataset.modelId || model.closest('.source-candidate')?.dataset.modelId;
+        if (modelID) {
+          event.preventDefault();
+          event.stopImmediatePropagation();
+          card._sources.push(allProviderSource(modelID));
+          closeSourcePickerV4(card);
+          renderSelectedSourcesV4(card);
+          renderCandidatesV4(card);
+          previewCurrentGroup();
+          return;
+        }
+      }
       if (select && (model || group)) select.value = group ? 'group' : 'model';
+    }, true);
+    card.addEventListener('input', (event) => {
+      const slider = event.target.closest('.source-max-price-percent');
+      if (!slider) return;
+      const row = slider.closest('.selected-source');
+      const source = card._sources?.[Number(row?.dataset.sourceIndex)];
+      if (!source) return;
+      event.stopImmediatePropagation();
+      source.maximum_official_price_percent = Math.max(0, Math.min(100, Number(slider.value || 0)));
+      renderSelectedSourcesV4(card);
+      previewCurrentGroup();
+    }, true);
+    card.addEventListener('change', (event) => {
+      const checkbox = event.target.closest('.source-include-new');
+      if (!checkbox) return;
+      const row = checkbox.closest('.selected-source');
+      const source = card._sources?.[Number(row?.dataset.sourceIndex)];
+      if (!source) return;
+      event.stopImmediatePropagation();
+      source.include_new_providers = checkbox.checked;
+      if (!checkbox.checked && !source.provider_names?.length) source.provider_names = providerNamesForModel(source.model_id);
+      renderSelectedSourcesV4(card);
+      previewCurrentGroup();
     }, true);
     // The picker is the primary action for a new route block, so expose the
     // search field immediately instead of requiring a second reveal click.
@@ -722,6 +758,151 @@
     setTimeout(() => openSourcePickerV4(card), 0);
     return card;
   };
+  function renderAllProviderPriceCapV9(row, source, auctionRoutes) {
+    const pricing = row.querySelector('.all-provider-pricing');
+    if (!pricing) return;
+    const percent = Math.max(0, Math.min(100, Number(source.maximum_official_price_percent ?? 100)));
+    const value = pricing.querySelector('.max-price-value');
+    if (value) value.textContent = `${percent}% of official${percent < 100 ? ` (−${100 - percent}%)` : ''}`;
+    const caps = pricing.querySelector('.auction-cap-list');
+    if (!caps) return;
+    caps.replaceChildren();
+    auctionRoutes.forEach((route) => {
+      const input = Number(route.official_pricing?.input || 0) * percent / 100;
+      const output = Number(route.official_pricing?.output || 0) * percent / 100;
+      const line = document.createElement('small');
+      line.className = 'auction-cap-line';
+      line.textContent = `${providerName(route.provider)} · ${displayPrice(input)} in / ${displayPrice(output)} out`;
+      caps.append(line);
+    });
+  }
+  function renderSelectedSourcesV9(card) {
+    const list = card.querySelector('.selected-sources');
+    if (!list) return;
+    list.replaceChildren();
+    const kind = card.querySelector('.source-kind').value;
+    card._sources = (card._sources || []).filter((source) => source.kind === kind);
+    if (!card._sources.length) return;
+    card._sources.forEach((source, sourceIndex) => {
+      const row = document.createElement('div');
+      row.className = 'selected-source';
+      row.draggable = false;
+      row.dataset.sourceIndex = sourceIndex;
+      const handle = document.createElement('span');
+      handle.className = 'drag-handle';
+      handle.textContent = '☷';
+      handle.draggable = true;
+      handle.title = 'Drag to reorder';
+      const main = document.createElement('div');
+      main.className = 'selected-source-main';
+      const header = document.createElement('div');
+      header.className = 'selected-source-header';
+      const title = document.createElement('strong');
+      const model = kind === 'model' ? modelDisplay(source.model_id) : null;
+      title.textContent = kind === 'model' ? model.name : (state.groups.find((group) => group.id === source.group_id)?.name || source.group_id || 'Choose a group');
+      const actions = document.createElement('div');
+      actions.className = 'selected-source-header-actions';
+      const retry = document.createElement('button');
+      retry.type = 'button';
+      retry.className = 'retry-summary';
+      retry.dataset.retrySource = sourceIndex;
+      retry.setAttribute('aria-label', `Configure retries, currently ${Math.max(1, Number(source.retries ?? 1))}`);
+      retry.title = 'Configure retries';
+      retry.innerHTML = `<span aria-hidden="true">↻</span><span>${Math.max(1, Number(source.retries ?? 1))}</span>`;
+      actions.append(retry);
+      const duplicate = document.createElement('button');
+      duplicate.type = 'button';
+      duplicate.className = 'source-action source-duplicate route-icon-button';
+      duplicate.dataset.duplicateSource = sourceIndex;
+      duplicate.setAttribute('aria-label', 'Duplicate provider route');
+      duplicate.title = 'Duplicate provider route';
+      duplicate.innerHTML = '<span aria-hidden="true">⧉</span>';
+      actions.append(duplicate);
+      header.append(title, actions);
+      main.append(header);
+      if (kind === 'group') {
+        const meta = document.createElement('small');
+        meta.textContent = state.groups.find((group) => group.id === source.group_id)?.slug || '';
+        main.append(meta);
+      } else {
+        const meta = document.createElement('small');
+        meta.textContent = source.model_id;
+        main.append(meta);
+        const routes = sourceRoutesForModel(source);
+        const providerList = document.createElement('div');
+        providerList.className = 'selected-provider-routes';
+        routes.forEach((route) => {
+          appendRoutePriceV7(providerList, route);
+          providerList.lastElementChild?.querySelector('.route-price-provider')?.classList.add('selected-route-provider');
+        });
+        if (!routes.length) {
+          const empty = document.createElement('small');
+          empty.textContent = 'No current provider routes';
+          providerList.append(empty);
+        }
+        main.append(providerList);
+        if (!source.provider_name) {
+          const scope = document.createElement('small');
+          scope.className = 'provider-scope-note';
+          scope.textContent = source.include_new_providers === false ? 'Pinned to these providers' : 'All current providers';
+          main.append(scope);
+        }
+      }
+      const remove = document.createElement('button');
+      remove.type = 'button';
+      remove.className = 'source-remove route-icon-button';
+      remove.dataset.removeSource = sourceIndex;
+      remove.setAttribute('aria-label', 'Remove provider route');
+      remove.title = 'Remove provider route';
+      remove.innerHTML = '<span aria-hidden="true">×</span>';
+      const controls = document.createElement('div');
+      controls.className = 'selected-source-controls';
+      if (kind === 'model' && !source.provider_name) {
+        const include = document.createElement('label');
+        include.className = 'include-new-providers';
+        const checkbox = document.createElement('input');
+        checkbox.type = 'checkbox';
+        checkbox.className = 'source-include-new';
+        checkbox.checked = source.include_new_providers !== false;
+        const text = document.createElement('span');
+        text.textContent = 'Include new providers';
+        const help = document.createElement('span');
+        help.className = 'tooltip-help';
+        help.textContent = '?';
+        help.title = 'When a new provider with this model is added, it is automatically added to this group.';
+        include.append(checkbox, text, help);
+        controls.append(include);
+      }
+      const auctionRoutes = kind === 'model' ? sourceRoutesForModel(source).filter((route) => route.provider === 'surplus' && route.official_pricing) : [];
+      if (auctionRoutes.length) {
+        const pricing = document.createElement('div');
+        pricing.className = 'route-setting-section all-provider-pricing';
+        const heading = document.createElement('div');
+        heading.className = 'route-setting-heading';
+        const label = document.createElement('strong');
+        label.textContent = 'Max allowed price';
+        const output = document.createElement('output');
+        output.className = 'max-price-value';
+        heading.append(label, output);
+        const slider = document.createElement('input');
+        slider.type = 'range';
+        slider.min = '0';
+        slider.max = '100';
+        slider.step = '1';
+        slider.className = 'source-auction-percent source-max-price-percent';
+        slider.value = source.maximum_official_price_percent ?? 100;
+        const caps = document.createElement('div');
+        caps.className = 'auction-cap-list';
+        pricing.append(heading, slider, caps);
+        controls.append(pricing);
+        row.dataset.hasAuctionPricing = 'true';
+      }
+      row.append(handle, main, remove, controls);
+      list.append(row);
+      if (auctionRoutes.length) renderAllProviderPriceCapV9(row, source, auctionRoutes);
+    });
+  }
+  renderSelectedSourcesV4 = renderSelectedSourcesV9;
   renderGroupStages = function(definition) { const container = $('#group-stage-list'); if (!container) return; container.replaceChildren(); const stages = definition.stages?.length ? definition.stages : blankGroup().stages; stages.forEach((stage, index) => container.append(stageSourceOptionsV4(stage, index))); };
   if (!window.__groupPickerOutsideClickV5) { document.addEventListener('click', (event) => { if (event.target.closest('.source-picker')) return; document.querySelectorAll('.source-search-popover:not([hidden])').forEach((popover) => closeSourcePickerV4(popover.closest('.group-stage-card'))); }); window.__groupPickerOutsideClickV5 = true; }
   // The editor below intentionally models one selected provider route per
@@ -729,7 +910,24 @@
   // users can deselect individual providers and apply limits at that level.
   function providerRoutesForModel(modelId) { return state.models.filter((route) => route.model === modelId); }
   function providerNamesForModel(modelId) { return [...new Set(providerRoutesForModel(modelId).map((route) => route.provider))]; }
-  function expandProviderSources(sources) { const expanded = []; (sources || []).forEach((source) => { if (source.kind === 'model' && !source.provider_name) { const providers = providerNamesForModel(source.model_id); if (providers.length) providers.forEach((provider) => expanded.push({ ...source, provider_name: provider })); else expanded.push({ ...source }); } else expanded.push({ ...source }); }); return expanded; }
+  function sourceProviderNames(source) {
+    if (source.provider_name) return [source.provider_name];
+    if (source.include_new_providers !== false) return providerNamesForModel(source.model_id);
+    return source.provider_names?.length ? source.provider_names : providerNamesForModel(source.model_id);
+  }
+  function sourceRoutesForModel(source) {
+    const allowed = new Set(sourceProviderNames(source).map((provider) => provider.toLowerCase()));
+    return providerRoutesForModel(source.model_id).filter((route) => allowed.size === 0 || allowed.has(route.provider.toLowerCase()));
+  }
+  function allProviderSource(modelId) {
+    return { kind: 'model', model_id: modelId, provider_names: providerNamesForModel(modelId), include_new_providers: true, retries: 1 };
+  }
+  function expandProviderSources(sources) {
+    return (sources || []).map((source) => {
+      if (source.kind !== 'model' || source.provider_name || source.include_new_providers === false || source.provider_names?.length) return { ...source };
+      return { ...source, include_new_providers: true, provider_names: providerNamesForModel(source.model_id) };
+    });
+  }
   function modelDisplay(modelId) { return modelCandidates().find((model) => model.id === modelId) || { id: modelId, name: modelId, routes: [] }; }
   function routeForSource(source) { return providerRoutesForModel(source.model_id).find((route) => !source.provider_name || route.provider === source.provider_name) || null; }
   function routePriceText(route) { if (!route) return 'No provider route discovered'; const currentInput = displayPrice(route.pricing?.input); const currentOutput = displayPrice(route.pricing?.output); const officialInput = displayPrice(route.official_pricing?.input); const officialOutput = displayPrice(route.official_pricing?.output); const discount = route.discount_percent_bps == null ? '' : ` · ${discountPercent(route.discount_percent_bps)} below official`; if (route.provider === 'surplus' && route.official_pricing) return `${providerName(route.provider)} · ${routeBilling(route).toUpperCase()} · ${currentInput} in / ${currentOutput} out · official ${officialInput} / ${officialOutput}${discount}`; return `${providerName(route.provider)} · ${route.free ? 'FREE' : routeBilling(route).toUpperCase()} · ${currentInput} in / ${currentOutput} out`; }

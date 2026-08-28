@@ -80,6 +80,9 @@ func cloneDefinition(value Definition) Definition {
 	value.Stages = append([]Stage(nil), value.Stages...)
 	for i := range value.Stages {
 		value.Stages[i].Sources = append([]Source(nil), value.Stages[i].Sources...)
+		for j := range value.Stages[i].Sources {
+			value.Stages[i].Sources[j].ProviderNames = append([]string(nil), value.Stages[i].Sources[j].ProviderNames...)
+		}
 		value.Stages[i].ProviderNames = append([]string(nil), value.Stages[i].ProviderNames...)
 		value.Stages[i].BillingClasses = append([]BillingClass(nil), value.Stages[i].BillingClasses...)
 	}

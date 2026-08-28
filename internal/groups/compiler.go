@@ -57,7 +57,7 @@ func Compile(root Definition, all map[string]Definition, limits CompileLimits) C
 			path := append(append([]string(nil), prefix...), def.Slug, stage.Name)
 			sourceSpecific := false
 			for _, source := range stage.Sources {
-				if source.Kind == SourceModel && (source.ProviderName != "" || source.Retries != nil || source.MaximumOfficialPricePercent != nil) {
+				if source.Kind == SourceModel && (source.ProviderName != "" || len(source.ProviderNames) > 0 || source.Retries != nil || source.MaximumOfficialPricePercent != nil) {
 					sourceSpecific = true
 				}
 			}
@@ -142,6 +142,11 @@ func sourcePolicy(parent inheritedPolicy, source Source) inheritedPolicy {
 		result.providers = intersectStrings(parent.providers, []string{strings.ToLower(strings.TrimSpace(source.ProviderName))})
 		if len(parent.providers) == 0 {
 			result.providers = []string{strings.ToLower(strings.TrimSpace(source.ProviderName))}
+		}
+	} else if !source.IncludeNewProviders && len(source.ProviderNames) > 0 {
+		result.providers = intersectStrings(parent.providers, source.ProviderNames)
+		if len(parent.providers) == 0 {
+			result.providers = append([]string(nil), source.ProviderNames...)
 		}
 	}
 	if source.Retries != nil && !parent.retryLocked {

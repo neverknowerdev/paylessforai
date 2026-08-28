@@ -42,6 +42,28 @@ func TestCompileDetectsIndirectCycle(t *testing.T) {
 	}
 }
 
+func TestCompileAllProviderSourceCanPinCurrentProviders(t *testing.T) {
+	root := Definition{ID: "root", Slug: "root", Enabled: true, Stages: []Stage{{Position: 0, Sources: []Source{{Kind: SourceModel, ModelID: "model-a", ProviderNames: []string{"Provider-A"}, IncludeNewProviders: false}}, BillingClasses: []BillingClass{BillingMetered}}}}
+	result := Compile(root, map[string]Definition{"root": root}, DefaultCompileLimits())
+	if len(result.Issues) != 0 || len(result.Stages) != 1 {
+		t.Fatalf("unexpected compile: %#v", result)
+	}
+	if len(result.Stages[0].ProviderNames) != 1 || result.Stages[0].ProviderNames[0] != "provider-a" {
+		t.Fatalf("expected pinned provider set, got %#v", result.Stages[0].ProviderNames)
+	}
+}
+
+func TestCompileAllProviderSourceIncludesFutureProvidersByDefault(t *testing.T) {
+	root := Definition{ID: "root", Slug: "root", Enabled: true, Stages: []Stage{{Position: 0, Sources: []Source{{Kind: SourceModel, ModelID: "model-a", ProviderNames: []string{"Provider-A"}, IncludeNewProviders: true}}, BillingClasses: []BillingClass{BillingMetered}}}}
+	result := Compile(root, map[string]Definition{"root": root}, DefaultCompileLimits())
+	if len(result.Issues) != 0 || len(result.Stages) != 1 {
+		t.Fatalf("unexpected compile: %#v", result)
+	}
+	if len(result.Stages[0].ProviderNames) != 0 {
+		t.Fatalf("expected no provider allow-list when future providers are included, got %#v", result.Stages[0].ProviderNames)
+	}
+}
+
 func TestCompileDisabledChildIsWarningAndEmpty(t *testing.T) {
 	child := Definition{ID: "child", Slug: "child", Enabled: false}
 	root := Definition{ID: "root", Slug: "root", Enabled: true, Stages: []Stage{{Position: 0, Sources: []Source{{Kind: SourceGroup, GroupID: "child"}}, BillingClasses: []BillingClass{BillingMetered}}}}

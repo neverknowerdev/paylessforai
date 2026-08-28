@@ -59,6 +59,14 @@ func ValidateDefinition(def Definition, all map[string]Definition) []ValidationI
 			if source.MaximumOfficialPricePercent != nil && (*source.MaximumOfficialPricePercent < 0 || *source.MaximumOfficialPricePercent > 100) {
 				issues = append(issues, issue(sourcePath+".maximum_official_price_percent", "invalid_price_percent", "auction price percentage must be between 0 and 100", "error"))
 			}
+			for k, provider := range source.ProviderNames {
+				if strings.TrimSpace(provider) == "" {
+					issues = append(issues, issue(fmt.Sprintf("%s.provider_names[%d]", sourcePath, k), "invalid_provider", "provider name cannot be empty", "error"))
+				}
+			}
+			if len(source.ProviderNames) > 0 && source.Kind != SourceModel {
+				issues = append(issues, issue(sourcePath+".provider_names", "invalid_provider", "provider names can only be set for model sources", "error"))
+			}
 			if source.Kind == SourceModel && strings.TrimSpace(source.ModelID) != "" && source.GroupID == "" {
 				continue
 			}
@@ -157,6 +165,7 @@ func normalizeStage(stage Stage) Stage {
 		stage.Sources[i].ModelID = strings.TrimSpace(stage.Sources[i].ModelID)
 		stage.Sources[i].GroupID = strings.TrimSpace(stage.Sources[i].GroupID)
 		stage.Sources[i].ProviderName = strings.ToLower(strings.TrimSpace(stage.Sources[i].ProviderName))
+		stage.Sources[i].ProviderNames = uniqueLower(stage.Sources[i].ProviderNames)
 	}
 	return stage
 }

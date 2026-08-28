@@ -24,6 +24,8 @@ type Source struct {
 	ModelID                     string     `json:"model_id,omitempty"`
 	GroupID                     string     `json:"group_id,omitempty"`
 	ProviderName                string     `json:"provider_name,omitempty"`
+	ProviderNames               []string   `json:"provider_names,omitempty"`
+	IncludeNewProviders         bool       `json:"include_new_providers"`
 	Retries                     *int       `json:"retries,omitempty"`
 	MaximumOfficialPricePercent *int       `json:"maximum_official_price_percent,omitempty"`
 }

@@ -396,3 +396,18 @@ code { display: inline-block; max-width: 100%; overflow: hidden; padding: 10px 1
 .tooltip-help:hover,.tooltip-help:focus-visible { border-color:#b8c9ff; color:#fff; background:#1d3560; outline:0; }
 .tooltip-help-text { position:absolute; left:26px; top:calc(100% + 6px); z-index:6; width:max-content; max-width:min(300px,calc(100vw - 72px)); padding:7px 9px; border:1px solid #45669b; border-radius:7px; color:#dce7ff; background:#0d172d; box-shadow:0 10px 24px #0008; font-size:10px; line-height:1.35; }
 .tooltip-help-text[hidden] { display:none; }
+.group-connect { color:var(--blue-bright); }
+.group-instructions-modal { width:min(560px,100%); }
+.connection-fields { display:grid; gap:10px; }
+.connection-field { display:grid; gap:5px; }
+.connection-field > label, .connection-steps > strong, .connection-code-heading > strong { color:var(--muted); font-size:10px; font-weight:800; letter-spacing:.04em; text-transform:uppercase; }
+.connection-value { display:flex; align-items:center; gap:7px; min-width:0; }
+.connection-value code { flex:1; min-width:0; }
+.connection-value .group-copy, .connection-code-heading .group-copy { flex:0 0 auto; padding:7px 9px; font-size:10px; }
+.connection-steps { margin-top:18px; padding:13px 15px; border:1px solid #344d7b; border-radius:10px; background:#142342; }
+.connection-steps ol { margin:8px 0 0 18px; padding:0; color:var(--muted); font-size:11px; line-height:1.65; }
+.connection-code { margin-top:18px; }
+.connection-code-heading { display:flex; align-items:center; justify-content:space-between; gap:8px; margin-bottom:6px; }
+.connection-code pre { margin:0; overflow:auto; padding:12px; border:1px solid #344363; border-radius:9px; background:#0a1122; }
+.connection-code pre code { display:block; max-width:none; overflow:visible; padding:0; border:0; color:#cbd9ff; background:transparent; font:11px/1.55 ui-monospace,SFMono-Regular,Menlo,monospace; white-space:pre; }
+.connection-access-link { text-decoration:none; }

@@ -812,7 +812,7 @@
       const line = document.createElement('small');
       line.className = 'auction-cap-line expected-price';
       const label = document.createElement('span');
-      label.textContent = 'Expected pricing';
+      label.textContent = 'Max pricing';
       const values = document.createElement('strong');
       values.textContent = `${displayPrice(input)} in / ${displayPrice(output)} out`;
       line.append(label, document.createTextNode(' · '), values);

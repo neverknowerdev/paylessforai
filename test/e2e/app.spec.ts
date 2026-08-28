@@ -178,7 +178,7 @@ test('creates and exposes a callable group alias', async ({ page, request }) => 
   expect(selectedProviders).toContain('Surplus Intelligence');
   const auctionCapText = await page.locator('#group-stage-list .auction-cap-line').allTextContents();
   expect(auctionCapText).toHaveLength(1);
-  expect(auctionCapText[0]).toContain('Expected pricing');
+  expect(auctionCapText[0]).toContain('Max pricing');
   expect(auctionCapText[0]).not.toContain('OpenRouter');
   expect(auctionCapText[0]).not.toContain('Surplus Intelligence');
   expect(auctionCapText[0]).toMatch(/\$[0-9.]+ in \/ \$[0-9.]+ out/);

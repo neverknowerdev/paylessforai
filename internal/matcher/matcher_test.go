@@ -164,3 +164,19 @@ func TestMatchSurplusOfficialPricePercentage(t *testing.T) {
 		t.Fatalf("expected missing official price, got %#v", result)
 	}
 }
+
+func TestMatchOpenRouterOfficialPricePercentage(t *testing.T) {
+	route := testRoute("openrouter", "openrouter", 30, 40)
+	route.OfficialPriceAvailable = true
+	route.OfficialPrice = Price{InputPicoUSDPerToken: 100, OutputPicoUSDPerToken: 100}
+	percent := 50
+	result := New().Match(MatchInput{Request: MatchRequest{Protocol: ProtocolChatCompletions, LogicalModel: "model-a", MaximumOfficialPricePercent: &percent}, Routes: []Route{route}, Now: time.Unix(20, 0)})
+	if result.Selected == nil {
+		t.Fatalf("expected OpenRouter route under 50%% cap, got %#v", result)
+	}
+	route.Price.InputPicoUSDPerToken = 51
+	result = New().Match(MatchInput{Request: MatchRequest{Protocol: ProtocolChatCompletions, LogicalModel: "model-a", MaximumOfficialPricePercent: &percent}, Routes: []Route{route}, Now: time.Unix(20, 0)})
+	if result.Selected != nil || len(result.Rejections) != 1 || result.Rejections[0].Code != "over_official_price_limit" {
+		t.Fatalf("expected OpenRouter rejection, got %#v", result)
+	}
+}

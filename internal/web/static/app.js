@@ -739,8 +739,8 @@
       // Keep the native range input mounted while the pointer is dragging.
       // Re-rendering the selected-source list here detaches the input after
       // the first `input` event, which makes a drag stop at the first pixel.
-      const auctionRoutes = sourceRoutesForModel(source).filter((route) => route.provider === 'surplus' && route.official_pricing);
-      if (auctionRoutes.length) renderAllProviderPriceCapV9(row, source, auctionRoutes);
+      const capRoutes = sourceRoutesForModel(source).filter((route) => route.official_pricing);
+      if (capRoutes.length) renderAllProviderPriceCapV9(row, source, capRoutes);
       previewCurrentGroup();
     }, true);
     card.addEventListener('change', (event) => {
@@ -773,7 +773,7 @@
     const routes = sourceRoutesForModel(source);
     const providerRows = [...row.querySelectorAll('.selected-provider-routes .route-price-line')];
     const routeUnderCap = (route) => {
-      if (!route || route.provider !== 'surplus' || !route.official_pricing) return true;
+      if (!route || !route.official_pricing) return false;
       const officialInput = Number(route.official_pricing.input);
       const officialOutput = Number(route.official_pricing.output);
       const currentInput = Number(route.pricing?.input);
@@ -784,7 +784,7 @@
     routes.forEach((route, index) => {
       const providerRow = providerRows[index];
       if (!providerRow) return;
-      const capped = route?.provider === 'surplus' && route.official_pricing;
+      const capped = Boolean(route?.official_pricing);
       providerRow.classList.toggle('cap-included', Boolean(capped && routeUnderCap(route)));
       providerRow.classList.toggle('cap-excluded', Boolean(capped && !routeUnderCap(route)));
       providerRow.classList.toggle('cap-not-applicable', !capped);
@@ -799,7 +799,7 @@
     const caps = pricing.querySelector('.auction-cap-list');
     if (!caps) return;
     caps.replaceChildren();
-    auctionRoutes.forEach((route) => {
+    auctionRoutes.filter((route) => route.provider === 'surplus').forEach((route) => {
       const input = Number(route.official_pricing?.input || 0) * percent / 100;
       const output = Number(route.official_pricing?.output || 0) * percent / 100;
       const line = document.createElement('small');
@@ -919,8 +919,8 @@
         include.append(includeLabel, help, helpText);
         controls.append(include);
       }
-      const auctionRoutes = kind === 'model' ? sourceRoutesForModel(source).filter((route) => route.provider === 'surplus' && route.official_pricing) : [];
-      if (auctionRoutes.length) {
+      const capRoutes = kind === 'model' ? sourceRoutesForModel(source).filter((route) => route.official_pricing) : [];
+      if (capRoutes.length) {
         const pricing = document.createElement('div');
         pricing.className = 'route-setting-section all-provider-pricing';
         const heading = document.createElement('div');
@@ -948,7 +948,7 @@
       }
       row.append(handle, main, controls);
       list.append(row);
-      if (auctionRoutes.length) renderAllProviderPriceCapV9(row, source, auctionRoutes);
+      if (capRoutes.length) renderAllProviderPriceCapV9(row, source, capRoutes);
     });
   }
   renderSelectedSourcesV4 = renderSelectedSourcesV9;

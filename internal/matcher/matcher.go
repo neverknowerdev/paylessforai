@@ -300,9 +300,9 @@ func rejectRoute(request MatchRequest, route Route, now time.Time, allowed, excl
 	if route.Price.InputPicoUSDPerToken < 0 || route.Price.OutputPicoUSDPerToken < 0 || route.Price.FixedPicoUSD < 0 {
 		return reject("missing_price", "route has invalid negative pricing")
 	}
-	if request.MaximumOfficialPricePercent != nil && strings.EqualFold(route.Provider, "surplus") {
+	if request.MaximumOfficialPricePercent != nil {
 		if !route.OfficialPriceAvailable || route.OfficialPrice.InputPicoUSDPerToken < 0 || route.OfficialPrice.OutputPicoUSDPerToken < 0 {
-			return reject("missing_official_price", "auction route does not expose an official price")
+			return reject("missing_official_price", "route does not expose an official price")
 		}
 		percent := int64(*request.MaximumOfficialPricePercent)
 		if percent > 0 && (route.OfficialPrice.InputPicoUSDPerToken > maxInt64/percent || route.OfficialPrice.OutputPicoUSDPerToken > maxInt64/percent) {
@@ -311,7 +311,7 @@ func rejectRoute(request MatchRequest, route Route, now time.Time, allowed, excl
 		inputCap := route.OfficialPrice.InputPicoUSDPerToken * percent / 100
 		outputCap := route.OfficialPrice.OutputPicoUSDPerToken * percent / 100
 		if route.Price.InputPicoUSDPerToken > inputCap || route.Price.OutputPicoUSDPerToken > outputCap {
-			return reject("over_official_price_limit", "auction price exceeds the allowed percentage of official price")
+			return reject("over_official_price_limit", "route price exceeds the allowed percentage of official price")
 		}
 	}
 	if request.MaximumInputPicoUSDPerToken != nil && route.Price.InputPicoUSDPerToken > *request.MaximumInputPicoUSDPerToken {

@@ -171,7 +171,7 @@ test('creates and exposes a callable group alias', async ({ page, request }) => 
   const auctionSlider = page.locator('#group-stage-list .source-auction-percent').first();
   await expect(page.locator('#group-stage-list .max-price-value').first()).toHaveText('100% of official');
   const capStatus = page.locator('#group-stage-list .auction-cap-status').first();
-  await expect(capStatus).toHaveText(/(\d+ provider|No providers) included under this max price setting/);
+  await expect(capStatus).toHaveText(/(\d+ providers?|No providers) included under this max price setting/);
   await expect(page.locator('#group-stage-list .selected-provider-routes .route-price-line')).toHaveCount(2);
   const initiallyClassifiedRoutes = await page.locator('#group-stage-list .selected-provider-routes .route-price-line.cap-included, #group-stage-list .selected-provider-routes .route-price-line.cap-excluded, #group-stage-list .selected-provider-routes .route-price-line.cap-not-applicable').count();
   expect(initiallyClassifiedRoutes).toBe(2);
@@ -187,7 +187,9 @@ test('creates and exposes a callable group alias', async ({ page, request }) => 
   await expect(page.locator('#group-stage-list .max-price-value').first()).toContainText('of official');
   const selectedPricePercent = Number(await auctionSlider.inputValue());
   await expect(page.locator('#group-stage-list .auction-cap-list')).toBeVisible();
-  await expect(capStatus).toHaveText(/(\d+ provider|No providers) included under this max price setting/);
+  await expect(capStatus).toHaveText(/(\d+ providers?|No providers) included under this max price setting/);
+  const openRouterRoute = page.locator('#group-stage-list .selected-provider-routes .route-price-line').filter({ hasText: 'OpenRouter' }).first();
+  await expect(openRouterRoute).toHaveClass(/cap-(included|excluded)/);
   const dynamicallyClassifiedRoutes = await page.locator('#group-stage-list .selected-provider-routes .route-price-line.cap-included, #group-stage-list .selected-provider-routes .route-price-line.cap-excluded, #group-stage-list .selected-provider-routes .route-price-line.cap-not-applicable').count();
   expect(dynamicallyClassifiedRoutes).toBe(2);
   await page.locator('#group-stage-list .source-include-new').first().uncheck();

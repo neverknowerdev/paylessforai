@@ -167,7 +167,7 @@ test('creates and exposes a callable group alias', async ({ page, request }) => 
   const selectedProviders = await page.locator('#group-stage-list .selected-route-provider').allTextContents();
   expect(selectedProviders).toContain('Surplus Intelligence');
   const auctionCapText = await page.locator('#group-stage-list .auction-cap-line').allTextContents();
-  expect(auctionCapText.every((text) => !text.includes('Surplus Intelligence'))).toBeTruthy();
+  expect(auctionCapText).toEqual(expect.arrayContaining([expect.stringContaining('OpenRouter'), expect.stringContaining('Surplus Intelligence')]));
   const auctionSlider = page.locator('#group-stage-list .source-auction-percent').first();
   await expect(page.locator('#group-stage-list .max-price-value').first()).toHaveText('100% of official');
   const capStatus = page.locator('#group-stage-list .auction-cap-status').first();

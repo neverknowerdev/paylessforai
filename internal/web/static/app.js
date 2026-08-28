@@ -762,7 +762,7 @@
     setTimeout(() => openSourcePickerV4(card), 0);
     return card;
   };
-  function renderAllProviderPriceCapV9(row, source, auctionRoutes) {
+  function renderAllProviderPriceCapV9(row, source, capRoutes) {
     const pricing = row.querySelector('.all-provider-pricing');
     if (!pricing) return;
     const percent = Math.max(0, Math.min(100, Number(source.maximum_official_price_percent ?? 100)));
@@ -789,7 +789,7 @@
       providerRow.classList.toggle('cap-excluded', Boolean(capped && !routeUnderCap(route)));
       providerRow.classList.toggle('cap-not-applicable', !capped);
     });
-    const includedCount = auctionRoutes.filter(routeUnderCap).length;
+    const includedCount = capRoutes.filter(routeUnderCap).length;
     const status = pricing.querySelector('.auction-cap-status');
     if (status) {
       status.textContent = includedCount === 0
@@ -799,12 +799,17 @@
     const caps = pricing.querySelector('.auction-cap-list');
     if (!caps) return;
     caps.replaceChildren();
-    auctionRoutes.filter((route) => route.provider === 'surplus').forEach((route) => {
+    capRoutes.forEach((route) => {
       const input = Number(route.official_pricing?.input || 0) * percent / 100;
       const output = Number(route.official_pricing?.output || 0) * percent / 100;
       const line = document.createElement('small');
       line.className = 'auction-cap-line';
-      line.textContent = `${displayPrice(input)} in / ${displayPrice(output)} out`;
+      const provider = document.createElement('strong');
+      provider.className = 'auction-cap-provider';
+      provider.textContent = providerName(route.provider);
+      const values = document.createElement('span');
+      values.textContent = `max ${displayPrice(input)} in / ${displayPrice(output)} out`;
+      line.append(provider, values);
       caps.append(line);
     });
   }

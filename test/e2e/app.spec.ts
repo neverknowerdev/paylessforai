@@ -149,6 +149,16 @@ test('creates and exposes a callable group alias', async ({ page, request }) => 
   await expect(page.locator('#group-stage-list .selected-source').first().locator('.drag-handle')).toHaveAttribute('draggable', 'true');
   await expect(page.locator('#group-stage-list .selected-provider-routes .route-price-line')).toHaveCount(2);
   await expect(page.locator('#group-stage-list .source-include-new').first()).toBeChecked();
+  const providerSwitch = page.locator('#group-stage-list .include-checkbox-mark').first();
+  await expect(providerSwitch).toBeVisible();
+  const switchMetrics = await providerSwitch.evaluate((element) => {
+    const rect = element.getBoundingClientRect();
+    const style = getComputedStyle(element);
+    return { width: rect.width, height: rect.height, radius: style.borderRadius };
+  });
+  expect(switchMetrics.width).toBeGreaterThan(30);
+  expect(switchMetrics.height).toBeGreaterThan(15);
+  expect(switchMetrics.radius).toBe('999px');
   await expect(page.locator('#group-stage-list .provider-scope-note')).toHaveCount(0);
   const includeHelp = page.locator('#group-stage-list .tooltip-help').first();
   await expect(includeHelp).toHaveAttribute('type', 'button');

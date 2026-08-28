@@ -367,14 +367,18 @@ code { display: inline-block; max-width: 100%; overflow: hidden; padding: 10px 1
 }
 .all-provider-pricing input[type="range"]::-moz-range-progress { height:8px; border-radius:999px; background:#b8c9ff; }
 .all-provider-pricing input[type="range"]::-moz-range-thumb { width:30px; height:30px; border:0; border-radius:50%; background:#b8c9ff; box-shadow:0 0 0 1px #9db4f5; }
-.include-new-providers { position:relative; display:flex; align-items:center; gap:8px; color:var(--muted); font-size:11px; }
-.include-new-toggle { position:relative; display:inline-flex; align-items:center; gap:7px; cursor:pointer; }
-.include-new-toggle input { position:absolute; top:0; left:0; z-index:2; width:17px; height:17px; margin:0; opacity:0; cursor:pointer; }
-.include-checkbox-mark { display:inline-grid; place-items:center; width:17px; height:17px; box-sizing:border-box; border:1px solid #5874ac; border-radius:5px; background:#0d172d; transition:background .12s ease,border-color .12s ease,box-shadow .12s ease; }
-.include-checkbox-mark::after { content:'✓'; color:#0b1425; font-size:12px; font-weight:900; line-height:1; opacity:0; transform:scale(.7); transition:opacity .12s ease,transform .12s ease; }
-.include-new-toggle input:checked + .include-checkbox-mark { border-color:#b8d5ff; background:#9ebaff; box-shadow:0 0 0 2px #9ebaff22; }
-.include-new-toggle input:checked + .include-checkbox-mark::after { opacity:1; transform:scale(1); }
+.include-new-providers { position:relative; display:flex; align-items:center; gap:10px; min-height:28px; color:var(--muted); font-size:11px; }
+.include-new-toggle { position:relative; display:inline-flex; flex:0 0 auto; align-items:center; gap:9px; min-width:0; color:#dce7ff; line-height:1.2; white-space:nowrap; cursor:pointer; }
+.include-new-toggle input { position:absolute; inset:0 auto auto 0; z-index:2; width:38px; height:24px; margin:0; opacity:0; cursor:pointer; }
+.include-checkbox-mark { position:relative; display:inline-block; flex:0 0 38px; width:38px; height:22px; box-sizing:border-box; border:1px solid #536b9d; border-radius:999px; background:#111d35; box-shadow:inset 0 1px 2px #050a14aa; transition:background .16s ease,border-color .16s ease,box-shadow .16s ease; }
+.include-checkbox-mark::before { content:''; position:absolute; top:2px; left:2px; width:16px; height:16px; border-radius:50%; background:#7183a5; box-shadow:0 1px 3px #050a1488; transition:background .16s ease,transform .16s ease; }
+.include-checkbox-mark::after { content:''; }
+.include-new-toggle input:checked + .include-checkbox-mark { border-color:#9ebaff; background:#355892; box-shadow:inset 0 1px 2px #15294dcc,0 0 0 2px #9ebaff22; }
+.include-new-toggle input:checked + .include-checkbox-mark::before { transform:translateX(16px); background:#e7efff; }
 .include-new-toggle input:focus-visible + .include-checkbox-mark { outline:2px solid var(--blue-bright); outline-offset:2px; }
+/* The stage card gives every label a grid layout; keep this control a true
+   single-line switch with its label beside it. */
+.group-stage-card .include-new-toggle { display:inline-flex; align-items:center; flex:0 0 auto; gap:9px; width:max-content; max-width:100%; min-width:0; color:#dce7ff; font-size:11px; line-height:1.2; white-space:nowrap; }
 .tooltip-help { flex:0 0 auto; width:18px; height:18px; padding:0; border:1px solid #6f8fd1; border-radius:50%; color:#c7d7ff; background:#132342; font:inherit; font-size:11px; font-weight:850; line-height:16px; cursor:pointer; }
 .tooltip-help:hover,.tooltip-help:focus-visible { border-color:#b8c9ff; color:#fff; background:#1d3560; outline:0; }
 .tooltip-help-text { position:absolute; left:26px; top:calc(100% + 6px); z-index:6; width:max-content; max-width:min(300px,calc(100vw - 72px)); padding:7px 9px; border:1px solid #45669b; border-radius:7px; color:#dce7ff; background:#0d172d; box-shadow:0 10px 24px #0008; font-size:10px; line-height:1.35; }

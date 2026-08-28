@@ -251,6 +251,12 @@ test('creates and exposes a callable group alias', async ({ page, request }) => 
   expect(groupSurface.color).toBe('rgb(244, 247, 251)');
   expect(groupSurface.backgroundImage).toContain('linear-gradient');
   await page.getByRole('button', { name: 'Create group' }).click();
+  const editorHeadingBox = await page.locator('#group-editor .panel-heading').boundingBox();
+  const groupNameBox = await page.locator('#group-name').boundingBox();
+  expect(editorHeadingBox).not.toBeNull();
+  expect(groupNameBox).not.toBeNull();
+  if (!editorHeadingBox || !groupNameBox) throw new Error('group editor alignment is not measurable');
+  expect(Math.abs(editorHeadingBox.x - groupNameBox.x)).toBeLessThan(2);
   const groupInputSurface = await page.locator('#group-name').evaluate((element) => {
     const style = getComputedStyle(element);
     return { color: style.color, backgroundColor: style.backgroundColor };

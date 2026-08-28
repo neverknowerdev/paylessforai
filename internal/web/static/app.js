@@ -855,6 +855,7 @@
       remove.setAttribute('aria-label', 'Remove provider route');
       remove.title = 'Remove provider route';
       remove.innerHTML = '<span aria-hidden="true">×</span>';
+      actions.append(remove);
       const controls = document.createElement('div');
       controls.className = 'selected-source-controls';
       if (kind === 'model' && !source.provider_name) {
@@ -897,7 +898,7 @@
         controls.append(pricing);
         row.dataset.hasAuctionPricing = 'true';
       }
-      row.append(handle, main, remove, controls);
+      row.append(handle, main, controls);
       list.append(row);
       if (auctionRoutes.length) renderAllProviderPriceCapV9(row, source, auctionRoutes);
     });

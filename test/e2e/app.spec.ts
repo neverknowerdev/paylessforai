@@ -150,6 +150,7 @@ test('creates and exposes a callable group alias', async ({ page, request }) => 
   await expect(page.locator('#group-stage-list .provider-scope-note').first()).toHaveText('All current providers');
   await expect(page.locator('#group-stage-list .source-duplicate').first()).toHaveAttribute('aria-label', 'Duplicate provider route');
   await expect(page.locator('#group-stage-list .source-duplicate').first()).toHaveAttribute('title', 'Duplicate provider route');
+  await expect(page.locator('#group-stage-list .selected-source-header-actions .source-remove')).toHaveCount(1);
   await expect(page.locator('#group-stage-list .source-remove').first()).toHaveAttribute('aria-label', 'Remove provider route');
   await expect(page.locator('#group-stage-list .source-remove').first()).toHaveAttribute('title', 'Remove provider route');
   const selectedPrices = await page.locator('#group-stage-list .route-price-line').allTextContents();

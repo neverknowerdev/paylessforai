@@ -402,6 +402,87 @@
   async function toggleGroupV6(button) { const id = button?.dataset.toggleGroup; const group = state.groups.find((item) => item.id === id); if (!group) return; const enabled = !group.enabled; button.disabled = true; button.textContent = 'Saving…'; try { const payload = await fetchJSON(`/api/groups/${encodeURIComponent(id)}?revision=${encodeURIComponent(group.revision || 0)}`, { method: 'PUT', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ ...group, enabled }) }); const saved = payload.data || { ...group, enabled, revision: Number(group.revision || 0) + 1 }; state.groups = state.groups.map((item) => item.id === id ? saved : item); renderGroupsV6(); } catch (error) { button.disabled = false; button.textContent = group.enabled ? 'Enabled' : 'Disabled'; button.title = error.message; } }
   document.addEventListener('click', (event) => { const toggle = event.target.closest('[data-toggle-group]'); if (!toggle) return; event.preventDefault(); event.stopImmediatePropagation(); toggleGroupV6(toggle); });
 
+  function renderGroupsV7() {
+    const list = $('#groups-list');
+    if (!list) return;
+    const query = ($('#groups-search')?.value || '').toLowerCase().trim();
+    list.replaceChildren();
+    const groups = state.groups.filter((group) => !query || `${group.name} ${group.slug} ${JSON.stringify(group.stages)}`.toLowerCase().includes(query));
+    setText('#groups-count', formatNumber(state.groups.filter((group) => group.enabled).length));
+    setText('#groups-warning-count', formatNumber(state.groups.filter((group) => !group.enabled || !group.stages?.length).length));
+    groups.forEach((group) => {
+      const row = document.createElement('div');
+      row.className = `group-row ${group.enabled ? 'is-enabled' : 'is-disabled'}`;
+      const main = document.createElement('div');
+      main.className = 'group-main';
+      const title = document.createElement('strong');
+      title.textContent = group.name;
+      const slugRow = document.createElement('div');
+      slugRow.className = 'group-slug-row';
+      const slug = document.createElement('code');
+      slug.textContent = group.slug;
+      const copy = document.createElement('button');
+      copy.type = 'button';
+      copy.className = 'group-copy';
+      copy.dataset.copyGroupSlug = group.slug;
+      copy.textContent = 'Copy slug';
+      copy.title = 'Copy group slug';
+      slugRow.append(slug, copy);
+      const note = document.createElement('small');
+      const count = group.stages?.length || 0;
+      note.textContent = `${count} route stage${count === 1 ? '' : 's'}`;
+      main.append(title, slugRow, note);
+      row.append(main);
+
+      const actions = document.createElement('div');
+      actions.className = 'group-actions';
+      const toggle = document.createElement('button');
+      toggle.type = 'button';
+      toggle.className = `group-toggle ${group.enabled ? 'enabled' : 'disabled'}`;
+      toggle.dataset.toggleGroup = group.id;
+      toggle.setAttribute('role', 'switch');
+      toggle.setAttribute('aria-checked', group.enabled ? 'true' : 'false');
+      toggle.setAttribute('aria-label', `${group.enabled ? 'Disable' : 'Enable'} ${group.name}`);
+      toggle.title = group.enabled ? 'Disable group' : 'Enable group';
+      const track = document.createElement('span');
+      track.className = 'group-toggle-track';
+      track.setAttribute('aria-hidden', 'true');
+      const status = document.createElement('span');
+      status.className = 'group-toggle-label';
+      status.textContent = group.enabled ? 'Enabled' : 'Disabled';
+      toggle.append(track, status);
+      const edit = document.createElement('button');
+      edit.type = 'button';
+      edit.className = 'quiet-button';
+      edit.dataset.editGroup = group.id;
+      edit.textContent = 'Edit';
+      actions.append(toggle, edit);
+      row.append(actions);
+      list.append(row);
+    });
+    if (!groups.length) {
+      const empty = document.createElement('div');
+      empty.className = 'empty-state';
+      empty.textContent = state.groups.length ? 'No groups match your search.' : 'Create a group alias for a routing strategy.';
+      list.append(empty);
+    }
+  }
+  renderGroupsV6 = renderGroupsV7;
+  renderGroups = renderGroupsV7;
+  const openGroupEditorOriginal = openGroupEditor;
+  openGroupEditor = function(definition = blankGroup()) {
+    const editor = $('#group-editor');
+    const creating = !definition.id;
+    openGroupEditorOriginal(definition);
+    if (editor) {
+      if (creating) editor.dataset.closeAfterCreate = 'true';
+      else if (editor.dataset.closeAfterCreate === 'true') {
+        editor.hidden = true;
+        delete editor.dataset.closeAfterCreate;
+      }
+    }
+  };
+
   function appendRouteSummaryV6(container, route) { const line = document.createElement('span'); line.className = 'route-price-line selected-route-summary'; if (!route) { line.textContent = 'No provider route discovered'; container.append(line); return; } const access = routeAccessLabelV4(route); const discountValue = route.provider === 'surplus' && route.official_pricing && route.discount_percent_bps != null ? Math.max(0, Math.min(100, Math.round(Number(route.discount_percent_bps || 0) / 100))) : null; if (access) { const accessNode = document.createElement('span'); accessNode.className = `route-access-label ${access.toLowerCase()}`; accessNode.textContent = access; line.append(accessNode); } if (discountValue) { const discountNode = document.createElement('strong'); discountNode.className = 'route-discount'; discountNode.textContent = `${discountValue}%`; line.append(discountNode); } const price = document.createElement('span'); price.className = 'route-price-values'; price.textContent = `${displayPrice(route.pricing?.input)} in / ${displayPrice(route.pricing?.output)} out`; line.append(price); container.append(line); }
   function ensureRetryModalV6() { return $('#retry-modal'); }
   function openRetryModalV6(card, sourceIndex) { const modal = ensureRetryModalV6(); const source = card?._sources?.[sourceIndex]; if (!modal || !source) return; state.retryTarget = { card, sourceIndex }; const input = $('#retry-count'); if (input) input.value = Math.max(1, Math.min(5, Number(source.retries ?? 1))); openModal('retry-modal'); }

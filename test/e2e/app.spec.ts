@@ -224,6 +224,7 @@ test('creates and exposes a callable group alias', async ({ page, request }) => 
   await expect(page.locator('#group-stage-list .try-retry-summary')).toContainText('2');
   await page.getByRole('button', { name: 'Save group' }).click();
   await expect(page.locator('#groups-list')).toContainText('coding-pool');
+  await expect(page.locator('#group-editor')).toBeHidden();
   const savedGroup = await (await request.get('/api/groups')).json();
   const savedSource = savedGroup.data.find((item: { slug: string }) => item.slug === 'coding-pool').stages[0].sources[0];
   expect(savedSource).toMatchObject({ model_id: 'model-a', include_new_providers: true, maximum_official_price_percent: selectedPricePercent });
@@ -231,12 +232,17 @@ test('creates and exposes a callable group alias', async ({ page, request }) => 
   expect(savedSource.provider_names).toEqual(expect.arrayContaining(['surplus', 'openrouter']));
   const groupToggle = page.locator('#groups-list [data-toggle-group]').first();
   await expect(groupToggle).toHaveText('Enabled');
+  await expect(groupToggle).toHaveAttribute('role', 'switch');
+  await expect(groupToggle).toHaveAttribute('aria-checked', 'true');
+  await expect(page.locator('#groups-list .group-slug-row .group-copy')).toHaveCount(1);
   await groupToggle.click();
   await expect(page.locator('#groups-list [data-toggle-group]').first()).toHaveText('Disabled');
+  await expect(page.locator('#groups-list [data-toggle-group]').first()).toHaveAttribute('aria-checked', 'false');
   const disabledGroup = await (await request.get('/api/groups')).json();
   expect(disabledGroup.data.find((item: { slug: string }) => item.slug === 'coding-pool').enabled).toBeFalsy();
   await page.locator('#groups-list [data-toggle-group]').first().click();
   await expect(page.locator('#groups-list [data-toggle-group]').first()).toHaveText('Enabled');
+  await expect(page.locator('#groups-list [data-toggle-group]').first()).toHaveAttribute('aria-checked', 'true');
   const groupSurface = await page.locator('.group-row').first().evaluate((element) => {
     const style = getComputedStyle(element);
     return { color: style.color, backgroundImage: style.backgroundImage };

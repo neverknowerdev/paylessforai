@@ -148,7 +148,7 @@ code { display: inline-block; max-width: 100%; overflow: hidden; padding: 10px 1
 .group-summary { overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
 .group-copy { flex:0 0 auto; padding:2px 6px; border:1px solid #45669b; border-radius:5px; color:var(--blue-bright); background:#162645; cursor:pointer; font-size:9px; font-weight:750; }
 .group-copy:hover,.group-copy:focus-visible { border-color:#9ebaff; color:#fff; outline:0; }
-.group-actions { display:flex; align-items:center; justify-content:flex-end; gap:7px; flex-wrap:wrap; }
+.group-actions { display:flex; align-items:center; justify-content:flex-end; gap:7px; flex-wrap:nowrap; }
 .group-toggle { display:inline-flex; align-items:center; gap:7px; min-width:0; padding:5px 8px; border:1px solid #526b9d; border-radius:999px; color:#dce7ff; background:#162443; cursor:pointer; font-size:10px; font-weight:800; }
 .group-toggle:hover { border-color:#9ebaff; background:#1d3560; }
 .group-toggle-track { position:relative; display:inline-block; width:30px; height:17px; flex:0 0 30px; border:1px solid #667796; border-radius:999px; background:#25324d; box-sizing:border-box; transition:background .16s ease,border-color .16s ease; }
@@ -222,8 +222,8 @@ code { display: inline-block; max-width: 100%; overflow: hidden; padding: 10px 1
 .source-candidate.selected .candidate-add { color:#d8e5ff; }
 .source-route-chip { max-width:100%; overflow:hidden; text-overflow:ellipsis; }
 @media (max-width: 520px) { .selected-source-controls { grid-template-columns:1fr 1fr; } .selected-source-controls label:first-child { grid-column:1 / -1; } }
-@media (max-width: 980px) { .groups-layout { grid-template-columns:1fr; } .group-editor-card { position:static; } }
-@media (max-width: 700px) { .group-row { grid-template-columns:1fr; gap:11px; } .group-actions { justify-content:flex-start; } }
+@media (max-width: 980px) { .groups-layout { grid-template-columns:1fr; } .group-editor-card { position:static; } .group-row { grid-template-columns:1fr; gap:11px; } .group-actions { justify-content:flex-start; } }
+@media (max-width: 700px) { .group-row { grid-template-columns:1fr; gap:11px; } .group-actions { justify-content:flex-start; flex-wrap:wrap; } }
 @media (max-width: 620px) { .group-row { grid-template-columns:1fr; } .group-actions { justify-content:flex-start; } }
 
 /* Focused route-picker layout */

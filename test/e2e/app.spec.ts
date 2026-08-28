@@ -264,6 +264,15 @@ test('creates and exposes a callable group alias', async ({ page, request }) => 
   await expect(page.locator('#group-instructions-curl')).toContainText('coding-pool');
   await page.getByRole('button', { name: 'Close connection instructions' }).click();
   await expect(instructions).toBeHidden();
+  await page.setViewportSize({ width: 900, height: 800 });
+  const actionRows = await page.locator('#groups-list .group-actions').first().evaluate((actions) => {
+    const buttons = [...actions.querySelectorAll('button')].map((button) => ({ text: button.textContent?.trim(), top: Math.round(button.getBoundingClientRect().top), width: Math.round(button.getBoundingClientRect().width) }));
+    const tops = buttons.map((button) => button.top);
+    return { rowSpan: Math.max(...tops) - Math.min(...tops), overflow: actions.scrollWidth > actions.clientWidth, buttons };
+  });
+  expect(actionRows.rowSpan).toBeLessThan(8);
+  expect(actionRows.overflow).toBeFalsy();
+  await page.setViewportSize({ width: 1280, height: 800 });
   await groupToggle.click();
   await expect(page.locator('#groups-list [data-toggle-group]').first()).toHaveText('Disabled');
   await expect(page.locator('#groups-list [data-toggle-group]').first()).toHaveAttribute('aria-checked', 'false');

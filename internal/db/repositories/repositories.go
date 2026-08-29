@@ -59,7 +59,7 @@ func New(db DBTX) *Repositories {
 		result.database = provider.SQLDB()
 		result.Groups = &RoutingGroupsRepository{database: result.database}
 		result.Stats = &StatsRepository{database: result.database}
-		result.Subscriptions = &SubscriptionRepository{database: result.database}
+		result.Subscriptions = &SubscriptionRepository{bobRepository: bobRepository{exec: bobExec}}
 	}
 	return result
 }

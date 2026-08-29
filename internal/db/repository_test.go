@@ -5,6 +5,8 @@ import (
 	"path/filepath"
 	"testing"
 	"time"
+
+	"github.com/neverknowerdev/paylessforai/internal/subscription"
 )
 
 func TestTableRepositoriesCRUD(t *testing.T) {
@@ -100,5 +102,74 @@ func TestTableRepositoriesCRUD(t *testing.T) {
 	}
 	if err := s.ProviderCredentials.Delete(ctx, credential.ID); err != nil {
 		t.Fatal(err)
+	}
+}
+
+func TestSubscriptionUsageRepositoryIncludesNullableCyclesAndMissingUsage(t *testing.T) {
+	ctx := context.Background()
+	s, err := Open(ctx, filepath.Join(t.TempDir(), "subscription.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer s.Close()
+
+	fee := int64(20_000_000_000_000)
+	start := "2026-08-01T00:00:00Z"
+	end := "2026-09-01T00:00:00Z"
+	if err := s.ProviderCredentials.Upsert(ctx, ProviderCredential{
+		ID: "subscription-credential", Provider: "subscription-provider", Label: "Pro plan",
+		Ciphertext: []byte("cipher"), Nonce: []byte("nonce"), Enabled: true, AccessMode: "subscription",
+		SubscriptionFeePicoUSD: &fee, SubscriptionCycleStart: &start, SubscriptionCycleEnd: &end,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.ProviderCredentials.Upsert(ctx, ProviderCredential{
+		ID: "subscription-credential-without-cycle", Provider: "subscription-provider-without-cycle", Label: "Legacy plan",
+		Ciphertext: []byte("cipher"), Nonce: []byte("nonce"), Enabled: true, AccessMode: "subscription",
+		SubscriptionFeePicoUSD: &fee,
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	for _, request := range []struct {
+		id       string
+		provider string
+	}{
+		{id: "request-with-usage", provider: "subscription-provider"},
+		{id: "request-without-usage", provider: "subscription-provider-without-cycle"},
+	} {
+		requestID := request.id
+		if err := s.ProxyRequests.Create(ctx, requestID, "", "chat.completions", "model"); err != nil {
+			t.Fatal(err)
+		}
+		if err := s.ProxyRequests.RecordAttemptRoute(ctx, requestID, 1, request.provider, "model"); err != nil {
+			t.Fatal(err)
+		}
+		if err := s.ProxyRequests.Complete(ctx, requestID, "succeeded", "", ""); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := s.RequestUsage.Upsert(ctx, RequestUsage{RequestID: "request-with-usage", InputTokens: 12, OutputTokens: 8, TotalTokens: 20, RawUsageJSON: "{}"}); err != nil {
+		t.Fatal(err)
+	}
+
+	rows, err := s.Subscriptions.Usage(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(rows) != 2 {
+		t.Fatalf("expected two usage rows, got %#v", rows)
+	}
+	byProvider := map[string]subscription.UsageRow{}
+	for _, row := range rows {
+		byProvider[row.Provider] = row
+	}
+	withUsage := byProvider["subscription-provider"]
+	if withUsage.InputTokens != 12 || withUsage.OutputTokens != 8 || withUsage.CycleStart.IsZero() || withUsage.CycleEnd.IsZero() {
+		t.Fatalf("unexpected populated subscription usage row: %#v", withUsage)
+	}
+	withoutUsage := byProvider["subscription-provider-without-cycle"]
+	if withoutUsage.InputTokens != 0 || withoutUsage.OutputTokens != 0 || !withoutUsage.CycleStart.IsZero() || !withoutUsage.CycleEnd.IsZero() {
+		t.Fatalf("unexpected nullable/coalesced subscription usage row: %#v", withoutUsage)
 	}
 }

@@ -16,9 +16,9 @@ func TestProxyRoutesGroupSlugAndPersistsResolution(t *testing.T) {
 	provider := &fakeProvider{name: "surplus", models: []providers.Model{model("model-a", 1, 1)}}
 	proxy, store, secret := testProxy(t, provider)
 	defer store.Close()
-	manager := groups.NewManager(store)
+	manager := groups.NewManager(store.Groups)
 	definition := groups.Definition{Name: "Coding", Slug: "coding", Enabled: true, Stages: []groups.Stage{{Position: 0, Name: "cheapest", Sources: []groups.Source{{Kind: groups.SourceModel, ModelID: "model-a"}}, BillingClasses: []groups.BillingClass{groups.BillingMetered}, Selection: groups.SelectionLowestExpectedCost}}}
-	if _, err := store.SaveGroup(context.Background(), definition, nil); err != nil {
+	if _, err := store.Groups.Save(context.Background(), definition, nil); err != nil {
 		t.Fatal(err)
 	}
 	if err := manager.Reload(context.Background()); err != nil {

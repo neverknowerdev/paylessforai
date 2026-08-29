@@ -12,8 +12,8 @@ import (
 	"time"
 
 	"github.com/neverknowerdev/paylessforai/internal/catalog"
-	"github.com/neverknowerdev/paylessforai/internal/db"
 	"github.com/neverknowerdev/paylessforai/internal/db/models"
+	"github.com/neverknowerdev/paylessforai/internal/db/repositories"
 	"github.com/neverknowerdev/paylessforai/internal/groups"
 	"github.com/neverknowerdev/paylessforai/internal/ids"
 	"github.com/neverknowerdev/paylessforai/internal/matcher"
@@ -27,15 +27,37 @@ const defaultMaximumBody = 32 << 20
 
 type Proxy struct {
 	Catalog          *catalog.Manager
-	Store            *db.Store
+	Repositories     *repositories.Repositories
 	Retry            retry.Engine
 	MaximumBody      int64
 	RequireClientKey bool
 	Groups           *groups.Manager
 }
 
-func New(catalogManager *catalog.Manager, dataStore *db.Store) *Proxy {
-	return &Proxy{Catalog: catalogManager, Store: dataStore, Retry: retry.New(), MaximumBody: defaultMaximumBody, RequireClientKey: true}
+func recordResolution(ctx context.Context, repos *repositories.Repositories, requestID string, plan routing.Plan) error {
+	data, err := json.Marshal(plan)
+	if err != nil {
+		return err
+	}
+	selected := ""
+	if entry := plan.Selected(); entry != nil {
+		selected = entry.Route.LogicalModel
+	}
+	return repos.ProxyRequests.RecordResolution(ctx, requestID, plan.GroupID, plan.GroupRevision, string(data), selected)
+}
+
+func recordProxyAttemptRoute(ctx context.Context, repos *repositories.Repositories, requestID string, attempt int, routeID, credentialID, stageID, stagePath, provider, upstream, state, errorClass, errorMessage string, rawError ...string) error {
+	if err := repos.ProxyRequests.RecordAttemptRoute(ctx, requestID, attempt, provider, upstream); err != nil {
+		return err
+	}
+	if err := repos.ProxyAttempts.Record(ctx, requestID, attempt, provider, upstream, state, errorClass, errorMessage, rawError...); err != nil {
+		return err
+	}
+	return repos.ProxyAttempts.UpdateRoute(ctx, requestID, attempt, routeID, credentialID, stageID, stagePath)
+}
+
+func New(catalogManager *catalog.Manager, repos *repositories.Repositories) *Proxy {
+	return &Proxy{Catalog: catalogManager, Repositories: repos, Retry: retry.New(), MaximumBody: defaultMaximumBody, RequireClientKey: true}
 }
 
 func (p *Proxy) SetGroups(manager *groups.Manager) { p.Groups = manager }
@@ -53,11 +75,11 @@ func (p *Proxy) ServeHTTP(w http.ResponseWriter, r *http.Request, protocol match
 		if secret == "" {
 			secret = strings.TrimSpace(r.Header.Get("x-api-key"))
 		}
-		if secret == "" || p.Store == nil {
+		if secret == "" || p.Repositories == nil {
 			writeError(w, http.StatusUnauthorized, "invalid_api_key", "a PayLessForAI client API key is required")
 			return
 		}
-		key, ok, err := p.Store.AuthenticateClientKey(r.Context(), secret)
+		key, ok, err := p.Repositories.ClientAPIKeys.Authenticate(r.Context(), secret)
 		if err != nil {
 			writeError(w, http.StatusInternalServerError, "key_lookup_failed", "client key lookup failed")
 			return
@@ -78,8 +100,8 @@ func (p *Proxy) ServeHTTP(w http.ResponseWriter, r *http.Request, protocol match
 		writeError(w, http.StatusBadRequest, "invalid_request", err.Error())
 		return
 	}
-	if p.Store != nil {
-		_ = p.Store.CreateProxyRequest(r.Context(), requestID, clientKeyID, string(protocol), request.Model)
+	if p.Repositories != nil {
+		_ = p.Repositories.ProxyRequests.Create(r.Context(), requestID, clientKeyID, string(protocol), request.Model)
 	}
 	if p.Catalog == nil {
 		p.finishError(r.Context(), requestID, "not_configured", "provider catalog is not configured")
@@ -107,8 +129,8 @@ func (p *Proxy) ServeHTTP(w http.ResponseWriter, r *http.Request, protocol match
 		writeError(w, status, code, message)
 		return
 	}
-	if p.Store != nil {
-		_ = p.Store.RecordResolution(r.Context(), requestID, plan)
+	if p.Repositories != nil {
+		_ = recordResolution(r.Context(), p.Repositories, requestID, plan)
 	}
 	officialPrice, officialExpectedCost := officialPricing(planRanked(plan))
 	if err := p.execute(r.Context(), w, requestID, body, request, plan, officialPrice, officialExpectedCost); err != nil {
@@ -289,37 +311,37 @@ func (p *Proxy) execute(ctx context.Context, writer http.ResponseWriter, request
 		}
 		client := p.Catalog.ClientForRoute(route)
 		if client == nil {
-			if p.Store != nil {
-				_ = p.Store.RecordProxyAttemptRoute(ctx, requestID, totalAttempts+1, route.ID, route.CredentialID, entry.StageID, strings.Join(entry.StagePath, " / "), route.Provider, route.UpstreamModel, "failed", "provider_not_configured", "Selected provider is not configured.", "selected provider is not configured")
+			if p.Repositories != nil {
+				_ = recordProxyAttemptRoute(ctx, p.Repositories, requestID, totalAttempts+1, route.ID, route.CredentialID, entry.StageID, strings.Join(entry.StagePath, " / "), route.Provider, route.UpstreamModel, "failed", "provider_not_configured", "Selected provider is not configured.", "selected provider is not configured")
 			}
 			return &proxyError{status: http.StatusBadGateway, code: "provider_not_configured", message: "selected provider is not configured"}
 		}
 		totalAttempts++
-		if p.Store != nil {
-			_ = p.Store.RecordProxyAttemptRoute(ctx, requestID, totalAttempts, route.ID, route.CredentialID, entry.StageID, strings.Join(entry.StagePath, " / "), route.Provider, route.UpstreamModel, "started", "", "")
+		if p.Repositories != nil {
+			_ = recordProxyAttemptRoute(ctx, p.Repositories, requestID, totalAttempts, route.ID, route.CredentialID, entry.StageID, strings.Join(entry.StagePath, " / "), route.Provider, route.UpstreamModel, "started", "", "")
 		}
 		response, err := client.Do(ctx, request.Protocol, route.UpstreamModel, body)
 		if err == nil {
 			if request.Stream || strings.Contains(strings.ToLower(response.Header.Get("Content-Type")), "text/event-stream") {
 				streamErr := p.stream(ctx, writer, requestID, response, entry.ExpectedCost, officialExpectedCost, route.Price, officialPrice)
-				if p.Store != nil {
+				if p.Repositories != nil {
 					state, code, message := "succeeded", "", ""
 					raw := ""
 					if streamErr != nil {
 						state, code, message, raw = "partial", "stream_error", humanErrorMessage(streamErr), sanitize(streamErr.Error())
 					}
-					_ = p.Store.RecordProxyAttemptRoute(ctx, requestID, totalAttempts, route.ID, route.CredentialID, entry.StageID, strings.Join(entry.StagePath, " / "), route.Provider, route.UpstreamModel, state, code, message, raw)
+					_ = recordProxyAttemptRoute(ctx, p.Repositories, requestID, totalAttempts, route.ID, route.CredentialID, entry.StageID, strings.Join(entry.StagePath, " / "), route.Provider, route.UpstreamModel, state, code, message, raw)
 				}
 				return streamErr
 			}
 			completeErr := p.complete(ctx, writer, requestID, response, entry.ExpectedCost, officialExpectedCost, route.Price, officialPrice)
-			if p.Store != nil {
+			if p.Repositories != nil {
 				state, code, message := "succeeded", "", ""
 				raw := ""
 				if completeErr != nil {
 					state, code, message, raw = "failed", errorCode(completeErr), humanErrorMessage(completeErr), sanitize(completeErr.Error())
 				}
-				_ = p.Store.RecordProxyAttemptRoute(ctx, requestID, totalAttempts, route.ID, route.CredentialID, entry.StageID, strings.Join(entry.StagePath, " / "), route.Provider, route.UpstreamModel, state, code, message, raw)
+				_ = recordProxyAttemptRoute(ctx, p.Repositories, requestID, totalAttempts, route.ID, route.CredentialID, entry.StageID, strings.Join(entry.StagePath, " / "), route.Provider, route.UpstreamModel, state, code, message, raw)
 			}
 			return completeErr
 		}
@@ -329,17 +351,17 @@ func (p *Proxy) execute(ctx context.Context, writer http.ResponseWriter, request
 			var upstream *providers.UpstreamError
 			if errors.As(err, &upstream) {
 				p.Catalog.SetProviderBlocked(blockKey, upstream.NextAvailableAt)
-				if p.Store != nil {
+				if p.Repositories != nil {
 					if route.CredentialID != "" {
-						_ = p.Store.MarkCredentialLimited(ctx, route.CredentialID, upstream.NextAvailableAt, upstream.Message)
+						_ = p.Repositories.ProviderCredentials.MarkLimitedByID(ctx, route.CredentialID, upstream.NextAvailableAt, upstream.Message)
 					} else {
-						_ = p.Store.MarkProviderLimited(ctx, route.Provider, upstream.NextAvailableAt, upstream.Message)
+						_ = p.Repositories.ProviderCredentials.MarkLimited(ctx, route.Provider, upstream.NextAvailableAt, upstream.Message)
 					}
 				}
 			}
 		}
-		if p.Store != nil {
-			_ = p.Store.RecordProxyAttemptRoute(ctx, requestID, totalAttempts, route.ID, route.CredentialID, entry.StageID, strings.Join(entry.StagePath, " / "), route.Provider, route.UpstreamModel, "failed", errorCode(err), humanErrorMessage(err), rawErrorMessage(err))
+		if p.Repositories != nil {
+			_ = recordProxyAttemptRoute(ctx, p.Repositories, requestID, totalAttempts, route.ID, route.CredentialID, entry.StageID, strings.Join(entry.StagePath, " / "), route.Provider, route.UpstreamModel, "failed", errorCode(err), humanErrorMessage(err), rawErrorMessage(err))
 		}
 		decision := p.Retry.Decide(retry.Input{Policy: policy, AttemptNumber: totalAttempts, Now: time.Now(), Error: classified, Delivery: retry.NothingSent, SameRouteAvailable: !route.Free, FallbacksRemaining: len(plan.Entries) - current - 1, PlanMode: true, SameRouteRetriesRemaining: retriesRemaining, PlanEntriesRemaining: len(plan.Entries) - current - 1, TotalAttemptsRemaining: policy.MaximumAttempts - totalAttempts})
 		if decision.Action != retry.RetrySameRoute && decision.Action != retry.FailOver {
@@ -367,9 +389,9 @@ func (p *Proxy) complete(ctx context.Context, writer http.ResponseWriter, reques
 	copyHeaders(writer.Header(), response.Header)
 	writer.WriteHeader(response.StatusCode)
 	_, _ = writer.Write(body)
-	persistUsage(ctx, p.Store, requestID, usage.FromJSON(body), expectedCost, officialExpectedCost, price, officialPrice)
-	if p.Store != nil {
-		_ = p.Store.CompleteProxyRequest(ctx, requestID, "succeeded", "", "")
+	persistUsage(ctx, p.Repositories, requestID, usage.FromJSON(body), expectedCost, officialExpectedCost, price, officialPrice)
+	if p.Repositories != nil {
+		_ = p.Repositories.ProxyRequests.Complete(ctx, requestID, "succeeded", "", "")
 	}
 	return nil
 }
@@ -394,14 +416,14 @@ func (p *Proxy) stream(ctx context.Context, writer http.ResponseWriter, requestI
 		}
 		if err != nil {
 			if errors.Is(err, io.EOF) {
-				persistUsage(ctx, p.Store, requestID, stats, expectedCost, officialExpectedCost, price, officialPrice)
-				if p.Store != nil {
-					_ = p.Store.CompleteProxyRequest(ctx, requestID, "succeeded", "", "")
+				persistUsage(ctx, p.Repositories, requestID, stats, expectedCost, officialExpectedCost, price, officialPrice)
+				if p.Repositories != nil {
+					_ = p.Repositories.ProxyRequests.Complete(ctx, requestID, "succeeded", "", "")
 				}
 				return nil
 			}
-			if p.Store != nil {
-				_ = p.Store.CompleteProxyRequest(ctx, requestID, "partial", "stream_error", sanitize(err.Error()))
+			if p.Repositories != nil {
+				_ = p.Repositories.ProxyRequests.Complete(ctx, requestID, "partial", "stream_error", sanitize(err.Error()))
 			}
 			return &partialStreamError{err: err}
 		}
@@ -446,8 +468,8 @@ func observeSSE(line []byte, stats *usage.Stats) {
 	stats.Raw = observed.Raw
 }
 
-func persistUsage(ctx context.Context, dataStore *db.Store, requestID string, stats usage.Stats, expectedCost, officialExpectedCost int64, price, officialPrice matcher.Price) {
-	if dataStore == nil {
+func persistUsage(ctx context.Context, repos *repositories.Repositories, requestID string, stats usage.Stats, expectedCost, officialExpectedCost int64, price, officialPrice matcher.Price) {
+	if repos == nil {
 		return
 	}
 	actualCost := stats.ActualCostPicoUSD
@@ -481,7 +503,7 @@ func persistUsage(ctx context.Context, dataStore *db.Store, requestID string, st
 		discountPico, discountBPS = &difference, &bps
 	}
 	raw, _ := json.Marshal(stats.Raw)
-	_ = dataStore.RecordUsage(ctx, models.RequestUsage{RequestID: requestID, InputTokens: stats.InputTokens, OutputTokens: stats.OutputTokens, TotalTokens: stats.TotalTokens, CachedReadTokens: stats.CachedReadTokens, CacheWriteTokens: stats.CacheWriteTokens, ReasoningTokens: stats.ReasoningTokens, EstimatedCostPico: expectedCost, OfficialCostPico: officialCost, ActualCostPico: actualCost, DiscountPico: discountPico, DiscountBPS: discountBPS, RawUsageJSON: string(raw)})
+	_ = repos.RequestUsage.Upsert(ctx, models.RequestUsage{RequestID: requestID, InputTokens: stats.InputTokens, OutputTokens: stats.OutputTokens, TotalTokens: stats.TotalTokens, CachedReadTokens: stats.CachedReadTokens, CacheWriteTokens: stats.CacheWriteTokens, ReasoningTokens: stats.ReasoningTokens, EstimatedCostPico: expectedCost, OfficialCostPico: officialCost, ActualCostPico: actualCost, DiscountPico: discountPico, DiscountBPS: discountBPS, RawUsageJSON: string(raw)})
 }
 
 func officialPricing(ranked []matcher.RankedRoute) (matcher.Price, int64) {
@@ -689,8 +711,8 @@ func errorCode(err error) string {
 }
 
 func (p *Proxy) finishError(ctx context.Context, requestID, code, message string) {
-	if p.Store != nil {
-		_ = p.Store.CompleteProxyRequest(ctx, requestID, "failed", code, message)
+	if p.Repositories != nil {
+		_ = p.Repositories.ProxyRequests.Complete(ctx, requestID, "failed", code, message)
 	}
 }
 

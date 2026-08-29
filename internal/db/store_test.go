@@ -35,7 +35,7 @@ func TestMigrateIsIdempotent(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer s.Close()
-	if err := s.Migrate(context.Background()); err != nil {
+	if err := MigrateDatabase(context.Background(), s.DB(), SQLiteDialect); err != nil {
 		t.Fatal(err)
 	}
 	var count int

@@ -18,7 +18,7 @@ func (s *Server) handleStatsSubscriptions(w http.ResponseWriter, r *http.Request
 		writeError(w, http.StatusMethodNotAllowed, "method_not_allowed", "subscription statistics only accepts GET")
 		return
 	}
-	items, err := s.db.SubscriptionPricing(r.Context())
+	items, err := s.db.Subscriptions.Pricing(r.Context())
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "subscription_stats_failed", "could not load subscription pricing")
 		return
@@ -39,7 +39,7 @@ func (s *Server) handleStatsModels(w http.ResponseWriter, r *http.Request) {
 			}
 		}
 	}
-	items, err := s.db.ModelStats(r.Context(), freeModels)
+	items, err := s.db.Stats.ModelStats(r.Context(), freeModels)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "model_stats_failed", "could not load model statistics")
 		return
@@ -52,7 +52,7 @@ func (s *Server) handleStatsProviders(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusMethodNotAllowed, "method_not_allowed", "provider statistics only accepts GET")
 		return
 	}
-	items, err := s.db.ProviderStats(r.Context())
+	items, err := s.db.Stats.ProviderStats(r.Context())
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "provider_stats_failed", "could not load provider statistics")
 		return
@@ -66,7 +66,7 @@ func (s *Server) handleRequests(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	limit, _ := strconv.Atoi(r.URL.Query().Get("limit"))
-	items, err := s.db.ListRequestStats(r.Context(), limit)
+	items, err := s.db.Stats.ListRequestStats(r.Context(), limit)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "request_stats_failed", "could not list request statistics")
 		return
@@ -79,7 +79,7 @@ func (s *Server) handleStatsSummary(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusMethodNotAllowed, "method_not_allowed", "statistics summary only accepts GET")
 		return
 	}
-	summary, err := s.db.RequestStatsSummary(r.Context())
+	summary, err := s.db.Stats.RequestStatsSummary(r.Context())
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "stats_summary_failed", "could not load statistics summary")
 		return

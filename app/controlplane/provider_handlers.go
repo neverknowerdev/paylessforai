@@ -46,7 +46,7 @@ func (s *Server) handleProviderCredentials(w http.ResponseWriter, r *http.Reques
 	}
 	switch r.Method {
 	case http.MethodGet:
-		items, err := s.db.ListProviderCredentials(r.Context())
+		items, err := s.db.ProviderCredentials.List(r.Context())
 		if err != nil {
 			writeError(w, http.StatusInternalServerError, "credential_list_failed", "could not list provider credentials")
 			return
@@ -162,7 +162,7 @@ func (s *Server) createProviderCredential(w http.ResponseWriter, r *http.Request
 	if input.SubscriptionCycleEnd != "" {
 		item.SubscriptionCycleEnd = &input.SubscriptionCycleEnd
 	}
-	if err := s.db.UpsertProviderCredential(r.Context(), item); err != nil {
+	if err := s.db.ProviderCredentials.Upsert(r.Context(), item); err != nil {
 		writeError(w, http.StatusInternalServerError, "credential_store_failed", "could not store provider credential")
 		return
 	}
@@ -180,7 +180,7 @@ func (s *Server) createProviderCredential(w http.ResponseWriter, r *http.Request
 }
 
 func (s *Server) findDuplicateProviderCredential(ctx context.Context, apiKey string) (*models.ProviderCredential, error) {
-	credentials, err := s.db.ListProviderCredentials(ctx)
+	credentials, err := s.db.ProviderCredentials.List(ctx)
 	if err != nil {
 		return nil, err
 	}
@@ -208,7 +208,7 @@ func (s *Server) handleProviderCredential(w http.ResponseWriter, r *http.Request
 		writeError(w, http.StatusBadRequest, "invalid_request", "provider credential ID is required")
 		return
 	}
-	if err := s.db.DeleteProviderCredential(r.Context(), id); err != nil {
+	if err := s.db.ProviderCredentials.Delete(r.Context(), id); err != nil {
 		writeError(w, http.StatusInternalServerError, "credential_delete_failed", "could not delete provider credential")
 		return
 	}

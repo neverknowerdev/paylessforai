@@ -26,7 +26,7 @@ func (s *Server) handleGroups(w http.ResponseWriter, r *http.Request) {
 	}
 	switch r.Method {
 	case http.MethodGet:
-		items, err := s.db.ListGroups(r.Context())
+		items, err := s.db.Groups.List(r.Context())
 		if err != nil {
 			writeError(w, http.StatusInternalServerError, "group_list_failed", "could not list groups")
 			return
@@ -57,7 +57,7 @@ func (s *Server) handleGroupPath(w http.ResponseWriter, r *http.Request) {
 	}
 	switch r.Method {
 	case http.MethodGet:
-		item, err := s.db.GetGroup(r.Context(), id)
+		item, err := s.db.Groups.Get(r.Context(), id)
 		if errors.Is(err, sql.ErrNoRows) {
 			writeError(w, http.StatusNotFound, "group_not_found", "group was not found")
 			return
@@ -80,7 +80,7 @@ func (s *Server) handleGroupPath(w http.ResponseWriter, r *http.Request) {
 			writeError(w, http.StatusBadRequest, "group_revision_required", "revision query parameter is required")
 			return
 		}
-		if err := s.db.DeleteGroup(r.Context(), id, revision); err != nil {
+		if err := s.db.Groups.Delete(r.Context(), id, revision); err != nil {
 			if strings.Contains(err.Error(), "FOREIGN KEY") {
 				writeError(w, http.StatusConflict, "group_in_use", "group is referenced by another group")
 			} else if strings.Contains(err.Error(), "group_revision_conflict") {
@@ -108,7 +108,7 @@ func (s *Server) saveGroup(w http.ResponseWriter, r *http.Request, base groups.D
 	}
 	input.ID = base.ID
 	input.Slug = groups.NormalizeSlug(input.Slug)
-	items, err := s.db.ListGroups(r.Context())
+	items, err := s.db.Groups.List(r.Context())
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "group_list_failed", "could not validate groups")
 		return
@@ -147,7 +147,7 @@ func (s *Server) saveGroup(w http.ResponseWriter, r *http.Request, base groups.D
 		writeJSON(w, http.StatusUnprocessableEntity, map[string]any{"error": map[string]any{"code": "invalid_group", "message": "group definition is invalid", "issues": issues}})
 		return
 	}
-	saved, err := s.db.SaveGroup(r.Context(), input, expected)
+	saved, err := s.db.Groups.Save(r.Context(), input, expected)
 	if err != nil {
 		if strings.Contains(err.Error(), "revision_conflict") {
 			writeError(w, http.StatusConflict, "group_revision_conflict", "group was changed; reload before saving")
@@ -174,7 +174,7 @@ func (s *Server) saveGroup(w http.ResponseWriter, r *http.Request, base groups.D
 func (s *Server) previewGroup(w http.ResponseWriter, r *http.Request, id *string) {
 	var definition groups.Definition
 	if id != nil {
-		loaded, err := s.db.GetGroup(r.Context(), *id)
+		loaded, err := s.db.Groups.Get(r.Context(), *id)
 		if err != nil {
 			writeError(w, http.StatusNotFound, "group_not_found", "group was not found")
 			return
@@ -184,7 +184,7 @@ func (s *Server) previewGroup(w http.ResponseWriter, r *http.Request, id *string
 		writeError(w, http.StatusBadRequest, "invalid_group_json", "group definition must be valid JSON")
 		return
 	}
-	items, err := s.db.ListGroups(r.Context())
+	items, err := s.db.Groups.List(r.Context())
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "group_list_failed", "could not load groups")
 		return

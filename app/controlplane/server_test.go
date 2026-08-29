@@ -14,6 +14,7 @@ import (
 
 	dbpkg "github.com/neverknowerdev/paylessforai/internal/db"
 	"github.com/neverknowerdev/paylessforai/internal/db/models"
+	"github.com/neverknowerdev/paylessforai/internal/db/repositories"
 	"github.com/neverknowerdev/paylessforai/internal/matcher"
 	"github.com/neverknowerdev/paylessforai/internal/providers"
 	"github.com/neverknowerdev/paylessforai/internal/secrets"
@@ -28,6 +29,13 @@ func (c credentialTestClient) Discover(context.Context) ([]providers.Model, erro
 }
 func (c credentialTestClient) Do(context.Context, matcher.Protocol, string, []byte) (*http.Response, error) {
 	return &http.Response{StatusCode: http.StatusOK, Body: io.NopCloser(strings.NewReader(`{"choices":[]}`)), Header: make(http.Header)}, nil
+}
+
+func recordAttempt(repos *repositories.Repositories, ctx context.Context, requestID string, attempt int, provider, upstream, state, errorClass, errorMessage string, rawError ...string) error {
+	if err := repos.ProxyRequests.RecordAttemptRoute(ctx, requestID, attempt, provider, upstream); err != nil {
+		return err
+	}
+	return repos.ProxyAttempts.Record(ctx, requestID, attempt, provider, upstream, state, errorClass, errorMessage, rawError...)
 }
 
 func testServer(t *testing.T) (*Server, func()) {
@@ -95,13 +103,13 @@ func TestRequestStatsAPI(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer db.Close()
-	if err := db.CreateProxyRequest(context.Background(), "request-1", "", "chat_completions", "model-a"); err != nil {
+	if err := db.ProxyRequests.Create(context.Background(), "request-1", "", "chat_completions", "model-a"); err != nil {
 		t.Fatal(err)
 	}
-	if err := db.RecordProxyAttempt(context.Background(), "request-1", 1, "surplus", "model-a", "succeeded", "", ""); err != nil {
+	if err := recordAttempt(db, context.Background(), "request-1", 1, "surplus", "model-a", "succeeded", "", ""); err != nil {
 		t.Fatal(err)
 	}
-	if err := db.RecordUsage(context.Background(), models.RequestUsage{RequestID: "request-1", TotalTokens: 5, EstimatedCostPico: 7}); err != nil {
+	if err := db.RequestUsage.Upsert(context.Background(), models.RequestUsage{RequestID: "request-1", TotalTokens: 5, EstimatedCostPico: 7}); err != nil {
 		t.Fatal(err)
 	}
 	server, err := New("127.0.0.1:0", time.Second, time.Second, db)

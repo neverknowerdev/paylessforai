@@ -7,7 +7,7 @@ import (
 
 	"github.com/neverknowerdev/paylessforai/app/gateway"
 	"github.com/neverknowerdev/paylessforai/internal/catalog"
-	"github.com/neverknowerdev/paylessforai/internal/db"
+	"github.com/neverknowerdev/paylessforai/internal/db/repositories"
 	"github.com/neverknowerdev/paylessforai/internal/groups"
 	"github.com/neverknowerdev/paylessforai/internal/providers"
 	proxyservice "github.com/neverknowerdev/paylessforai/internal/proxy"
@@ -17,7 +17,7 @@ import (
 
 type Server struct {
 	httpServer  *http.Server
-	db          *db.Store
+	db          *repositories.Repositories
 	catalog     *catalog.Manager
 	proxy       *proxyservice.Proxy
 	credentials CredentialDeps
@@ -31,11 +31,11 @@ type CredentialDeps struct {
 	Groups   *groups.Manager
 }
 
-func New(addr string, readHeaderTimeout, idleTimeout time.Duration, db *db.Store) (*Server, error) {
+func New(addr string, readHeaderTimeout, idleTimeout time.Duration, db *repositories.Repositories) (*Server, error) {
 	return NewWithDeps(addr, readHeaderTimeout, idleTimeout, db, nil, nil)
 }
 
-func NewWithDeps(addr string, readHeaderTimeout, idleTimeout time.Duration, db *db.Store, catalogManager *catalog.Manager, proxyHandler *proxyservice.Proxy, credentialConfig ...CredentialDeps) (*Server, error) {
+func NewWithDeps(addr string, readHeaderTimeout, idleTimeout time.Duration, db *repositories.Repositories, catalogManager *catalog.Manager, proxyHandler *proxyservice.Proxy, credentialConfig ...CredentialDeps) (*Server, error) {
 	credentials := CredentialDeps{}
 	if len(credentialConfig) > 0 {
 		credentials = credentialConfig[0]
@@ -46,7 +46,7 @@ func NewWithDeps(addr string, readHeaderTimeout, idleTimeout time.Duration, db *
 	}
 	groupManager := credentials.Groups
 	if groupManager == nil && db != nil {
-		groupManager = groups.NewManager(db)
+		groupManager = groups.NewManager(db.Groups)
 		_ = groupManager.Reload(context.Background())
 	}
 	server := &Server{db: db, catalog: catalogManager, proxy: proxyHandler, credentials: credentials, groups: groupManager}

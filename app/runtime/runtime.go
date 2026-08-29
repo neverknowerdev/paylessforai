@@ -23,6 +23,7 @@ import (
 	"github.com/neverknowerdev/paylessforai/internal/catalog"
 	"github.com/neverknowerdev/paylessforai/internal/config"
 	"github.com/neverknowerdev/paylessforai/internal/db"
+	"github.com/neverknowerdev/paylessforai/internal/db/repositories"
 	"github.com/neverknowerdev/paylessforai/internal/groups"
 	"github.com/neverknowerdev/paylessforai/internal/matcher"
 	"github.com/neverknowerdev/paylessforai/internal/providers"
@@ -51,7 +52,7 @@ func Run(parent context.Context, args []string) error {
 	registry := providers.Builtin(c.ProviderBaseURLs)
 	clients := loadProviderClients(registry, db, secretBox)
 	catalogManager := catalog.New(clients)
-	if stored, err := db.ListProviderCredentials(parent); err == nil {
+	if stored, err := db.ProviderCredentials.List(parent); err == nil {
 		for _, credential := range stored {
 			if credential.SubscriptionStatus == "limited" {
 				var until *time.Time
@@ -77,7 +78,7 @@ func Run(parent context.Context, args []string) error {
 		return catalogManager.Refresh(appContext)
 	}
 	proxyHandler := proxy.New(catalogManager, db)
-	groupManager := groups.NewManager(db)
+	groupManager := groups.NewManager(db.Groups)
 	if err := groupManager.Reload(appContext); err != nil {
 		slog.Warn("group load failed", "error", err)
 	}
@@ -135,9 +136,9 @@ func refreshCatalogPeriodically(ctx context.Context, manager *catalog.Manager, i
 	}
 }
 
-func loadProviderClients(registry *providers.Registry, dataStore *db.Store, box *secrets.Box) []providers.Client {
+func loadProviderClients(registry *providers.Registry, repos *repositories.Repositories, box *secrets.Box) []providers.Client {
 	clients := make([]providers.Client, 0)
-	stored, err := dataStore.ListProviderCredentials(context.Background())
+	stored, err := repos.ProviderCredentials.List(context.Background())
 	if err == nil {
 		for _, credential := range stored {
 			provider := strings.ToLower(strings.TrimSpace(credential.Provider))

@@ -53,6 +53,12 @@ func (o *ORM) BobExecutor() bob.Executor {
 	return bobExecutor{db: o.DB, dialect: o.dialect}
 }
 
+// SQLDB exposes the underlying connection to repositories that need a
+// read-only aggregate query or an explicit transaction. Mutations for
+// persisted tables still belong to the individual repositories.
+func (o *ORM) SQLDB() *sql.DB { return o.DB }
+
+
 type bobExecutor struct {
 	db      *sql.DB
 	dialect SQLDialect

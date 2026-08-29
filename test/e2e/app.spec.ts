@@ -335,6 +335,8 @@ test('creates and exposes a callable group alias', async ({ page, request }) => 
   await page.locator('#group-stage-list .source-search-toggle').click();
   await page.locator('#group-stage-list .source-search').fill('model-a');
   await expect(page.locator('#group-stage-list .source-candidate').first()).toHaveClass(/source-group-candidate/);
+  await page.locator('#group-stage-list .source-candidate').first().locator('strong').click();
+  await expect(page.locator('#group-stage-list .selected-source .selected-source-type')).toHaveText('GROUP');
   await page.locator('#close-group-editor').click();
   await page.getByRole('button', { name: 'Create group' }).click();
   const editorHeadingBox = await page.locator('#group-editor .panel-heading').boundingBox();

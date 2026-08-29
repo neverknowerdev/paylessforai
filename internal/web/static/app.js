@@ -1328,6 +1328,15 @@
       const title = document.createElement('strong');
       const model = source.kind === 'model' ? modelDisplay(source.model_id) : null;
       title.textContent = source.kind === 'model' ? model.name : (state.groups.find((group) => group.id === source.group_id)?.name || source.group_id || 'Choose a group');
+      const titleWrap = document.createElement('div');
+      titleWrap.className = 'selected-source-title';
+      titleWrap.append(title);
+      if (source.kind === 'group') {
+        const badge = document.createElement('span');
+        badge.className = 'selected-source-type';
+        badge.textContent = 'GROUP';
+        titleWrap.append(badge);
+      }
       const actions = document.createElement('div');
       actions.className = 'selected-source-header-actions';
       const futureProvider = source.kind === 'model' && !source.provider_name;
@@ -1352,7 +1361,7 @@
         remove.innerHTML = '<span aria-hidden="true">×</span>';
         actions.append(remove);
       }
-      header.append(title, actions);
+      header.append(titleWrap, actions);
       main.append(header);
       if (source.kind === 'group') {
         const meta = document.createElement('small');

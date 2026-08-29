@@ -18,15 +18,20 @@ func (r *SubscriptionRepository) Usage(ctx context.Context) ([]subscription.Usag
 	defer rows.Close()
 	result := []subscription.UsageRow{}
 	for rows.Next() {
-		var provider, label, start, end, at string
+		var provider, label, at string
+		var start, end sql.NullString
 		var fee, input, output int64
 		if err := rows.Scan(&provider, &label, &fee, &start, &end, &at, &input, &output); err != nil {
 			return nil, err
 		}
 		row := subscription.UsageRow{Provider: provider, Label: label, FeePicoUSD: fee, InputTokens: input, OutputTokens: output}
-		row.CycleStart, _ = time.Parse(time.RFC3339Nano, start)
-		row.CycleEnd, _ = time.Parse(time.RFC3339Nano, end)
 		row.At, _ = time.Parse(time.RFC3339Nano, at)
+		if start.Valid {
+			row.CycleStart, _ = time.Parse(time.RFC3339Nano, start.String)
+		}
+		if end.Valid {
+			row.CycleEnd, _ = time.Parse(time.RFC3339Nano, end.String)
+		}
 		result = append(result, row)
 	}
 	return result, rows.Err()

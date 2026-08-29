@@ -1327,6 +1327,9 @@
       const actions = document.createElement('div');
       actions.className = 'selected-source-header-actions';
       const futureProvider = source.kind === 'model' && !source.provider_name;
+      const route = source.kind === 'model' && source.provider_name ? routeForSource(source) : null;
+      if (route && routeBilling(route) === 'subscription') row.classList.add('subscription-route');
+      if (futureProvider) row.classList.add(source.include_new_providers !== false ? 'new-provider-enabled' : 'new-provider-disabled');
       if (!futureProvider) {
         const retry = document.createElement('button');
         retry.type = 'button';
@@ -1356,7 +1359,6 @@
         provider.className = 'selected-route-provider';
         provider.textContent = source.provider_name ? providerName(source.provider_name) : 'New providers';
         main.append(provider);
-        const route = source.provider_name ? routeForSource(source) : null;
         if (route && routeBilling(route) === 'subscription') {
           const warning = document.createElement('small');
           warning.className = 'subscription-warning';
@@ -1377,26 +1379,12 @@
           label.setAttribute('aria-label', `Include new providers for ${model.name}`);
           label.title = `Include new providers for ${model.name}`;
           label.append(checkbox, mark);
-          const help = document.createElement('button');
-          help.type = 'button';
-          help.className = 'tooltip-help';
-          help.textContent = '?';
-          help.setAttribute('aria-label', 'Explain include new providers');
-          help.setAttribute('aria-expanded', 'false');
-          help.title = `When a new provider with ${model.name} is added, it is automatically added to this group.`;
-          const helpText = document.createElement('span');
-          helpText.className = 'tooltip-help-text';
-          helpText.hidden = true;
-          helpText.textContent = help.title;
-          help.addEventListener('click', (event) => {
-            event.preventDefault();
-            event.stopPropagation();
-            const expanded = help.getAttribute('aria-expanded') === 'true';
-            help.setAttribute('aria-expanded', String(!expanded));
-            helpText.hidden = expanded;
-          });
           include.classList.add('header-include-toggle');
-          include.append(label, help, helpText);
+          const explanation = document.createElement('small');
+          explanation.className = 'new-provider-explanation';
+          explanation.textContent = 'New providers are added automatically';
+          main.append(explanation);
+          include.append(label);
           actions.append(include);
         }
       }

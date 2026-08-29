@@ -368,6 +368,9 @@ code { display: inline-block; max-width: 100%; overflow: hidden; padding: 10px 1
 .compact-provider-source.cap-included { border-color:#78a8e5; background:#1b3154; box-shadow:0 0 0 1px #78a8e544,0 0 16px #78a8e51f; }
 .compact-provider-source.cap-excluded { border-color:#3c4b68; background:#111c32; opacity:.58; box-shadow:none; }
 .compact-provider-source.cap-not-applicable { border-color:#30466f; }
+.compact-provider-source.subscription-route { border-color:#b1844c; background:#202a43; box-shadow:0 0 0 1px #b1844c55,0 0 15px #b1844c1f; }
+.compact-provider-source.new-provider-enabled { border-color:#78a8e5; background:#1b3154; box-shadow:0 0 0 1px #78a8e544,0 0 16px #78a8e51f; }
+.compact-provider-source.new-provider-disabled { border-color:#3c4b68; background:#111c32; opacity:.58; box-shadow:none; }
 .compact-route-summary { color:#c9d8f6; }
 .compact-provider-source .selected-route-provider { color:#dce7ff; }
 .compact-provider-source .include-new-providers { margin-top:9px; }
@@ -422,6 +425,7 @@ code { display: inline-block; max-width: 100%; overflow: hidden; padding: 10px 1
 .compact-provider-source .selected-source-header > strong { font-size:21px; line-height:1.08; letter-spacing:-.01em; }
 .compact-provider-source .selected-source-header-actions { gap:5px; }
 .compact-provider-source .selected-route-provider { margin-top:2px; color:#b9cdf6; font-size:16px; font-weight:700; line-height:1.12; letter-spacing:.015em; }
+.compact-provider-source .new-provider-explanation { color:#b6c8e9; font-size:11px; line-height:1.15; }
 .compact-provider-source .selected-route-summary { margin-top:4px; padding:6px 8px; font-size:12px; line-height:1.15; }
 .compact-provider-source .subscription-warning { margin-top:5px; padding:5px 8px; font-size:10px; line-height:1.2; }
 .header-include-toggle .tooltip-help { width:22px; height:22px; }

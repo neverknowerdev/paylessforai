@@ -176,6 +176,9 @@ test('creates and exposes a callable group alias', async ({ page, request }) => 
   const futureProviderRow = page.locator('#group-stage-list .selected-source').filter({ hasText: 'New providers' }).first();
   await expect(futureProviderRow.locator('.source-remove, .source-duplicate, .retry-summary')).toHaveCount(0);
   await expect(futureProviderRow.locator('.selected-source-header-actions .source-include-new')).toHaveCount(1);
+  await expect(futureProviderRow.locator('.new-provider-explanation')).toHaveText('New providers are added automatically');
+  await expect(futureProviderRow.locator('.tooltip-help')).toHaveCount(0);
+  await expect(futureProviderRow).toHaveClass(/new-provider-enabled/);
   const providerSwitch = page.locator('#group-stage-list .include-checkbox-mark').first();
   await expect(providerSwitch).toBeVisible();
   const switchMetrics = await providerSwitch.evaluate((element) => {
@@ -187,13 +190,8 @@ test('creates and exposes a callable group alias', async ({ page, request }) => 
   expect(switchMetrics.height).toBeGreaterThan(15);
   expect(switchMetrics.radius).toBe('999px');
   await expect(page.locator('#group-stage-list .provider-scope-note')).toHaveCount(0);
-  const includeHelp = page.locator('#group-stage-list .tooltip-help').first();
-  await expect(includeHelp).toHaveAttribute('type', 'button');
-  await includeHelp.click();
-  await expect(page.locator('#group-stage-list .source-include-new').first()).toBeChecked();
-  await expect(page.locator('#group-stage-list .tooltip-help-text').first()).toBeVisible();
-  await includeHelp.click();
-  await expect(page.locator('#group-stage-list .tooltip-help-text').first()).toBeHidden();
+  await page.locator('#group-stage-list .source-include-new').first().uncheck();
+  await expect(page.locator('#group-stage-list .selected-source').filter({ hasText: 'New providers' }).first()).toHaveClass(/new-provider-disabled/);
   await expect(page.locator('#group-stage-list .selected-source .source-duplicate')).toHaveCount(0);
   await expect(page.locator('#group-stage-list .stage-card-actions .source-duplicate')).toHaveAttribute('title', 'Duplicate route block');
   await expect(page.locator('#group-stage-list .selected-source-header-actions .source-remove')).toHaveCount(2);

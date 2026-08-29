@@ -8,7 +8,6 @@ import (
 
 func TestRoutingGroupsRepositoryIntegration(t *testing.T) {
 	i := newIntegrationDB(t)
-	i.reset(t)
 
 	created, err := i.repos.Groups.Save(i.ctx, groups.Definition{
 		Name: "Coding", Slug: "Coding", Enabled: true,

@@ -9,7 +9,6 @@ import (
 
 func TestModelRoutesRepositoryIntegration(t *testing.T) {
 	i := newIntegrationDB(t)
-	i.reset(t)
 	if err := i.repos.Models.Upsert(i.ctx, models.ModelRecord{ID: "model-1", DisplayName: "Model", ObservedAt: time.Now().UTC().Format(time.RFC3339Nano)}); err != nil {
 		t.Fatal(err)
 	}

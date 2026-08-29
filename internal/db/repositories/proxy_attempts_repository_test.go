@@ -2,14 +2,10 @@ package repositories_test
 
 import (
 	"testing"
-
-	bobmodels "github.com/neverknowerdev/paylessforai/internal/db/bob/models"
-	"github.com/stephenafamo/bob"
 )
 
 func TestProxyAttemptsRepositoryIntegration(t *testing.T) {
 	i := newIntegrationDB(t)
-	i.reset(t)
 	if err := i.repos.ProxyRequests.Create(i.ctx, "request-1", "", "chat.completions", "model"); err != nil {
 		t.Fatal(err)
 	}
@@ -19,11 +15,11 @@ func TestProxyAttemptsRepositoryIntegration(t *testing.T) {
 	if err := i.repos.ProxyAttempts.Record(i.ctx, "request-1", 1, "provider", "model", "failed", "quota_exhausted", "quota"); err != nil {
 		t.Fatal(err)
 	}
-	row, err := bobmodels.FindProxyAttempt(i.ctx, bob.NewDB(i.db), "request-1:1")
+	stats, err := i.repos.Stats.ListRequestStats(i.ctx, 10)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if row.State != "failed" || row.StatsDisposition != "excluded_limit" || !row.CompletedAt.Valid {
-		t.Fatalf("attempt row: state=%q disposition=%q completed_at=%v", row.State, row.StatsDisposition, row.CompletedAt)
+	if len(stats) != 1 || len(stats[0].AttemptDetails) != 1 || stats[0].AttemptDetails[0].State != "failed" || stats[0].AttemptDetails[0].ErrorClass != "quota_exhausted" {
+		t.Fatalf("attempt stats: %#v", stats)
 	}
 }

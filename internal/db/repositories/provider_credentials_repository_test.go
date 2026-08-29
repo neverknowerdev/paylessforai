@@ -9,7 +9,6 @@ import (
 
 func TestProviderCredentialsRepositoryIntegration(t *testing.T) {
 	i := newIntegrationDB(t)
-	i.reset(t)
 	fee := int64(20_000_000_000_000)
 	credential := models.ProviderCredential{ID: "credential-1", Provider: "provider", Label: "Subscription", Ciphertext: []byte("cipher"), Nonce: []byte("nonce"), Enabled: true, AccessMode: "subscription", SubscriptionFeePicoUSD: &fee}
 	if err := i.repos.ProviderCredentials.Upsert(i.ctx, credential); err != nil {

@@ -8,7 +8,6 @@ import (
 
 func TestStatsRepositoryIntegrationAggregatesBobRows(t *testing.T) {
 	i := newIntegrationDB(t)
-	i.reset(t)
 	if err := i.repos.ProxyRequests.Create(i.ctx, "stats-request", "", "chat.completions", "model"); err != nil {
 		t.Fatal(err)
 	}

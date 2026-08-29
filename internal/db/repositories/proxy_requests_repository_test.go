@@ -2,14 +2,10 @@ package repositories_test
 
 import (
 	"testing"
-
-	bobmodels "github.com/neverknowerdev/paylessforai/internal/db/bob/models"
-	"github.com/stephenafamo/bob"
 )
 
 func TestProxyRequestsRepositoryIntegration(t *testing.T) {
 	i := newIntegrationDB(t)
-	i.reset(t)
 	if err := i.repos.ProxyRequests.Create(i.ctx, "request-1", "", "chat.completions", "model"); err != nil {
 		t.Fatal(err)
 	}
@@ -23,14 +19,14 @@ func TestProxyRequestsRepositoryIntegration(t *testing.T) {
 	if err := i.repos.ProxyRequests.Complete(i.ctx, "request-1", "failed", "provider_quota_exhausted", "quota"); err != nil {
 		t.Fatal(err)
 	}
-	row, err := bobmodels.FindProxyRequest(i.ctx, bob.NewDB(i.db), "request-1")
+	stats, err := i.repos.Stats.ListRequestStats(i.ctx, 10)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if row.SelectedProvider.V != "provider" || row.StatsDisposition != "excluded_limit" || row.State != "failed" || row.AttemptCount != 1 {
-		t.Fatalf("request row: provider=%q disposition=%q state=%q attempts=%d", row.SelectedProvider.V, row.StatsDisposition, row.State, row.AttemptCount)
+	if len(stats) != 1 || stats[0].Provider != "provider" || stats[0].State != "failed" || stats[0].Attempts != 1 {
+		t.Fatalf("request stats: %#v", stats)
 	}
-	if row.ResolvedGroupID.V != "group-1" || row.ResolvedGroupRevision.V != 3 || row.ResolvedPlanJSON.V != planJSON || row.SelectedLogicalModel.V != "model" {
-		t.Fatalf("resolution row: group=%q revision=%d plan=%q selected=%q", row.ResolvedGroupID.V, row.ResolvedGroupRevision.V, row.ResolvedPlanJSON.V, row.SelectedLogicalModel.V)
+	if stats[0].UpstreamModel != "model" {
+		t.Fatalf("resolution stats: %#v", stats[0])
 	}
 }

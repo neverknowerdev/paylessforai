@@ -8,7 +8,6 @@ import (
 
 func TestSubscriptionRepositoryIntegrationUsesUsageAndCredentialModels(t *testing.T) {
 	i := newIntegrationDB(t)
-	i.reset(t)
 	fee := int64(20_000_000_000_000)
 	if err := i.repos.ProviderCredentials.Upsert(i.ctx, models.ProviderCredential{
 		ID: "subscription-credential", Provider: "subscription-provider", Label: "Pro plan",

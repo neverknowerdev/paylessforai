@@ -9,7 +9,6 @@ import (
 
 func TestProviderHealthRepositoryIntegration(t *testing.T) {
 	i := newIntegrationDB(t)
-	i.reset(t)
 	health := models.ProviderHealthRecord{RouteID: "route-1", FailureCount: 2, State: "healthy", UpdatedAt: time.Now().UTC().Format(time.RFC3339Nano)}
 	if err := i.repos.ProviderHealth.Upsert(i.ctx, health); err != nil {
 		t.Fatal(err)

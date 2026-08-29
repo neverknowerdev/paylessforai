@@ -21,12 +21,17 @@ import (
 
 // RoutingGroupSource is an object representing the database table.
 type RoutingGroupSource struct {
-	ID            string           `db:"id,pk" `
-	StageID       string           `db:"stage_id" `
-	Position      int64            `db:"position" `
-	SourceKind    string           `db:"source_kind" `
-	ModelID       sql.Null[string] `db:"model_id" `
-	NestedGroupID sql.Null[string] `db:"nested_group_id" `
+	ID                          string           `db:"id,pk" `
+	StageID                     string           `db:"stage_id" `
+	Position                    int64            `db:"position" `
+	SourceKind                  string           `db:"source_kind" `
+	ModelID                     sql.Null[string] `db:"model_id" `
+	NestedGroupID               sql.Null[string] `db:"nested_group_id" `
+	ProviderName                sql.Null[string] `db:"provider_name" `
+	Retries                     sql.Null[int64]  `db:"retries" `
+	MaximumOfficialPricePercent sql.Null[int64]  `db:"maximum_official_price_percent" `
+	ProviderNames               string           `db:"provider_names" `
+	IncludeNewProviders         int64            `db:"include_new_providers" `
 
 	R routingGroupSourceR `db:"-" `
 }
@@ -59,7 +64,7 @@ type routingGroupSourceRLoaded struct {
 
 func buildRoutingGroupSourceColumns(tableName string) routingGroupSourceColumns {
 	columnsExpr := expr.NewColumnsExpr(
-		"id", "stage_id", "position", "source_kind", "model_id", "nested_group_id",
+		"id", "stage_id", "position", "source_kind", "model_id", "nested_group_id", "provider_name", "retries", "maximum_official_price_percent", "provider_names", "include_new_providers",
 	)
 
 	if tableName != "" {
@@ -67,26 +72,36 @@ func buildRoutingGroupSourceColumns(tableName string) routingGroupSourceColumns 
 	}
 
 	return routingGroupSourceColumns{
-		ColumnsExpr:   columnsExpr,
-		tableAlias:    tableName,
-		ID:            buildRoutingGroupSourceColumn(tableName, "id"),
-		StageID:       buildRoutingGroupSourceColumn(tableName, "stage_id"),
-		Position:      buildRoutingGroupSourceColumn(tableName, "position"),
-		SourceKind:    buildRoutingGroupSourceColumn(tableName, "source_kind"),
-		ModelID:       buildRoutingGroupSourceColumn(tableName, "model_id"),
-		NestedGroupID: buildRoutingGroupSourceColumn(tableName, "nested_group_id"),
+		ColumnsExpr:                 columnsExpr,
+		tableAlias:                  tableName,
+		ID:                          buildRoutingGroupSourceColumn(tableName, "id"),
+		StageID:                     buildRoutingGroupSourceColumn(tableName, "stage_id"),
+		Position:                    buildRoutingGroupSourceColumn(tableName, "position"),
+		SourceKind:                  buildRoutingGroupSourceColumn(tableName, "source_kind"),
+		ModelID:                     buildRoutingGroupSourceColumn(tableName, "model_id"),
+		NestedGroupID:               buildRoutingGroupSourceColumn(tableName, "nested_group_id"),
+		ProviderName:                buildRoutingGroupSourceColumn(tableName, "provider_name"),
+		Retries:                     buildRoutingGroupSourceColumn(tableName, "retries"),
+		MaximumOfficialPricePercent: buildRoutingGroupSourceColumn(tableName, "maximum_official_price_percent"),
+		ProviderNames:               buildRoutingGroupSourceColumn(tableName, "provider_names"),
+		IncludeNewProviders:         buildRoutingGroupSourceColumn(tableName, "include_new_providers"),
 	}
 }
 
 type routingGroupSourceColumns struct {
 	expr.ColumnsExpr
-	tableAlias    string
-	ID            routingGroupSourceColumn
-	StageID       routingGroupSourceColumn
-	Position      routingGroupSourceColumn
-	SourceKind    routingGroupSourceColumn
-	ModelID       routingGroupSourceColumn
-	NestedGroupID routingGroupSourceColumn
+	tableAlias                  string
+	ID                          routingGroupSourceColumn
+	StageID                     routingGroupSourceColumn
+	Position                    routingGroupSourceColumn
+	SourceKind                  routingGroupSourceColumn
+	ModelID                     routingGroupSourceColumn
+	NestedGroupID               routingGroupSourceColumn
+	ProviderName                routingGroupSourceColumn
+	Retries                     routingGroupSourceColumn
+	MaximumOfficialPricePercent routingGroupSourceColumn
+	ProviderNames               routingGroupSourceColumn
+	IncludeNewProviders         routingGroupSourceColumn
 }
 
 // Alias returns the current table alias for the columns set.
@@ -132,16 +147,21 @@ func (c routingGroupSourceColumn) ShouldOmitParens() bool {
 // All values are optional, and do not have to be set
 // Generated columns are not included
 type RoutingGroupSourceSetter struct {
-	ID            *string           `db:"id,pk" `
-	StageID       *string           `db:"stage_id" `
-	Position      *int64            `db:"position" `
-	SourceKind    *string           `db:"source_kind" `
-	ModelID       *sql.Null[string] `db:"model_id" `
-	NestedGroupID *sql.Null[string] `db:"nested_group_id" `
+	ID                          *string           `db:"id,pk" `
+	StageID                     *string           `db:"stage_id" `
+	Position                    *int64            `db:"position" `
+	SourceKind                  *string           `db:"source_kind" `
+	ModelID                     *sql.Null[string] `db:"model_id" `
+	NestedGroupID               *sql.Null[string] `db:"nested_group_id" `
+	ProviderName                *sql.Null[string] `db:"provider_name" `
+	Retries                     *sql.Null[int64]  `db:"retries" `
+	MaximumOfficialPricePercent *sql.Null[int64]  `db:"maximum_official_price_percent" `
+	ProviderNames               *string           `db:"provider_names" `
+	IncludeNewProviders         *int64            `db:"include_new_providers" `
 }
 
 func (s RoutingGroupSourceSetter) SetColumns() []string {
-	vals := make([]string, 0, 6)
+	vals := make([]string, 0, 11)
 	if s.ID != nil {
 		vals = append(vals, "id")
 	}
@@ -159,6 +179,21 @@ func (s RoutingGroupSourceSetter) SetColumns() []string {
 	}
 	if s.NestedGroupID != nil {
 		vals = append(vals, "nested_group_id")
+	}
+	if s.ProviderName != nil {
+		vals = append(vals, "provider_name")
+	}
+	if s.Retries != nil {
+		vals = append(vals, "retries")
+	}
+	if s.MaximumOfficialPricePercent != nil {
+		vals = append(vals, "maximum_official_price_percent")
+	}
+	if s.ProviderNames != nil {
+		vals = append(vals, "provider_names")
+	}
+	if s.IncludeNewProviders != nil {
+		vals = append(vals, "include_new_providers")
 	}
 	return vals
 }
@@ -212,6 +247,49 @@ func (s RoutingGroupSourceSetter) Overwrite(t *RoutingGroupSource) {
 			}
 			v := s.NestedGroupID
 			return *v
+		}()
+	}
+	if s.ProviderName != nil {
+		t.ProviderName = func() sql.Null[string] {
+			if s.ProviderName == nil {
+				return *new(sql.Null[string])
+			}
+			v := s.ProviderName
+			return *v
+		}()
+	}
+	if s.Retries != nil {
+		t.Retries = func() sql.Null[int64] {
+			if s.Retries == nil {
+				return *new(sql.Null[int64])
+			}
+			v := s.Retries
+			return *v
+		}()
+	}
+	if s.MaximumOfficialPricePercent != nil {
+		t.MaximumOfficialPricePercent = func() sql.Null[int64] {
+			if s.MaximumOfficialPricePercent == nil {
+				return *new(sql.Null[int64])
+			}
+			v := s.MaximumOfficialPricePercent
+			return *v
+		}()
+	}
+	if s.ProviderNames != nil {
+		t.ProviderNames = func() string {
+			if s.ProviderNames == nil {
+				return *new(string)
+			}
+			return *s.ProviderNames
+		}()
+	}
+	if s.IncludeNewProviders != nil {
+		t.IncludeNewProviders = func() int64 {
+			if s.IncludeNewProviders == nil {
+				return *new(int64)
+			}
+			return *s.IncludeNewProviders
 		}()
 	}
 }
@@ -306,6 +384,69 @@ func (s *RoutingGroupSourceSetter) Apply(q *dialect.InsertQuery) {
 					return *v
 				}()).WriteSQL(ctx, w, d, start)
 			}))
+		case "provider_name":
+			vals = append(vals, bob.ExpressionFunc(func(ctx context.Context, w io.StringWriter, d bob.Dialect, start int) ([]any, error) {
+				if s.ProviderName == nil {
+					return sqlite.Arg(nil).WriteSQL(ctx, w, d, start)
+				}
+				return sqlite.Arg(func() sql.Null[string] {
+					if s.ProviderName == nil {
+						return *new(sql.Null[string])
+					}
+					v := s.ProviderName
+					return *v
+				}()).WriteSQL(ctx, w, d, start)
+			}))
+		case "retries":
+			vals = append(vals, bob.ExpressionFunc(func(ctx context.Context, w io.StringWriter, d bob.Dialect, start int) ([]any, error) {
+				if s.Retries == nil {
+					return sqlite.Arg(nil).WriteSQL(ctx, w, d, start)
+				}
+				return sqlite.Arg(func() sql.Null[int64] {
+					if s.Retries == nil {
+						return *new(sql.Null[int64])
+					}
+					v := s.Retries
+					return *v
+				}()).WriteSQL(ctx, w, d, start)
+			}))
+		case "maximum_official_price_percent":
+			vals = append(vals, bob.ExpressionFunc(func(ctx context.Context, w io.StringWriter, d bob.Dialect, start int) ([]any, error) {
+				if s.MaximumOfficialPricePercent == nil {
+					return sqlite.Arg(nil).WriteSQL(ctx, w, d, start)
+				}
+				return sqlite.Arg(func() sql.Null[int64] {
+					if s.MaximumOfficialPricePercent == nil {
+						return *new(sql.Null[int64])
+					}
+					v := s.MaximumOfficialPricePercent
+					return *v
+				}()).WriteSQL(ctx, w, d, start)
+			}))
+		case "provider_names":
+			vals = append(vals, bob.ExpressionFunc(func(ctx context.Context, w io.StringWriter, d bob.Dialect, start int) ([]any, error) {
+				if s.ProviderNames == nil {
+					return sqlite.Arg(nil).WriteSQL(ctx, w, d, start)
+				}
+				return sqlite.Arg(func() string {
+					if s.ProviderNames == nil {
+						return *new(string)
+					}
+					return *s.ProviderNames
+				}()).WriteSQL(ctx, w, d, start)
+			}))
+		case "include_new_providers":
+			vals = append(vals, bob.ExpressionFunc(func(ctx context.Context, w io.StringWriter, d bob.Dialect, start int) ([]any, error) {
+				if s.IncludeNewProviders == nil {
+					return sqlite.Arg(nil).WriteSQL(ctx, w, d, start)
+				}
+				return sqlite.Arg(func() int64 {
+					if s.IncludeNewProviders == nil {
+						return *new(int64)
+					}
+					return *s.IncludeNewProviders
+				}()).WriteSQL(ctx, w, d, start)
+			}))
 		}
 	}
 
@@ -317,7 +458,7 @@ func (s RoutingGroupSourceSetter) UpdateMod() bob.Mod[*dialect.UpdateQuery] {
 }
 
 func (s RoutingGroupSourceSetter) Expressions(prefix ...string) []bob.Expression {
-	exprs := make([]bob.Expression, 0, 6)
+	exprs := make([]bob.Expression, 0, 11)
 
 	if s.ID != nil {
 		exprs = append(exprs, expr.Join{Sep: " = ", Exprs: []bob.Expression{
@@ -361,6 +502,41 @@ func (s RoutingGroupSourceSetter) Expressions(prefix ...string) []bob.Expression
 		}})
 	}
 
+	if s.ProviderName != nil {
+		exprs = append(exprs, expr.Join{Sep: " = ", Exprs: []bob.Expression{
+			sqlite.Quote(append(prefix, "provider_name")...),
+			sqlite.Arg(s.ProviderName),
+		}})
+	}
+
+	if s.Retries != nil {
+		exprs = append(exprs, expr.Join{Sep: " = ", Exprs: []bob.Expression{
+			sqlite.Quote(append(prefix, "retries")...),
+			sqlite.Arg(s.Retries),
+		}})
+	}
+
+	if s.MaximumOfficialPricePercent != nil {
+		exprs = append(exprs, expr.Join{Sep: " = ", Exprs: []bob.Expression{
+			sqlite.Quote(append(prefix, "maximum_official_price_percent")...),
+			sqlite.Arg(s.MaximumOfficialPricePercent),
+		}})
+	}
+
+	if s.ProviderNames != nil {
+		exprs = append(exprs, expr.Join{Sep: " = ", Exprs: []bob.Expression{
+			sqlite.Quote(append(prefix, "provider_names")...),
+			sqlite.Arg(s.ProviderNames),
+		}})
+	}
+
+	if s.IncludeNewProviders != nil {
+		exprs = append(exprs, expr.Join{Sep: " = ", Exprs: []bob.Expression{
+			sqlite.Quote(append(prefix, "include_new_providers")...),
+			sqlite.Arg(s.IncludeNewProviders),
+		}})
+	}
+
 	return exprs
 }
 
@@ -371,7 +547,7 @@ func routingGroupSourceScanMapper(ctx context.Context, cols []string) (scan.Befo
 		idx int
 		dst func(o *RoutingGroupSource) any
 	}
-	targets := make([]target, 0, 6)
+	targets := make([]target, 0, 11)
 	for i, col := range cols {
 		switch col {
 		case "id":
@@ -386,6 +562,16 @@ func routingGroupSourceScanMapper(ctx context.Context, cols []string) (scan.Befo
 			targets = append(targets, target{i, func(o *RoutingGroupSource) any { return &o.ModelID }})
 		case "nested_group_id":
 			targets = append(targets, target{i, func(o *RoutingGroupSource) any { return &o.NestedGroupID }})
+		case "provider_name":
+			targets = append(targets, target{i, func(o *RoutingGroupSource) any { return &o.ProviderName }})
+		case "retries":
+			targets = append(targets, target{i, func(o *RoutingGroupSource) any { return &o.Retries }})
+		case "maximum_official_price_percent":
+			targets = append(targets, target{i, func(o *RoutingGroupSource) any { return &o.MaximumOfficialPricePercent }})
+		case "provider_names":
+			targets = append(targets, target{i, func(o *RoutingGroupSource) any { return &o.ProviderNames }})
+		case "include_new_providers":
+			targets = append(targets, target{i, func(o *RoutingGroupSource) any { return &o.IncludeNewProviders }})
 		}
 	}
 

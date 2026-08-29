@@ -69,6 +69,51 @@ var RoutingGroupSources = Table[
 			Generated: false,
 			AutoIncr:  false,
 		},
+		ProviderName: column{
+			Name:      "provider_name",
+			DBType:    "TEXT",
+			Default:   "NULL",
+			Comment:   "",
+			Nullable:  true,
+			Generated: false,
+			AutoIncr:  false,
+		},
+		Retries: column{
+			Name:      "retries",
+			DBType:    "INTEGER",
+			Default:   "NULL",
+			Comment:   "",
+			Nullable:  true,
+			Generated: false,
+			AutoIncr:  false,
+		},
+		MaximumOfficialPricePercent: column{
+			Name:      "maximum_official_price_percent",
+			DBType:    "INTEGER",
+			Default:   "NULL",
+			Comment:   "",
+			Nullable:  true,
+			Generated: false,
+			AutoIncr:  false,
+		},
+		ProviderNames: column{
+			Name:      "provider_names",
+			DBType:    "TEXT",
+			Default:   "'[]'",
+			Comment:   "",
+			Nullable:  false,
+			Generated: false,
+			AutoIncr:  false,
+		},
+		IncludeNewProviders: column{
+			Name:      "include_new_providers",
+			DBType:    "INTEGER",
+			Default:   "1",
+			Comment:   "",
+			Nullable:  false,
+			Generated: false,
+			AutoIncr:  false,
+		},
 	},
 	Indexes: routingGroupSourceIndexes{
 		SqliteAutoindexRoutingGroupSources2: index{
@@ -142,17 +187,22 @@ var RoutingGroupSources = Table[
 }
 
 type routingGroupSourceColumns struct {
-	ID            column
-	StageID       column
-	Position      column
-	SourceKind    column
-	ModelID       column
-	NestedGroupID column
+	ID                          column
+	StageID                     column
+	Position                    column
+	SourceKind                  column
+	ModelID                     column
+	NestedGroupID               column
+	ProviderName                column
+	Retries                     column
+	MaximumOfficialPricePercent column
+	ProviderNames               column
+	IncludeNewProviders         column
 }
 
 func (c routingGroupSourceColumns) AsSlice() []column {
 	return []column{
-		c.ID, c.StageID, c.Position, c.SourceKind, c.ModelID, c.NestedGroupID,
+		c.ID, c.StageID, c.Position, c.SourceKind, c.ModelID, c.NestedGroupID, c.ProviderName, c.Retries, c.MaximumOfficialPricePercent, c.ProviderNames, c.IncludeNewProviders,
 	}
 }
 

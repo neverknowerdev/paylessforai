@@ -30,6 +30,7 @@ type RoutingGroupStage struct {
 	MaximumOutputPicoUsdPerToken sql.Null[int64] `db:"maximum_output_pico_usd_per_token" `
 	MaximumExpectedCostPicoUsd   sql.Null[int64] `db:"maximum_expected_cost_pico_usd" `
 	SameRouteRetries             sql.Null[int64] `db:"same_route_retries" `
+	TryRetries                   sql.Null[int64] `db:"try_retries" `
 
 	R routingGroupStageR `db:"-" `
 }
@@ -66,7 +67,7 @@ type routingGroupStageRLoaded struct {
 
 func buildRoutingGroupStageColumns(tableName string) routingGroupStageColumns {
 	columnsExpr := expr.NewColumnsExpr(
-		"id", "group_id", "position", "name", "selection_strategy", "maximum_input_pico_usd_per_token", "maximum_output_pico_usd_per_token", "maximum_expected_cost_pico_usd", "same_route_retries",
+		"id", "group_id", "position", "name", "selection_strategy", "maximum_input_pico_usd_per_token", "maximum_output_pico_usd_per_token", "maximum_expected_cost_pico_usd", "same_route_retries", "try_retries",
 	)
 
 	if tableName != "" {
@@ -85,6 +86,7 @@ func buildRoutingGroupStageColumns(tableName string) routingGroupStageColumns {
 		MaximumOutputPicoUsdPerToken: buildRoutingGroupStageColumn(tableName, "maximum_output_pico_usd_per_token"),
 		MaximumExpectedCostPicoUsd:   buildRoutingGroupStageColumn(tableName, "maximum_expected_cost_pico_usd"),
 		SameRouteRetries:             buildRoutingGroupStageColumn(tableName, "same_route_retries"),
+		TryRetries:                   buildRoutingGroupStageColumn(tableName, "try_retries"),
 	}
 }
 
@@ -100,6 +102,7 @@ type routingGroupStageColumns struct {
 	MaximumOutputPicoUsdPerToken routingGroupStageColumn
 	MaximumExpectedCostPicoUsd   routingGroupStageColumn
 	SameRouteRetries             routingGroupStageColumn
+	TryRetries                   routingGroupStageColumn
 }
 
 // Alias returns the current table alias for the columns set.
@@ -154,10 +157,11 @@ type RoutingGroupStageSetter struct {
 	MaximumOutputPicoUsdPerToken *sql.Null[int64] `db:"maximum_output_pico_usd_per_token" `
 	MaximumExpectedCostPicoUsd   *sql.Null[int64] `db:"maximum_expected_cost_pico_usd" `
 	SameRouteRetries             *sql.Null[int64] `db:"same_route_retries" `
+	TryRetries                   *sql.Null[int64] `db:"try_retries" `
 }
 
 func (s RoutingGroupStageSetter) SetColumns() []string {
-	vals := make([]string, 0, 9)
+	vals := make([]string, 0, 10)
 	if s.ID != nil {
 		vals = append(vals, "id")
 	}
@@ -184,6 +188,9 @@ func (s RoutingGroupStageSetter) SetColumns() []string {
 	}
 	if s.SameRouteRetries != nil {
 		vals = append(vals, "same_route_retries")
+	}
+	if s.TryRetries != nil {
+		vals = append(vals, "try_retries")
 	}
 	return vals
 }
@@ -262,6 +269,15 @@ func (s RoutingGroupStageSetter) Overwrite(t *RoutingGroupStage) {
 				return *new(sql.Null[int64])
 			}
 			v := s.SameRouteRetries
+			return *v
+		}()
+	}
+	if s.TryRetries != nil {
+		t.TryRetries = func() sql.Null[int64] {
+			if s.TryRetries == nil {
+				return *new(sql.Null[int64])
+			}
+			v := s.TryRetries
 			return *v
 		}()
 	}
@@ -395,6 +411,19 @@ func (s *RoutingGroupStageSetter) Apply(q *dialect.InsertQuery) {
 					return *v
 				}()).WriteSQL(ctx, w, d, start)
 			}))
+		case "try_retries":
+			vals = append(vals, bob.ExpressionFunc(func(ctx context.Context, w io.StringWriter, d bob.Dialect, start int) ([]any, error) {
+				if s.TryRetries == nil {
+					return sqlite.Arg(nil).WriteSQL(ctx, w, d, start)
+				}
+				return sqlite.Arg(func() sql.Null[int64] {
+					if s.TryRetries == nil {
+						return *new(sql.Null[int64])
+					}
+					v := s.TryRetries
+					return *v
+				}()).WriteSQL(ctx, w, d, start)
+			}))
 		}
 	}
 
@@ -406,7 +435,7 @@ func (s RoutingGroupStageSetter) UpdateMod() bob.Mod[*dialect.UpdateQuery] {
 }
 
 func (s RoutingGroupStageSetter) Expressions(prefix ...string) []bob.Expression {
-	exprs := make([]bob.Expression, 0, 9)
+	exprs := make([]bob.Expression, 0, 10)
 
 	if s.ID != nil {
 		exprs = append(exprs, expr.Join{Sep: " = ", Exprs: []bob.Expression{
@@ -471,6 +500,13 @@ func (s RoutingGroupStageSetter) Expressions(prefix ...string) []bob.Expression 
 		}})
 	}
 
+	if s.TryRetries != nil {
+		exprs = append(exprs, expr.Join{Sep: " = ", Exprs: []bob.Expression{
+			sqlite.Quote(append(prefix, "try_retries")...),
+			sqlite.Arg(s.TryRetries),
+		}})
+	}
+
 	return exprs
 }
 
@@ -481,7 +517,7 @@ func routingGroupStageScanMapper(ctx context.Context, cols []string) (scan.Befor
 		idx int
 		dst func(o *RoutingGroupStage) any
 	}
-	targets := make([]target, 0, 9)
+	targets := make([]target, 0, 10)
 	for i, col := range cols {
 		switch col {
 		case "id":
@@ -502,6 +538,8 @@ func routingGroupStageScanMapper(ctx context.Context, cols []string) (scan.Befor
 			targets = append(targets, target{i, func(o *RoutingGroupStage) any { return &o.MaximumExpectedCostPicoUsd }})
 		case "same_route_retries":
 			targets = append(targets, target{i, func(o *RoutingGroupStage) any { return &o.SameRouteRetries }})
+		case "try_retries":
+			targets = append(targets, target{i, func(o *RoutingGroupStage) any { return &o.TryRetries }})
 		}
 	}
 

@@ -96,6 +96,15 @@ var RoutingGroupStages = Table[
 			Generated: false,
 			AutoIncr:  false,
 		},
+		TryRetries: column{
+			Name:      "try_retries",
+			DBType:    "INTEGER",
+			Default:   "NULL",
+			Comment:   "",
+			Nullable:  true,
+			Generated: false,
+			AutoIncr:  false,
+		},
 	},
 	Indexes: routingGroupStageIndexes{
 		SqliteAutoindexRoutingGroupStages2: index{
@@ -169,11 +178,12 @@ type routingGroupStageColumns struct {
 	MaximumOutputPicoUsdPerToken column
 	MaximumExpectedCostPicoUsd   column
 	SameRouteRetries             column
+	TryRetries                   column
 }
 
 func (c routingGroupStageColumns) AsSlice() []column {
 	return []column{
-		c.ID, c.GroupID, c.Position, c.Name, c.SelectionStrategy, c.MaximumInputPicoUsdPerToken, c.MaximumOutputPicoUsdPerToken, c.MaximumExpectedCostPicoUsd, c.SameRouteRetries,
+		c.ID, c.GroupID, c.Position, c.Name, c.SelectionStrategy, c.MaximumInputPicoUsdPerToken, c.MaximumOutputPicoUsdPerToken, c.MaximumExpectedCostPicoUsd, c.SameRouteRetries, c.TryRetries,
 	}
 }
 

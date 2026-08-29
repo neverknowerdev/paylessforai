@@ -23,11 +23,15 @@ func TestProviderCredentialsRepositoryIntegration(t *testing.T) {
 	if err := i.repos.ProviderCredentials.MarkLimited(i.ctx, "provider", &next, "quota"); err != nil {
 		t.Fatal(err)
 	}
+	credentialNext := time.Now().UTC().Add(2 * time.Hour)
+	if err := i.repos.ProviderCredentials.MarkLimitedByID(i.ctx, credential.ID, &credentialNext, "credential quota"); err != nil {
+		t.Fatal(err)
+	}
 	limited, err := i.repos.ProviderCredentials.List(i.ctx)
-	if err != nil || len(limited) != 1 || limited[0].SubscriptionStatus != "limited" || limited[0].NextAvailableAt == nil {
+	if err != nil || len(limited) != 1 || limited[0].SubscriptionStatus != "limited" || limited[0].NextAvailableAt == nil || limited[0].StatusReason == nil || *limited[0].StatusReason != "credential quota" || limited[0].LastError == nil || *limited[0].LastError != "credential quota" {
 		t.Fatalf("limited: %+v, %v", limited, err)
 	}
-	if err := i.repos.ProviderCredentials.ClearExpired(i.ctx, next.Add(time.Minute)); err != nil {
+	if err := i.repos.ProviderCredentials.ClearExpired(i.ctx, credentialNext.Add(time.Minute)); err != nil {
 		t.Fatal(err)
 	}
 	available, err := i.repos.ProviderCredentials.List(i.ctx)

@@ -32,6 +32,24 @@ func (r *ProxyRequestsRepository) RecordAttemptRoute(ctx context.Context, reques
 	return row.Update(ctx, r.exec, &bobmodels.ProxyRequestSetter{SelectedProvider: &providerValue, SelectedUpstreamModel: &upstreamValue, AttemptCount: &attemptCount})
 }
 
+func (r *ProxyRequestsRepository) RecordResolution(ctx context.Context, requestID, groupID string, groupRevision int64, planJSON, selectedModel string) error {
+	row, err := bobmodels.FindProxyRequest(ctx, r.exec, requestID)
+	if err != nil {
+		return err
+	}
+	var revision *int64
+	if groupRevision != 0 {
+		revision = &groupRevision
+	}
+	revisionValue := nullableInt64(revision)
+	return row.Update(ctx, r.exec, &bobmodels.ProxyRequestSetter{
+		ResolvedGroupID:       nullableStringPointer(pointerIfNonEmpty(groupID)),
+		ResolvedGroupRevision: &revisionValue,
+		ResolvedPlanJSON:      nullableStringPointer(pointerIfNonEmpty(planJSON)),
+		SelectedLogicalModel:  nullableStringPointer(pointerIfNonEmpty(selectedModel)),
+	})
+}
+
 func (r *ProxyRequestsRepository) Complete(ctx context.Context, id, state, code, message string) error {
 	row, err := bobmodels.FindProxyRequest(ctx, r.exec, id)
 	if err != nil {

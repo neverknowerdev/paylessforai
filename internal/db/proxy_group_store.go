@@ -17,8 +17,7 @@ func (s *Store) RecordResolution(ctx context.Context, requestID string, plan rou
 	if entry := plan.Selected(); entry != nil {
 		selected = entry.Route.LogicalModel
 	}
-	_, err = s.db.ExecContext(ctx, `UPDATE proxy_requests SET resolved_group_id=?,resolved_group_revision=?,resolved_plan_json=?,selected_logical_model=? WHERE id=?`, nullableStringReason(plan.GroupID), nullableInt64Reason(plan.GroupRevision), string(data), nullableStringReason(selected), requestID)
-	return err
+	return s.Repositories.ProxyRequests.RecordResolution(ctx, requestID, plan.GroupID, plan.GroupRevision, string(data), selected)
 }
 
 func (s *Store) RecordProxyAttemptRoute(ctx context.Context, requestID string, attempt int, routeID, credentialID, stageID, stagePath, provider, upstream, state, errorClass, errorMessage string, rawError ...string) error {
@@ -44,12 +43,6 @@ func (s *Store) RecordProxyAttemptRoute(ctx context.Context, requestID string, a
 
 func nullableStringReason(value string) any {
 	if strings.TrimSpace(value) == "" {
-		return nil
-	}
-	return value
-}
-func nullableInt64Reason(value int64) any {
-	if value == 0 {
 		return nil
 	}
 	return value

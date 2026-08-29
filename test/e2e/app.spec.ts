@@ -258,6 +258,8 @@ test('creates and exposes a callable group alias', async ({ page, request }) => 
   await expect(connectGroup).toContainText('Connection instructions');
   await expect(connectGroup).toHaveClass(/group-connect-link/);
   await expect(connectGroup).toHaveAttribute('title', 'Connection instructions');
+  await expect(connectGroup.locator('.group-connect-help')).toBeVisible();
+  await expect(connectGroup.locator('.group-connect-arrow')).toHaveText('→');
   await expect(page.locator('#groups-list .group-actions [data-connect-group]')).toHaveCount(0);
   await expect(page.locator('#groups-list .group-title-row .group-toggle')).toHaveCount(1);
   await connectGroup.click();

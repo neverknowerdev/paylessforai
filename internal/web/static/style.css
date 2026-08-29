@@ -152,10 +152,14 @@ code { display: inline-block; max-width: 100%; overflow: hidden; padding: 10px 1
 .group-copy { position:absolute; top:50%; right:7px; display:grid; place-items:center; width:25px; height:25px; padding:0; border:0; border-radius:5px; color:var(--blue-bright); background:transparent; cursor:pointer; font-size:16px; font-weight:800; line-height:1; transform:translateY(-50%); }
 .group-copy:hover,.group-copy:focus-visible { border-color:#9ebaff; color:#fff; outline:0; }
 .group-copy:hover,.group-copy:focus-visible { background:#29436f; }
-.group-connect-link { display:inline-flex; align-items:center; gap:7px; width:max-content; max-width:100%; padding:0; border:0; color:var(--blue-bright); background:transparent; cursor:pointer; font:inherit; font-size:11px; font-weight:750; text-align:left; }
-.group-connect-link:hover,.group-connect-link:focus-visible { color:#fff; outline:0; text-decoration:underline; }
-.group-connect-help { display:inline-grid; place-items:center; width:18px; height:18px; border:1px solid #6f8fd1; border-radius:50%; color:#c7d7ff; background:#132342; font-size:11px; font-weight:850; line-height:1; }
-.group-connect-link:hover .group-connect-help,.group-connect-link:focus-visible .group-connect-help { border-color:#b8c9ff; color:#fff; background:#1d3560; }
+.group-connect-link { display:flex; align-items:center; gap:8px; width:100%; box-sizing:border-box; min-width:0; margin-top:1px; padding:7px 10px; border:1px solid #2f4367; border-radius:8px; color:#c1d1ff; background:#111e37; cursor:pointer; font:inherit; font-size:11px; font-weight:700; text-align:left; transition:border-color .16s ease,background .16s ease,color .16s ease,transform .16s ease; }
+.group-connect-link:hover,.group-connect-link:focus-visible { border-color:#7898db; color:#fff; background:#17294b; outline:0; }
+.group-connect-link:active { transform:translateY(1px); }
+.group-connect-help { display:inline-grid; place-items:center; width:20px; height:20px; flex:0 0 20px; box-sizing:border-box; border:1px solid #6f8fd1; border-radius:50%; color:#d3dfff; background:#162a4d; font-size:11px; font-weight:850; line-height:1; }
+.group-connect-label { min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+.group-connect-arrow { margin-left:auto; color:#91a8e6; font-size:15px; font-weight:500; line-height:1; transition:color .16s ease,transform .16s ease; }
+.group-connect-link:hover .group-connect-help,.group-connect-link:focus-visible .group-connect-help { border-color:#b8c9ff; color:#fff; background:#244274; }
+.group-connect-link:hover .group-connect-arrow,.group-connect-link:focus-visible .group-connect-arrow { color:#fff; transform:translateX(2px); }
 .group-actions { display:flex; align-items:center; justify-content:flex-end; gap:7px; flex-wrap:nowrap; }
 .group-toggle { display:inline-flex; align-items:center; justify-content:center; flex:0 0 38px; width:38px; height:24px; min-width:38px; padding:2px; border:1px solid #526b9d; border-radius:999px; color:#dce7ff; background:#162443; cursor:pointer; }
 .group-toggle:hover { border-color:#9ebaff; background:#1d3560; }

@@ -443,7 +443,14 @@
       connectIcon.className = 'group-connect-help';
       connectIcon.setAttribute('aria-hidden', 'true');
       connectIcon.textContent = '?';
-      connect.append(connectIcon, document.createTextNode('Connection instructions'));
+      const connectLabel = document.createElement('span');
+      connectLabel.className = 'group-connect-label';
+      connectLabel.textContent = 'Connection instructions';
+      const connectArrow = document.createElement('span');
+      connectArrow.className = 'group-connect-arrow';
+      connectArrow.setAttribute('aria-hidden', 'true');
+      connectArrow.textContent = '→';
+      connect.append(connectIcon, connectLabel, connectArrow);
       const note = document.createElement('small');
       const count = group.stages?.length || 0;
       note.textContent = `${count} route stage${count === 1 ? '' : 's'}`;

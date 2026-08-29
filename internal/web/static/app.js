@@ -627,6 +627,12 @@
       accessNode.textContent = access;
       line.append(accessNode);
     }
+    // Subscription routes expose their access class only. Their displayed
+    // prices and discounts are not meaningful for a subscription allowance.
+    if (routeBilling(route) === 'subscription') {
+      container.append(line);
+      return;
+    }
     const price = document.createElement('span');
     price.className = 'route-price-values';
     price.textContent = `${displayPrice(route.pricing?.input)} in / ${displayPrice(route.pricing?.output)} out`;
@@ -884,6 +890,14 @@
       const stageActions = document.createElement('div');
       stageActions.className = 'stage-card-actions';
       stageActions.append(summary);
+      const duplicateStage = document.createElement('button');
+      duplicateStage.type = 'button';
+      duplicateStage.className = 'source-duplicate route-icon-button';
+      duplicateStage.dataset.duplicateStage = String(index);
+      duplicateStage.setAttribute('aria-label', 'Duplicate route block');
+      duplicateStage.title = 'Duplicate route block';
+      duplicateStage.innerHTML = '<span aria-hidden="true">⧉</span>';
+      stageActions.append(duplicateStage);
       if (removeStage) stageActions.append(removeStage);
       headingRow?.append(stageActions);
     }
@@ -1188,11 +1202,26 @@
   renderSelectedSourcesV4 = renderSelectedSourcesV10;
   function compactRouteSummaryV11(container, route) {
     if (!route) return;
-    const line = document.createElement('small');
+    const line = document.createElement('div');
     line.className = 'selected-route-summary compact-route-summary';
     const access = routeAccessLabelV4(route);
+    if (access) {
+      const accessNode = document.createElement('span');
+      accessNode.className = `route-access-label ${access.toLowerCase()}`;
+      accessNode.textContent = access;
+      line.append(accessNode);
+    }
+    const prices = document.createElement('span');
+    prices.className = 'route-price-values';
+    prices.textContent = `${displayPrice(route.pricing?.input)} in / ${displayPrice(route.pricing?.output)} out`;
+    line.append(prices);
     const discount = routeDiscountInfoV7(route);
-    line.textContent = `${access ? `${access} · ` : ''}${displayPrice(route.pricing?.input)} in / ${displayPrice(route.pricing?.output)} out${discount ? ` · ${discount.label}` : ''}`;
+    if (discount) {
+      const badge = document.createElement('strong');
+      badge.className = `route-discount${discount.label === 'Official price' ? ' official' : ''}`;
+      badge.textContent = discount.label;
+      line.append(badge);
+    }
     container.append(line);
   }
   function renderStagePriceCapV11(card) {
@@ -1297,28 +1326,25 @@
       title.textContent = source.kind === 'model' ? model.name : (state.groups.find((group) => group.id === source.group_id)?.name || source.group_id || 'Choose a group');
       const actions = document.createElement('div');
       actions.className = 'selected-source-header-actions';
-      const retry = document.createElement('button');
-      retry.type = 'button';
-      retry.className = 'retry-summary';
-      retry.dataset.retrySource = sourceIndex;
-      retry.setAttribute('aria-label', `Configure retries, currently ${Math.max(1, Number(source.retries ?? 1))}`);
-      retry.title = 'Configure retries';
-      retry.innerHTML = `<span aria-hidden="true">↻</span><span>${Math.max(1, Number(source.retries ?? 1))}</span>`;
-      const duplicate = document.createElement('button');
-      duplicate.type = 'button';
-      duplicate.className = 'source-action source-duplicate route-icon-button';
-      duplicate.dataset.duplicateSource = sourceIndex;
-      duplicate.setAttribute('aria-label', 'Duplicate provider route');
-      duplicate.title = 'Duplicate provider route';
-      duplicate.innerHTML = '<span aria-hidden="true">⧉</span>';
-      const remove = document.createElement('button');
-      remove.type = 'button';
-      remove.className = 'source-remove route-icon-button';
-      remove.dataset.removeSource = sourceIndex;
-      remove.setAttribute('aria-label', 'Remove provider route');
-      remove.title = 'Remove provider route';
-      remove.innerHTML = '<span aria-hidden="true">×</span>';
-      actions.append(retry, duplicate, remove);
+      const futureProvider = source.kind === 'model' && !source.provider_name;
+      if (!futureProvider) {
+        const retry = document.createElement('button');
+        retry.type = 'button';
+        retry.className = 'retry-summary';
+        retry.dataset.retrySource = sourceIndex;
+        retry.setAttribute('aria-label', `Configure retries, currently ${Math.max(1, Number(source.retries ?? 1))}`);
+        retry.title = 'Configure retries';
+        retry.innerHTML = `<span aria-hidden="true">↻</span><span>${Math.max(1, Number(source.retries ?? 1))}</span>`;
+        actions.append(retry);
+        const remove = document.createElement('button');
+        remove.type = 'button';
+        remove.className = 'source-remove route-icon-button';
+        remove.dataset.removeSource = sourceIndex;
+        remove.setAttribute('aria-label', 'Remove provider route');
+        remove.title = 'Remove provider route';
+        remove.innerHTML = '<span aria-hidden="true">×</span>';
+        actions.append(remove);
+      }
       header.append(title, actions);
       main.append(header);
       if (source.kind === 'group') {
@@ -1350,9 +1376,9 @@
           checkbox.checked = source.include_new_providers !== false;
           const mark = document.createElement('span');
           mark.className = 'include-checkbox-mark';
-          const text = document.createElement('span');
-          text.textContent = `Include new providers for ${model.name}`;
-          label.append(checkbox, mark, text);
+          label.setAttribute('aria-label', `Include new providers for ${model.name}`);
+          label.title = `Include new providers for ${model.name}`;
+          label.append(checkbox, mark);
           const help = document.createElement('button');
           help.type = 'button';
           help.className = 'tooltip-help';
@@ -1371,8 +1397,9 @@
             help.setAttribute('aria-expanded', String(!expanded));
             helpText.hidden = expanded;
           });
+          include.classList.add('header-include-toggle');
           include.append(label, help, helpText);
-          main.append(include);
+          actions.append(include);
         }
       }
       row.append(handle, main);
@@ -1443,7 +1470,7 @@
   $('#provider-form').addEventListener('submit', async (event) => { event.preventDefault(); const custom = $('#provider-type').value === 'custom'; let manualModels = []; try { manualModels = parseManualModels(); } catch (error) { setProviderFeedback(error.message, 'error'); return; } setProviderFeedback(''); setProviderSaving(true); try { const payload = await fetchJSON('/api/providers/credentials', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ provider: custom ? $('#provider-name').value : $('#provider-type').value, base_url: custom ? $('#provider-base-url').value : '', label: $('#provider-label').value, api_key: $('#provider-key').value, manual_models: manualModels }) }); const found = Number(payload.models_found ?? Number(payload.models_discovered || 0) + Number(payload.models_verified || 0)); $('#provider-form').reset(); updateProviderFormMode(); $('#manual-model-fields').hidden = true; setProviderSaving(false); setProviderFeedback(`Found ${formatNumber(found)} model${found === 1 ? '' : 's'}. Provider verified and saved.`, 'success'); await Promise.all([loadProviders(), loadModels(), loadStatus()]); await new Promise((resolve) => setTimeout(resolve, 1200)); closeModal('provider-modal'); setProviderFeedback(''); } catch (error) { const details = error.payload?.error; if (details?.can_enter_models) { $('#manual-model-fields').hidden = false; setProviderFeedback(`${details.message} Enter model IDs and prices below; each will be verified before the credential is saved.`); } else { setProviderFeedback(error.message, 'error'); } } finally { setProviderSaving(false); } });
   $('#open-key-modal').addEventListener('click', () => openModal('key-modal')); $('#open-provider-modal').addEventListener('click', () => { $('#provider-form').reset(); updateProviderFormMode(); $('#manual-model-fields').hidden = true; setProviderFeedback(''); openModal('provider-modal'); }); $('#provider-type').addEventListener('change', updateProviderFormMode); $('#menu-toggle').addEventListener('click', () => $('#sidebar').classList.toggle('open')); $('#refresh-button').addEventListener('click', () => Promise.all([loadStatus(), loadSummary(), loadRequests(), loadModelStats(), loadProviderStats(), loadModels(), loadKeys(), loadProviders(), loadGroups()])); $('#models-refresh').addEventListener('click', loadModels);
   $('#models-search').addEventListener('input', renderModels); $('#models-clear-filters').addEventListener('click', clearModelFilters); $$('.table-sort').forEach((button) => button.addEventListener('click', () => cycleModelSort(button.dataset.sortKey))); $$('.table-filter').forEach((button) => button.addEventListener('click', (event) => { event.stopPropagation(); openModelFilter(button.dataset.filterKey, button); })); $('#requests-search').addEventListener('input', renderRequestTable); $('#requests-state').addEventListener('change', renderRequestTable); $('#groups-search').addEventListener('input', renderGroups); $('#groups-refresh').addEventListener('click', loadGroups); $('#open-group-editor').addEventListener('click', () => openGroupEditor()); $('#close-group-editor').addEventListener('click', () => { $('#group-editor').hidden = true; }); $('#cancel-group').addEventListener('click', () => { $('#group-editor').hidden = true; }); $('#add-group-stage').addEventListener('click', () => { const current = collectGroupDefinition(); current.stages.push({ position: current.stages.length, name: `Fallback ${current.stages.length + 1}`, sources: [], billing_classes: ['free', 'subscription', 'metered'], selection: 'lowest_expected_cost', try_retries: 1 }); renderGroupStages(current); previewCurrentGroup(); }); $('#group-stage-list').addEventListener('change', previewCurrentGroup); $('#group-stage-list').addEventListener('input', previewCurrentGroup); $('#group-form').addEventListener('submit', async (event) => { event.preventDefault(); setGroupFeedback(''); const definition = collectGroupDefinition(); const id = definition.id; const url = id ? `/api/groups/${encodeURIComponent(id)}?revision=${encodeURIComponent(definition.revision)}` : '/api/groups'; try { const payload = await fetchJSON(url, { method: id ? 'PUT' : 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(definition) }); openGroupEditor(payload.data); setGroupFeedback('Group saved and ready to call.', 'success'); await Promise.all([loadGroups(), loadModels()]); } catch (error) { const details = error.payload?.error; setGroupFeedback(details?.issues?.[0]?.message || error.message, 'error'); } });
-  document.addEventListener('click', (event) => { if (state.filterPopover && !event.target.closest('#models-filter-popover') && !event.target.closest('.table-filter')) closeModelFilter(); const target = event.target.closest('[data-view]'); if (target) { event.preventDefault(); navigate(target.dataset.view); } const requestTarget = event.target.closest('[data-request-id]'); if (requestTarget) showRequestDetail(requestTarget.dataset.requestId); const connectGroup = event.target.closest('[data-connect-group]'); if (connectGroup) { const group = state.groups.find((item) => item.id === connectGroup.dataset.connectGroup); if (group) showGroupInstructions(group); return; } const editGroup = event.target.closest('[data-edit-group]'); if (editGroup) { const group = state.groups.find((item) => item.id === editGroup.dataset.editGroup); if (group) openGroupEditor(group); } const copyGroup = event.target.closest('[data-copy-group-slug]'); if (copyGroup) { navigator.clipboard?.writeText(copyGroup.dataset.copyGroupSlug); copyGroup.textContent = 'Copied'; setTimeout(() => { copyGroup.textContent = 'Copy slug'; }, 1200); } const revoke = event.target.closest('[data-revoke-key]'); if (revoke && window.confirm('Revoke this client key?')) fetchJSON(`/api/client-keys/${encodeURIComponent(revoke.dataset.revokeKey)}`, { method: 'DELETE' }).then(loadKeys); const remove = event.target.closest('[data-remove-provider]'); if (remove && window.confirm('Remove this provider credential?')) fetchJSON(`/api/providers/credentials/${encodeURIComponent(remove.dataset.removeProvider)}`, { method: 'DELETE' }).then(() => Promise.all([loadProviders(), loadModels(), loadStatus()])); const copy = event.target.closest('[data-copy-target]'); if (copy) { const value = $(`#${copy.dataset.copyTarget}`)?.textContent || ''; navigator.clipboard?.writeText(value); copy.textContent = 'Copied'; setTimeout(() => { copy.textContent = 'Copy'; }, 1200); } if (event.target.classList.contains('remove-stage')) { const cards = $$('#group-stage-list .group-stage-card'); if (cards.length > 1) { const current = collectGroupDefinition(); const index = Number(event.target.closest('.group-stage-card').dataset.stageIndex); current.stages.splice(index, 1); renderGroupStages(current); previewCurrentGroup(); } } if (event.target.classList.contains('modal-backdrop')) closeModal(event.target); if (event.target.closest('.close-modal')) closeModal(event.target.closest('.modal-backdrop')); });
+  document.addEventListener('click', (event) => { if (state.filterPopover && !event.target.closest('#models-filter-popover') && !event.target.closest('.table-filter')) closeModelFilter(); const target = event.target.closest('[data-view]'); if (target) { event.preventDefault(); navigate(target.dataset.view); } const requestTarget = event.target.closest('[data-request-id]'); if (requestTarget) showRequestDetail(requestTarget.dataset.requestId); const connectGroup = event.target.closest('[data-connect-group]'); if (connectGroup) { const group = state.groups.find((item) => item.id === connectGroup.dataset.connectGroup); if (group) showGroupInstructions(group); return; } const editGroup = event.target.closest('[data-edit-group]'); if (editGroup) { const group = state.groups.find((item) => item.id === editGroup.dataset.editGroup); if (group) openGroupEditor(group); } const copyGroup = event.target.closest('[data-copy-group-slug]'); if (copyGroup) { navigator.clipboard?.writeText(copyGroup.dataset.copyGroupSlug); copyGroup.textContent = 'Copied'; setTimeout(() => { copyGroup.textContent = 'Copy slug'; }, 1200); } const revoke = event.target.closest('[data-revoke-key]'); if (revoke && window.confirm('Revoke this client key?')) fetchJSON(`/api/client-keys/${encodeURIComponent(revoke.dataset.revokeKey)}`, { method: 'DELETE' }).then(loadKeys); const remove = event.target.closest('[data-remove-provider]'); if (remove && window.confirm('Remove this provider credential?')) fetchJSON(`/api/providers/credentials/${encodeURIComponent(remove.dataset.removeProvider)}`, { method: 'DELETE' }).then(() => Promise.all([loadProviders(), loadModels(), loadStatus()])); const copy = event.target.closest('[data-copy-target]'); if (copy) { const value = $(`#${copy.dataset.copyTarget}`)?.textContent || ''; navigator.clipboard?.writeText(value); copy.textContent = 'Copied'; setTimeout(() => { copy.textContent = 'Copy'; }, 1200); } const duplicateStage = event.target.closest('[data-duplicate-stage]'); if (duplicateStage) { const current = collectGroupDefinition(); const index = Number(duplicateStage.dataset.duplicateStage); const stage = current.stages[index]; if (stage) { current.stages.splice(index + 1, 0, { ...stage, sources: stage.sources.map((source) => ({ ...source })) }); renderGroupStages(current); previewCurrentGroup(); } return; } if (event.target.closest('.remove-stage')) { const cards = $$('#group-stage-list .group-stage-card'); if (cards.length > 1) { const current = collectGroupDefinition(); const index = Number(event.target.closest('.group-stage-card').dataset.stageIndex); current.stages.splice(index, 1); renderGroupStages(current); previewCurrentGroup(); } } if (event.target.classList.contains('modal-backdrop')) closeModal(event.target); if (event.target.closest('.close-modal')) closeModal(event.target.closest('.modal-backdrop')); });
   document.addEventListener('keydown', (event) => { if (event.key === 'Escape') { closeModelFilter(); $$('.modal-backdrop:not([hidden])').forEach(closeModal); } }); window.addEventListener('hashchange', () => navigate(window.location.hash.slice(1))); navigate(window.location.hash.slice(1) || 'overview');
   updateProviderFormMode(); setText('#base-url', `${window.location.origin}/v1`); Promise.all([loadStatus(), loadSummary(), loadRequests(), loadModelStats(), loadProviderStats(), loadModels(), loadKeys(), loadProviders(), loadGroups()]);
   const statsPanel = document.querySelector('[data-view-panel="stats"]'); if (statsPanel && !$('#subscription-stats-body')) { const article = document.createElement('article'); article.className = 'panel-card table-card stats-table-card'; article.innerHTML = '<div class="panel-heading stats-heading"><h3>Subscription economics</h3><span class="card-note">Dynamic blended pricing; observed 5h min/max</span></div><div class="table-wrap"><table><thead><tr><th>Provider</th><th>Tokens</th><th>Input / output per 1M</th><th>5h min / max</th></tr></thead><tbody id="subscription-stats-body"></tbody></table></div><div class="empty-state" id="subscription-stats-empty" hidden>No subscription usage yet.</div>'; statsPanel.append(article); }

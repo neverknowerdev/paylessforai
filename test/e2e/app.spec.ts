@@ -120,6 +120,12 @@ test('creates and exposes a callable group alias', async ({ page, request }) => 
   await expect(page.locator('#group-stage-list .source-candidates')).toBeHidden();
   await expect(page.locator('#group-stage-list .selected-sources .source-empty')).toHaveCount(0);
   await expect(page.locator('#group-stage-list .try-retry-summary')).toBeVisible();
+  const blockDuplicate = page.locator('#group-stage-list .stage-card-actions .source-duplicate');
+  await expect(blockDuplicate).toHaveAttribute('aria-label', 'Duplicate route block');
+  await blockDuplicate.click();
+  await expect(page.locator('#group-stage-list .group-stage-card')).toHaveCount(2);
+  await page.locator('#group-stage-list .group-stage-card').nth(1).locator('.remove-stage').click();
+  await expect(page.locator('#group-stage-list .group-stage-card')).toHaveCount(1);
   await expect(page.getByRole('button', { name: '+ Add route block' })).toBeVisible();
   await expect(page.locator('#group-stage-list .source-kind')).toBeHidden();
   await expect(page.locator('#group-stage-list .stage-billing')).toHaveCount(0);
@@ -166,6 +172,9 @@ test('creates and exposes a callable group alias', async ({ page, request }) => 
   await expect(page.locator('#group-stage-list .selected-source .drag-handle')).toHaveCount(3);
   await expect(page.locator('#group-stage-list .selected-source .drag-handle').first()).toHaveAttribute('draggable', 'true');
   await expect(page.locator('#group-stage-list .source-include-new').first()).toBeChecked();
+  const futureProviderRow = page.locator('#group-stage-list .selected-source').filter({ hasText: 'New providers' }).first();
+  await expect(futureProviderRow.locator('.source-remove, .source-duplicate, .retry-summary')).toHaveCount(0);
+  await expect(futureProviderRow.locator('.selected-source-header-actions .source-include-new')).toHaveCount(1);
   const providerSwitch = page.locator('#group-stage-list .include-checkbox-mark').first();
   await expect(providerSwitch).toBeVisible();
   const switchMetrics = await providerSwitch.evaluate((element) => {
@@ -184,9 +193,9 @@ test('creates and exposes a callable group alias', async ({ page, request }) => 
   await expect(page.locator('#group-stage-list .tooltip-help-text').first()).toBeVisible();
   await includeHelp.click();
   await expect(page.locator('#group-stage-list .tooltip-help-text').first()).toBeHidden();
-  await expect(page.locator('#group-stage-list .source-duplicate').first()).toHaveAttribute('aria-label', 'Duplicate provider route');
-  await expect(page.locator('#group-stage-list .source-duplicate').first()).toHaveAttribute('title', 'Duplicate provider route');
-  await expect(page.locator('#group-stage-list .selected-source-header-actions .source-remove')).toHaveCount(3);
+  await expect(page.locator('#group-stage-list .selected-source .source-duplicate')).toHaveCount(0);
+  await expect(page.locator('#group-stage-list .stage-card-actions .source-duplicate')).toHaveAttribute('title', 'Duplicate route block');
+  await expect(page.locator('#group-stage-list .selected-source-header-actions .source-remove')).toHaveCount(2);
   await expect(page.locator('#group-stage-list .source-remove').first()).toHaveAttribute('aria-label', 'Remove provider route');
   await expect(page.locator('#group-stage-list .source-remove').first()).toHaveAttribute('title', 'Remove provider route');
   const selectedPrices = await page.locator('#group-stage-list .compact-route-summary').allTextContents();
@@ -400,6 +409,10 @@ test('configures a subscription, records quota blocking, and shows dynamic prici
   await page.getByRole('button', { name: 'Create group' }).click();
   await page.locator('#group-stage-list .source-search-toggle').click();
   await page.locator('#group-stage-list .source-search').fill('subscription-model');
+  const subscriptionSearchRoute = page.locator('#group-stage-list .source-candidate[data-model-id="subscription-model"] .source-route-option[data-add-provider="subscription-mock"] .route-price-line');
+  await expect(subscriptionSearchRoute).toContainText('SUBSCRIPTION');
+  await expect(subscriptionSearchRoute).not.toContainText('$');
+  await expect(subscriptionSearchRoute.locator('.route-discount')).toHaveCount(0);
   await page.locator('#group-stage-list .source-candidate[data-model-id="subscription-model"] .source-route-option[data-add-provider="subscription-mock"]').click();
   await expect(page.locator('#group-stage-list .selected-source')).toHaveCount(1);
   await expect(page.locator('#group-stage-list .selected-source .subscription-warning')).toContainText('may be rate limited');

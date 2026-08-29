@@ -319,7 +319,12 @@ code { display: inline-block; max-width: 100%; overflow: hidden; padding: 10px 1
 .remove-stage.route-icon-button:hover, .remove-stage.route-icon-button:focus-visible { border-color:#ff8ea7; background:#3a1d32; }
 .selected-route-provider { margin-top:4px; font-size:17px; line-height:1.2; }
 .selected-route-summary { margin-top:7px; width:100%; box-sizing:border-box; padding:8px 10px; border:1px solid #38517d; border-radius:9px; color:#dce7ff; background:#223554; font-size:13px; line-height:1.35; }
+.compact-route-summary { display:flex; align-items:center; gap:7px; }
+.compact-route-summary .route-discount { margin-left:auto; }
 .selected-route-summary .route-price-values { font-weight:700; }
+.header-include-toggle { margin:0; min-height:0; color:#dce7ff; }
+.header-include-toggle .include-new-toggle { gap:0; }
+.header-include-toggle .tooltip-help-text { left:auto; right:0; top:calc(100% + 8px); }
 .selected-source-controls { grid-column:2 / -1; width:100%; display:block; }
 .auction-pricing { margin-top:10px; padding:12px; border:1px solid #45669b; border-radius:10px; background:linear-gradient(135deg,#1d3154,#182944); }
 .auction-pricing .route-setting-heading { align-items:center; font-size:11px; }

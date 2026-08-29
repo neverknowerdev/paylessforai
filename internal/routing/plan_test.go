@@ -50,15 +50,15 @@ func TestBuildGroupPinsAllProviderSourceWhenFutureProvidersExcluded(t *testing.T
 	}
 }
 
-func TestBuildGroupModelWideSourceExcludesSubscriptionRoute(t *testing.T) {
+func TestBuildGroupModelWideSourceCanSelectSubscriptionRoute(t *testing.T) {
 	definition := groups.Definition{ID: "g", Slug: "g", Enabled: true, Stages: []groups.Stage{{Position: 0, Sources: []groups.Source{{Kind: groups.SourceModel, ModelID: "model-a"}}, BillingClasses: groups.AllBillingClasses}}}
 	subscription := route("subscription", "model-a", 1, 1, matcher.BillingSubscription)
 	subscription.Provider = "subscription-provider"
 	metered := route("metered", "model-a", 2, 2, matcher.BillingMetered)
 	metered.Provider = "metered-provider"
 	plan := BuildGroup(matcher.MatchRequest{Protocol: matcher.ProtocolChatCompletions, LogicalModel: "g", InputTokens: 1, ExpectedOutput: 1}, definition, map[string]groups.Definition{"g": definition}, []matcher.Route{subscription, metered}, time.Unix(2, 0), DefaultLimits())
-	if plan.Error != nil || len(plan.Entries) != 1 || plan.Entries[0].Route.ID != "metered" {
-		t.Fatalf("model-wide source must exclude subscription route, got %#v", plan)
+	if plan.Error != nil || len(plan.Entries) != 2 || plan.Entries[0].Route.ID != "subscription" || plan.Entries[1].Route.ID != "metered" {
+		t.Fatalf("model-wide source should retain subscription and metered routes, got %#v", plan)
 	}
 }
 

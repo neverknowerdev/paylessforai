@@ -896,7 +896,19 @@
         if (modelID) {
           event.preventDefault();
           event.stopImmediatePropagation();
-          card._sources.push(allProviderSource(modelID));
+          // Clicking the model adds each currently discovered provider-model
+          // route as an independent, reorderable source. Subscription and
+          // free routes remain visible; only the special future-provider row
+          // is represented without a concrete provider.
+          const routeSources = providerRoutesForModel(modelID)
+            .slice()
+            .sort((a, b) => {
+              const priority = (route) => route.free ? 0 : routeBilling(route) === 'subscription' ? 1 : 2;
+              return priority(a) - priority(b);
+            })
+            .map((route) => ({ kind: 'model', model_id: modelID, provider_name: route.provider, retries: 1 }));
+          card._sources.push(...routeSources);
+          card._sources.push({ kind: 'model', model_id: modelID, retries: 1, include_new_providers: true });
           closeSourcePickerV4(card);
           renderSelectedSourcesV4(card);
           renderCandidatesV4(card);
@@ -1150,14 +1162,7 @@
   }
   function sourceRoutesForModel(source) {
     const allowed = new Set(sourceProviderNames(source).map((provider) => provider.toLowerCase()));
-    const routes = providerRoutesForModel(source.model_id).filter((route) => allowed.size === 0 || allowed.has(route.provider.toLowerCase()));
-    // A model-wide source represents the metered/free provider pool. A
-    // subscription plan is a single provider-model route and must be added
-    // explicitly so it can be shown with its rate-limit warning.
-    if (source.kind === 'model' && !source.provider_name) {
-      return routes.filter((route) => routeBilling(route) !== 'subscription');
-    }
-    return routes;
+    return providerRoutesForModel(source.model_id).filter((route) => allowed.size === 0 || allowed.has(route.provider.toLowerCase()));
   }
   const renderSelectedSourcesV9Original = renderSelectedSourcesV9;
   function renderSelectedSourcesV10(card) {
@@ -1181,14 +1186,227 @@
     });
   }
   renderSelectedSourcesV4 = renderSelectedSourcesV10;
+  function compactRouteSummaryV11(container, route) {
+    if (!route) return;
+    const line = document.createElement('small');
+    line.className = 'selected-route-summary compact-route-summary';
+    const access = routeAccessLabelV4(route);
+    const discount = routeDiscountInfoV7(route);
+    line.textContent = `${access ? `${access} · ` : ''}${displayPrice(route.pricing?.input)} in / ${displayPrice(route.pricing?.output)} out${discount ? ` · ${discount.label}` : ''}`;
+    container.append(line);
+  }
+  function renderStagePriceCapV11(card) {
+    card.querySelector('.stage-price-cap')?.remove();
+    const routes = (card._sources || [])
+      .filter((source) => source.kind === 'model')
+      .flatMap((source) => sourceRoutesForModel(source))
+      .filter((route) => route?.official_pricing && routeBilling(route) !== 'subscription')
+      .filter((route, index, all) => all.findIndex((candidate) => candidate.model === route.model && candidate.provider === route.provider) === index);
+    card.querySelectorAll('.selected-source').forEach((row) => {
+      const source = card._sources?.[Number(row.dataset.sourceIndex)];
+      const route = source?.provider_name ? routeForSource(source) : null;
+      row.classList.remove('cap-included', 'cap-excluded', 'cap-not-applicable');
+      if (!route?.official_pricing || routeBilling(route) === 'subscription') {
+        row.classList.add('cap-not-applicable');
+        return;
+      }
+      const percent = Math.max(0, Math.min(100, Number(source.maximum_official_price_percent ?? 100)));
+      const under = Number(route.pricing?.input) <= Number(route.official_pricing.input) * percent / 100 && Number(route.pricing?.output) <= Number(route.official_pricing.output) * percent / 100;
+      row.classList.add(under ? 'cap-included' : 'cap-excluded');
+    });
+    if (!routes.length) return;
+    const percent = Math.max(0, Math.min(100, Number((card._sources || []).find((source) => source.maximum_official_price_percent != null)?.maximum_official_price_percent ?? 100)));
+    const panel = document.createElement('div');
+    panel.className = 'route-setting-section stage-price-cap all-provider-pricing';
+    const heading = document.createElement('div');
+    heading.className = 'route-setting-heading';
+    const label = document.createElement('strong');
+    label.textContent = 'Max allowed price';
+    const output = document.createElement('output');
+    output.className = 'max-price-value';
+    output.textContent = `${percent}% of model official${percent < 100 ? ` (−${100 - percent}%)` : ''}`;
+    heading.append(label, output);
+    const slider = document.createElement('input');
+    slider.type = 'range';
+    slider.min = '0';
+    slider.max = '100';
+    slider.step = '1';
+    slider.className = 'stage-max-price-percent';
+    slider.value = percent;
+    slider.style.setProperty('--slider-percent', `${percent}%`);
+    const status = document.createElement('small');
+    status.className = 'auction-cap-status';
+    const included = routes.filter((route) => Number(route.pricing?.input) <= Number(route.official_pricing.input) * percent / 100 && Number(route.pricing?.output) <= Number(route.official_pricing.output) * percent / 100).length;
+    status.textContent = `${included} provider${included === 1 ? '' : 's'} included under this max price setting`;
+    const official = modelOfficialPricing(routes);
+    if (official) {
+      const cap = document.createElement('small');
+      cap.className = 'auction-cap-line expected-price';
+      cap.textContent = `Max pricing · ${displayPrice(Number(official.input || 0) * percent / 100)} in / ${displayPrice(Number(official.output || 0) * percent / 100)} out`;
+      panel.append(heading, slider, status, cap);
+    } else panel.append(heading, slider, status);
+    card.querySelector('.selected-sources')?.after(panel);
+  }
+  function updateStagePriceCapV11(card, percent) {
+    const panel = card.querySelector('.stage-price-cap');
+    if (!panel) return;
+    const value = panel.querySelector('.max-price-value');
+    if (value) value.textContent = `${percent}% of model official${percent < 100 ? ` (−${100 - percent}%)` : ''}`;
+    const slider = panel.querySelector('.stage-max-price-percent');
+    if (slider) slider.style.setProperty('--slider-percent', `${percent}%`);
+    const routes = (card._sources || [])
+      .filter((source) => source.kind === 'model')
+      .flatMap((source) => sourceRoutesForModel(source))
+      .filter((route) => route?.official_pricing && routeBilling(route) !== 'subscription')
+      .filter((route, index, all) => all.findIndex((candidate) => candidate.model === route.model && candidate.provider === route.provider) === index);
+    const included = routes.filter((route) => Number(route.pricing?.input) <= Number(route.official_pricing.input) * percent / 100 && Number(route.pricing?.output) <= Number(route.official_pricing.output) * percent / 100).length;
+    const status = panel.querySelector('.auction-cap-status');
+    if (status) status.textContent = `${included} provider${included === 1 ? '' : 's'} included under this max price setting`;
+    const official = modelOfficialPricing(routes);
+    const cap = panel.querySelector('.auction-cap-line');
+    if (cap && official) cap.textContent = `Max pricing · ${displayPrice(Number(official.input || 0) * percent / 100)} in / ${displayPrice(Number(official.output || 0) * percent / 100)} out`;
+    card.querySelectorAll('.selected-source').forEach((row) => {
+      const source = card._sources?.[Number(row.dataset.sourceIndex)];
+      const route = source?.provider_name ? routeForSource(source) : null;
+      row.classList.remove('cap-included', 'cap-excluded', 'cap-not-applicable');
+      if (!route?.official_pricing || routeBilling(route) === 'subscription') row.classList.add('cap-not-applicable');
+      else row.classList.add(Number(route.pricing?.input) <= Number(route.official_pricing.input) * percent / 100 && Number(route.pricing?.output) <= Number(route.official_pricing.output) * percent / 100 ? 'cap-included' : 'cap-excluded');
+    });
+  }
+  function renderSelectedSourcesV11(card) {
+    const list = card.querySelector('.selected-sources');
+    if (!list) return;
+    list.replaceChildren();
+    card._sources = (card._sources || []).filter((source) => source.kind === card.querySelector('.source-kind').value);
+    card._sources.forEach((source, sourceIndex) => {
+      const row = document.createElement('div');
+      row.className = 'selected-source compact-provider-source';
+      row.draggable = false;
+      row.dataset.sourceIndex = sourceIndex;
+      const handle = document.createElement('span');
+      handle.className = 'drag-handle';
+      handle.textContent = '☷';
+      handle.draggable = true;
+      handle.title = 'Drag to reorder';
+      const main = document.createElement('div');
+      main.className = 'selected-source-main';
+      const header = document.createElement('div');
+      header.className = 'selected-source-header';
+      const title = document.createElement('strong');
+      const model = source.kind === 'model' ? modelDisplay(source.model_id) : null;
+      title.textContent = source.kind === 'model' ? model.name : (state.groups.find((group) => group.id === source.group_id)?.name || source.group_id || 'Choose a group');
+      const actions = document.createElement('div');
+      actions.className = 'selected-source-header-actions';
+      const retry = document.createElement('button');
+      retry.type = 'button';
+      retry.className = 'retry-summary';
+      retry.dataset.retrySource = sourceIndex;
+      retry.setAttribute('aria-label', `Configure retries, currently ${Math.max(1, Number(source.retries ?? 1))}`);
+      retry.title = 'Configure retries';
+      retry.innerHTML = `<span aria-hidden="true">↻</span><span>${Math.max(1, Number(source.retries ?? 1))}</span>`;
+      const duplicate = document.createElement('button');
+      duplicate.type = 'button';
+      duplicate.className = 'source-action source-duplicate route-icon-button';
+      duplicate.dataset.duplicateSource = sourceIndex;
+      duplicate.setAttribute('aria-label', 'Duplicate provider route');
+      duplicate.title = 'Duplicate provider route';
+      duplicate.innerHTML = '<span aria-hidden="true">⧉</span>';
+      const remove = document.createElement('button');
+      remove.type = 'button';
+      remove.className = 'source-remove route-icon-button';
+      remove.dataset.removeSource = sourceIndex;
+      remove.setAttribute('aria-label', 'Remove provider route');
+      remove.title = 'Remove provider route';
+      remove.innerHTML = '<span aria-hidden="true">×</span>';
+      actions.append(retry, duplicate, remove);
+      header.append(title, actions);
+      main.append(header);
+      if (source.kind === 'group') {
+        const meta = document.createElement('small');
+        meta.textContent = state.groups.find((group) => group.id === source.group_id)?.slug || '';
+        main.append(meta);
+      } else {
+        const provider = document.createElement('strong');
+        provider.className = 'selected-route-provider';
+        provider.textContent = source.provider_name ? providerName(source.provider_name) : 'New providers';
+        const meta = document.createElement('small');
+        meta.textContent = source.model_id;
+        main.append(provider, meta);
+        const route = source.provider_name ? routeForSource(source) : null;
+        if (route && routeBilling(route) === 'subscription') {
+          const warning = document.createElement('small');
+          warning.className = 'subscription-warning';
+          warning.textContent = 'Subscription plan · may be rate limited';
+          main.append(warning);
+        } else if (route) compactRouteSummaryV11(main, route);
+        if (!source.provider_name) {
+          const include = document.createElement('div');
+          include.className = 'include-new-providers';
+          const label = document.createElement('label');
+          label.className = 'include-new-toggle';
+          const checkbox = document.createElement('input');
+          checkbox.type = 'checkbox';
+          checkbox.className = 'source-include-new';
+          checkbox.checked = source.include_new_providers !== false;
+          const mark = document.createElement('span');
+          mark.className = 'include-checkbox-mark';
+          const text = document.createElement('span');
+          text.textContent = `Include new providers for ${model.name}`;
+          label.append(checkbox, mark, text);
+          const help = document.createElement('button');
+          help.type = 'button';
+          help.className = 'tooltip-help';
+          help.textContent = '?';
+          help.setAttribute('aria-label', 'Explain include new providers');
+          help.setAttribute('aria-expanded', 'false');
+          help.title = `When a new provider with ${model.name} is added, it is automatically added to this group.`;
+          const helpText = document.createElement('span');
+          helpText.className = 'tooltip-help-text';
+          helpText.hidden = true;
+          helpText.textContent = help.title;
+          help.addEventListener('click', (event) => {
+            event.preventDefault();
+            event.stopPropagation();
+            const expanded = help.getAttribute('aria-expanded') === 'true';
+            help.setAttribute('aria-expanded', String(!expanded));
+            helpText.hidden = expanded;
+          });
+          include.append(label, help, helpText);
+          main.append(include);
+        }
+      }
+      row.append(handle, main);
+      list.append(row);
+    });
+    renderStagePriceCapV11(card);
+  }
+  renderSelectedSourcesV4 = renderSelectedSourcesV11;
+  // Keep the global block price cap interactive without replacing the range
+  // input while the pointer is dragging.
+  document.addEventListener('input', (event) => {
+    const slider = event.target.closest('.stage-max-price-percent');
+    if (!slider) return;
+    const card = slider.closest('.group-stage-card');
+    if (!card) return;
+    const percent = Math.max(0, Math.min(100, Number(slider.value || 0)));
+    card._sources?.forEach((source) => {
+      if (source.kind !== 'model') return;
+      const route = source.provider_name ? routeForSource(source) : null;
+      if (!route || routeBilling(route) !== 'subscription') source.maximum_official_price_percent = percent;
+    });
+    updateStagePriceCapV11(card, percent);
+    previewCurrentGroup();
+  }, true);
   function allProviderSource(modelId) {
     const providers = [...new Set(providerRoutesForModel(modelId).filter((route) => routeBilling(route) !== 'subscription').map((route) => route.provider))];
     return { kind: 'model', model_id: modelId, provider_names: providers, include_new_providers: true, retries: 1 };
   }
   function expandProviderSources(sources) {
-    return (sources || []).map((source) => {
-      if (source.kind !== 'model' || source.provider_name || source.include_new_providers === false || source.provider_names?.length) return { ...source };
-      return { ...source, include_new_providers: true, provider_names: providerNamesForModel(source.model_id) };
+    return (sources || []).flatMap((source) => {
+      if (source.kind !== 'model' || source.provider_name || !source.provider_names?.length) return [{ ...source }];
+      const expanded = source.provider_names.map((provider) => ({ ...source, provider_name: provider, provider_names: undefined, include_new_providers: false }));
+      if (source.include_new_providers !== false) expanded.push({ kind: 'model', model_id: source.model_id, include_new_providers: true, retries: source.retries });
+      return expanded;
     });
   }
   function modelDisplay(modelId) { return modelCandidates().find((model) => model.id === modelId) || { id: modelId, name: modelId, routes: [] }; }

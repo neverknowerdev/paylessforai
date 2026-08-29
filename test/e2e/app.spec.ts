@@ -160,10 +160,11 @@ test('creates and exposes a callable group alias', async ({ page, request }) => 
   await expect(page.locator('#group-slug')).toHaveValue('coding-pool');
   await expect(page.locator('#group-stage-list .selected-source').first()).toContainText('model-a');
   await expect(page.locator('#group-stage-list .selected-route-heading')).toHaveCount(0);
-  await expect(page.locator('#group-stage-list .selected-source')).toHaveCount(1);
+  await expect(page.locator('#group-stage-list .selected-source')).toHaveCount(3);
   await expect(page.locator('#group-stage-list .selected-source').first()).toHaveAttribute('draggable', 'false');
   await expect(page.locator('#group-stage-list .selected-source').first().locator('.drag-handle')).toHaveAttribute('draggable', 'true');
-  await expect(page.locator('#group-stage-list .selected-provider-routes .route-price-line')).toHaveCount(2);
+  await expect(page.locator('#group-stage-list .selected-source .drag-handle')).toHaveCount(3);
+  await expect(page.locator('#group-stage-list .selected-source .drag-handle').first()).toHaveAttribute('draggable', 'true');
   await expect(page.locator('#group-stage-list .source-include-new').first()).toBeChecked();
   const providerSwitch = page.locator('#group-stage-list .include-checkbox-mark').first();
   await expect(providerSwitch).toBeVisible();
@@ -185,10 +186,10 @@ test('creates and exposes a callable group alias', async ({ page, request }) => 
   await expect(page.locator('#group-stage-list .tooltip-help-text').first()).toBeHidden();
   await expect(page.locator('#group-stage-list .source-duplicate').first()).toHaveAttribute('aria-label', 'Duplicate provider route');
   await expect(page.locator('#group-stage-list .source-duplicate').first()).toHaveAttribute('title', 'Duplicate provider route');
-  await expect(page.locator('#group-stage-list .selected-source-header-actions .source-remove')).toHaveCount(1);
+  await expect(page.locator('#group-stage-list .selected-source-header-actions .source-remove')).toHaveCount(3);
   await expect(page.locator('#group-stage-list .source-remove').first()).toHaveAttribute('aria-label', 'Remove provider route');
   await expect(page.locator('#group-stage-list .source-remove').first()).toHaveAttribute('title', 'Remove provider route');
-  const selectedPrices = await page.locator('#group-stage-list .route-price-line').allTextContents();
+  const selectedPrices = await page.locator('#group-stage-list .compact-route-summary').allTextContents();
   expect(selectedPrices.every((text) => !text.includes('official'))).toBeTruthy();
   const selectedProviders = await page.locator('#group-stage-list .selected-route-provider').allTextContents();
   expect(selectedProviders).toContain('Surplus Intelligence');
@@ -198,13 +199,12 @@ test('creates and exposes a callable group alias', async ({ page, request }) => 
   expect(auctionCapText[0]).not.toContain('OpenRouter');
   expect(auctionCapText[0]).not.toContain('Surplus Intelligence');
   expect(auctionCapText[0]).toMatch(/\$[0-9.]+ in \/ \$[0-9.]+ out/);
-  const auctionSlider = page.locator('#group-stage-list .source-auction-percent').first();
+  const auctionSlider = page.locator('#group-stage-list .stage-max-price-percent').first();
   await expect(page.locator('#group-stage-list .max-price-value').first()).toHaveText('100% of model official');
   const capStatus = page.locator('#group-stage-list .auction-cap-status').first();
   await expect(capStatus).toHaveText(/(\d+ providers?|No providers) included under this max price setting/);
-  await expect(page.locator('#group-stage-list .selected-provider-routes .route-price-line')).toHaveCount(2);
-  const initiallyClassifiedRoutes = await page.locator('#group-stage-list .selected-provider-routes .route-price-line.cap-included, #group-stage-list .selected-provider-routes .route-price-line.cap-excluded, #group-stage-list .selected-provider-routes .route-price-line.cap-not-applicable').count();
-  expect(initiallyClassifiedRoutes).toBe(2);
+  const initiallyClassifiedRoutes = await page.locator('#group-stage-list .selected-source.cap-included, #group-stage-list .selected-source.cap-excluded, #group-stage-list .selected-source.cap-not-applicable').count();
+  expect(initiallyClassifiedRoutes).toBe(3);
   await auctionSlider.scrollIntoViewIfNeeded();
   const sliderBox = await auctionSlider.boundingBox();
   expect(sliderBox).not.toBeNull();
@@ -216,12 +216,11 @@ test('creates and exposes a callable group alias', async ({ page, request }) => 
   await expect(auctionSlider).not.toHaveValue('100');
   await expect(page.locator('#group-stage-list .max-price-value').first()).toContainText('of model official');
   const selectedPricePercent = Number(await auctionSlider.inputValue());
-  await expect(page.locator('#group-stage-list .auction-cap-list')).toBeVisible();
   await expect(capStatus).toHaveText(/(\d+ providers?|No providers) included under this max price setting/);
-  const openRouterRoute = page.locator('#group-stage-list .selected-provider-routes .route-price-line').filter({ hasText: 'OpenRouter' }).first();
+  const openRouterRoute = page.locator('#group-stage-list .selected-source').filter({ hasText: 'OpenRouter' }).first();
   await expect(openRouterRoute).toHaveClass(/cap-(included|excluded)/);
-  const dynamicallyClassifiedRoutes = await page.locator('#group-stage-list .selected-provider-routes .route-price-line.cap-included, #group-stage-list .selected-provider-routes .route-price-line.cap-excluded, #group-stage-list .selected-provider-routes .route-price-line.cap-not-applicable').count();
-  expect(dynamicallyClassifiedRoutes).toBe(2);
+  const dynamicallyClassifiedRoutes = await page.locator('#group-stage-list .selected-source.cap-included, #group-stage-list .selected-source.cap-excluded, #group-stage-list .selected-source.cap-not-applicable').count();
+  expect(dynamicallyClassifiedRoutes).toBe(3);
   await page.locator('#group-stage-list .source-include-new').first().uncheck();
   await expect(page.locator('#group-stage-list .provider-scope-note')).toHaveCount(0);
   await page.locator('#group-stage-list .source-include-new').first().check();
@@ -242,10 +241,13 @@ test('creates and exposes a callable group alias', async ({ page, request }) => 
   await expect(page.locator('#groups-list')).toContainText('coding-pool');
   await expect(page.locator('#group-editor')).toBeHidden();
   const savedGroup = await (await request.get('/api/groups')).json();
-  const savedSource = savedGroup.data.find((item: { slug: string }) => item.slug === 'coding-pool').stages[0].sources[0];
-  expect(savedSource).toMatchObject({ model_id: 'model-a', include_new_providers: true, maximum_official_price_percent: selectedPricePercent });
-  expect(savedSource.provider_name).toBeUndefined();
-  expect(savedSource.provider_names).toEqual(expect.arrayContaining(['surplus', 'openrouter']));
+  const savedSources = savedGroup.data.find((item: { slug: string }) => item.slug === 'coding-pool').stages[0].sources;
+  expect(savedSources).toHaveLength(3);
+  expect(savedSources).toEqual(expect.arrayContaining([
+    expect.objectContaining({ model_id: 'model-a', provider_name: 'surplus', maximum_official_price_percent: selectedPricePercent }),
+    expect.objectContaining({ model_id: 'model-a', provider_name: 'openrouter', maximum_official_price_percent: selectedPricePercent }),
+    expect.objectContaining({ model_id: 'model-a', include_new_providers: true, maximum_official_price_percent: selectedPricePercent }),
+  ]));
   const groupToggle = page.locator('#groups-list [data-toggle-group]').first();
   await expect(groupToggle).toHaveText('');
   await expect(groupToggle).toHaveAttribute('role', 'switch');

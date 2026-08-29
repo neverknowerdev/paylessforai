@@ -75,13 +75,6 @@ func Compile(root Definition, all map[string]Definition, limits CompileLimits) C
 				}
 			} else {
 				effective := effectiveStage(composePolicy(inherited, stage), stage)
-				// A model source without an explicit provider is a model-wide
-				// block. Subscription plans are intentionally never part of that
-				// block; they must be selected as an explicit provider-model
-				// source so their rate-limit warning and semantics remain visible.
-				if hasModelWideSource(stage.Sources) {
-					effective.BillingClasses = withoutSubscription(effective.BillingClasses)
-				}
 				effective.Path = path
 				effective.TryKey = tryKey
 				if len(effective.LogicalModelIDs) > 0 {
@@ -156,9 +149,6 @@ func sourcePolicy(parent inheritedPolicy, source Source) inheritedPolicy {
 			result.providers = append([]string(nil), source.ProviderNames...)
 		}
 	}
-	if source.Kind == SourceModel && source.ProviderName == "" {
-		result.billing = withoutSubscription(result.billing)
-	}
 	if source.Retries != nil && !parent.retryLocked {
 		value := *source.Retries
 		result.retries = &value
@@ -166,32 +156,6 @@ func sourcePolicy(parent inheritedPolicy, source Source) inheritedPolicy {
 	}
 	if source.MaximumOfficialPricePercent != nil {
 		result.officialPercent = minIntPtr(parent.officialPercent, source.MaximumOfficialPricePercent)
-	}
-	return result
-}
-
-func hasModelWideSource(sources []Source) bool {
-	for _, source := range sources {
-		if source.Kind == SourceModel && strings.TrimSpace(source.ProviderName) == "" {
-			return true
-		}
-	}
-	return false
-}
-
-func withoutSubscription(values []BillingClass) []BillingClass {
-	result := make([]BillingClass, 0, len(values))
-	for _, value := range values {
-		if value != BillingSubscription {
-			result = append(result, value)
-		}
-	}
-	// An empty AllowedBillingClasses slice means "no billing filter" to the
-	// matcher. Keep a non-matching sentinel when a model-wide source has no
-	// non-subscription billing classes, so subscription routes cannot leak
-	// back into the candidate set.
-	if len(values) > 0 && len(result) == 0 {
-		return []BillingClass{"__no_eligible_billing__"}
 	}
 	return result
 }

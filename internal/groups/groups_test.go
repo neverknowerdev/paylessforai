@@ -64,14 +64,16 @@ func TestCompileAllProviderSourceIncludesFutureProvidersByDefault(t *testing.T) 
 	}
 }
 
-func TestCompileModelWideSourceExcludesSubscriptionPlans(t *testing.T) {
+func TestCompileModelWideSourceKeepsSubscriptionPlans(t *testing.T) {
+
 	root := Definition{ID: "root", Slug: "root", Enabled: true, Stages: []Stage{{Position: 0, Sources: []Source{{Kind: SourceModel, ModelID: "model-a"}}, BillingClasses: append([]BillingClass(nil), AllBillingClasses...)}}}
 	result := Compile(root, map[string]Definition{"root": root}, DefaultCompileLimits())
 	if len(result.Issues) != 0 || len(result.Stages) != 1 {
 		t.Fatalf("unexpected compile: %#v", result)
 	}
-	if got := result.Stages[0].BillingClasses; len(got) != 2 || got[0] != BillingFree || got[1] != BillingMetered {
-		t.Fatalf("model-wide source should exclude subscription billing, got %#v", got)
+	got := result.Stages[0].BillingClasses
+	if len(got) != len(AllBillingClasses) || got[0] != BillingFree || got[1] != BillingSubscription || got[2] != BillingMetered {
+		t.Fatalf("model-wide source should preserve all billing classes, got %#v", got)
 	}
 }
 
@@ -83,17 +85,6 @@ func TestCompileExplicitSubscriptionProviderRemainsEligible(t *testing.T) {
 	}
 	if got := result.Stages[0].BillingClasses; len(got) != 1 || got[0] != BillingSubscription {
 		t.Fatalf("explicit subscription provider should remain eligible, got %#v", got)
-	}
-}
-
-func TestCompileModelWideSubscriptionOnlySourceCannotFallBackToUnfilteredBilling(t *testing.T) {
-	root := Definition{ID: "root", Slug: "root", Enabled: true, Stages: []Stage{{Position: 0, Sources: []Source{{Kind: SourceModel, ModelID: "model-a"}}, BillingClasses: []BillingClass{BillingSubscription}}}}
-	result := Compile(root, map[string]Definition{"root": root}, DefaultCompileLimits())
-	if len(result.Issues) != 0 || len(result.Stages) != 1 {
-		t.Fatalf("unexpected compile: %#v", result)
-	}
-	if got := result.Stages[0].BillingClasses; len(got) != 1 || got[0] == BillingSubscription {
-		t.Fatalf("subscription-only model-wide source must remain blocked, got %#v", got)
 	}
 }
 

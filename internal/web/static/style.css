@@ -356,6 +356,58 @@ code { display: inline-block; max-width: 100%; overflow: hidden; padding: 10px 1
 .auction-cap-status { display:block; margin-top:5px; color:#b7c8e7; font-size:10px; font-weight:700; }
 .subscription-warning { display:block; margin-top:9px; padding:7px 9px; border:1px solid #8d6b47; border-radius:7px; color:#f1d5a8; background:#2a241b; font-size:10px; font-weight:700; line-height:1.35; }
 
+/* Route-block-wide price cap and compact provider route rows. The cap state is
+   reflected on each concrete provider row so the effect of moving the slider
+   is immediately visible without expanding the row. */
+.compact-provider-source { transition:border-color .16s ease, box-shadow .16s ease, opacity .16s ease, background .16s ease; }
+.compact-provider-source.cap-included { border-color:#78a8e5; background:#1b3154; box-shadow:0 0 0 1px #78a8e544,0 0 16px #78a8e51f; }
+.compact-provider-source.cap-excluded { border-color:#3c4b68; background:#111c32; opacity:.58; box-shadow:none; }
+.compact-provider-source.cap-not-applicable { border-color:#30466f; }
+.compact-route-summary { color:#c9d8f6; }
+.compact-provider-source .selected-route-provider { color:#dce7ff; }
+.compact-provider-source .include-new-providers { margin-top:9px; }
+.stage-price-cap { margin-top:10px; padding:12px 0 2px; }
+.stage-price-cap .route-setting-heading { font-size:11px; }
+.stage-price-cap .max-price-value { color:var(--blue-bright); font-size:14px; font-weight:850; text-transform:none; }
+.stage-price-cap input[type="range"] { width:100%; }
+.stage-price-cap .auction-cap-status { margin-top:6px; color:#c5d5f2; font-size:11px; }
+.stage-price-cap .auction-cap-line { margin-top:2px; color:#bce8d0; font-size:11px; }
+.stage-price-cap input[type="range"] {
+  -webkit-appearance:none;
+  appearance:none;
+  width:100%;
+  height:22px;
+  margin:0;
+  padding:0;
+  border:0;
+  background:transparent;
+  cursor:pointer;
+}
+.stage-price-cap input[type="range"]::-webkit-slider-runnable-track {
+  width:100%;
+  height:8px;
+  border-radius:999px;
+  background:linear-gradient(90deg,#b8c9ff var(--slider-percent,100%),#40516e var(--slider-percent,100%));
+}
+.stage-price-cap input[type="range"]::-webkit-slider-thumb {
+  -webkit-appearance:none;
+  width:30px;
+  height:30px;
+  margin-top:-11px;
+  border:0;
+  border-radius:50%;
+  background:#b8c9ff;
+  box-shadow:0 0 0 1px #9db4f5;
+}
+.stage-price-cap input[type="range"]::-moz-range-track {
+  width:100%;
+  height:8px;
+  border-radius:999px;
+  background:linear-gradient(90deg,#b8c9ff var(--slider-percent,100%),#40516e var(--slider-percent,100%));
+}
+.stage-price-cap input[type="range"]::-moz-range-progress { height:8px; border-radius:999px; background:#b8c9ff; }
+.stage-price-cap input[type="range"]::-moz-range-thumb { width:30px; height:30px; border:0; border-radius:50%; background:#b8c9ff; box-shadow:0 0 0 1px #9db4f5; }
+
 /* Keep the max-price track flush with its pricing panel and preserve the
    filled portion while allowing the thumb to be dragged end to end. */
 .all-provider-pricing input[type="range"] {

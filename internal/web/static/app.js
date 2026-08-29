@@ -786,6 +786,10 @@
       item.append(main);
       list.append(item);
     });
+    // Groups are higher-level routing aliases, so surface them before the
+    // underlying model results when both match the same search.
+    const matchingGroups = [...list.querySelectorAll('.source-group-candidate')];
+    matchingGroups.reverse().forEach((group) => list.prepend(group));
     if (!list.children.length) {
       const empty = document.createElement('small');
       empty.className = 'source-empty';

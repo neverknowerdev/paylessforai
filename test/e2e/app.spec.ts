@@ -320,6 +320,22 @@ test('creates and exposes a callable group alias', async ({ page, request }) => 
   });
   expect(groupSurface.color).toBe('rgb(244, 247, 251)');
   expect(groupSurface.backgroundImage).toContain('linear-gradient');
+  const helperGroup = await request.post('/api/groups', {
+    data: {
+      name: 'Model A fallback',
+      slug: 'model-a-fallback',
+      description: '',
+      enabled: true,
+      stages: [{ position: 0, name: '', sources: [{ kind: 'model', model_id: 'model-a', provider_name: 'openrouter', retries: 1 }], billing_classes: ['free', 'subscription', 'metered'], selection: 'lowest_expected_cost', try_retries: 1 }],
+    },
+  });
+  expect(helperGroup.ok()).toBeTruthy();
+  await page.reload();
+  await page.getByRole('button', { name: 'Create group' }).click();
+  await page.locator('#group-stage-list .source-search-toggle').click();
+  await page.locator('#group-stage-list .source-search').fill('model-a');
+  await expect(page.locator('#group-stage-list .source-candidate').first()).toHaveClass(/source-group-candidate/);
+  await page.locator('#close-group-editor').click();
   await page.getByRole('button', { name: 'Create group' }).click();
   const editorHeadingBox = await page.locator('#group-editor .panel-heading').boundingBox();
   const groupNameBox = await page.locator('#group-name').boundingBox();

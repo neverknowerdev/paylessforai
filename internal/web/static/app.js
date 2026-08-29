@@ -466,8 +466,8 @@
       track.className = 'group-toggle-track';
       track.setAttribute('aria-hidden', 'true');
       toggle.append(track);
-      titleRow.append(title, toggle);
-      main.append(titleRow, slugRow, connect, note);
+      titleRow.append(title, connect, toggle);
+      main.append(titleRow, slugRow, note);
       row.append(main);
 
       const actions = document.createElement('div');

@@ -284,10 +284,11 @@ test('creates and exposes a callable group alias', async ({ page, request }) => 
   const titleToggleLayout = await page.locator('#groups-list .group-title-row').first().evaluate((row) => {
     const title = row.querySelector('strong')?.getBoundingClientRect();
     const toggle = row.querySelector('.group-toggle')?.getBoundingClientRect();
-    return { gap: title && toggle ? toggle.left - title.right : Number.POSITIVE_INFINITY };
+    return { gap: title && toggle ? toggle.left - title.right : Number.POSITIVE_INFINITY, overflow: row.scrollWidth > row.clientWidth };
   });
   expect(titleToggleLayout.gap).toBeGreaterThanOrEqual(0);
-  expect(titleToggleLayout.gap).toBeLessThan(32);
+  expect(titleToggleLayout.gap).toBeLessThan(220);
+  expect(titleToggleLayout.overflow).toBeFalsy();
   await groupToggle.click();
   await expect(page.locator('#groups-list [data-toggle-group]').first()).toHaveText('');
   await expect(page.locator('#groups-list [data-toggle-group]').first()).toHaveAttribute('aria-checked', 'false');

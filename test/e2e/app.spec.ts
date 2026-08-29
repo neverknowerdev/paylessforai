@@ -164,7 +164,8 @@ test('creates and exposes a callable group alias', async ({ page, request }) => 
   await expect(page.locator('#group-slug')).toHaveValue(/^[a-z0-9-]+$/);
   await page.locator('#group-name').fill('Coding pool');
   await expect(page.locator('#group-slug')).toHaveValue('coding-pool');
-  await expect(page.locator('#group-stage-list .selected-source').first()).toContainText('model-a');
+  await expect(page.locator('#group-stage-list .selected-source').first()).toContainText('Model A');
+  await expect(page.locator('#group-stage-list .selected-source').first()).not.toContainText('model-a');
   await expect(page.locator('#group-stage-list .selected-route-heading')).toHaveCount(0);
   await expect(page.locator('#group-stage-list .selected-source')).toHaveCount(3);
   await expect(page.locator('#group-stage-list .selected-source').first()).toHaveAttribute('draggable', 'false');

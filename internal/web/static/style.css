@@ -419,14 +419,11 @@ code { display: inline-block; max-width: 100%; overflow: hidden; padding: 10px 1
 .compact-provider-source { padding:9px 10px; }
 .compact-provider-source .selected-source-main { gap:1px; }
 .compact-provider-source .selected-source-header { gap:7px; }
-.compact-provider-source .selected-source-header > strong { font-size:18px; line-height:1.08; }
+.compact-provider-source .selected-source-header > strong { font-size:21px; line-height:1.08; letter-spacing:-.01em; }
 .compact-provider-source .selected-source-header-actions { gap:5px; }
-.compact-provider-source .selected-route-provider { margin-top:1px; font-size:15px; line-height:1.08; }
-.compact-provider-source .selected-source-main > small:not(.selected-route-summary) { font-size:10px; line-height:1.1; }
+.compact-provider-source .selected-route-provider { margin-top:2px; color:#b9cdf6; font-size:16px; font-weight:700; line-height:1.12; letter-spacing:.015em; }
 .compact-provider-source .selected-route-summary { margin-top:4px; padding:6px 8px; font-size:12px; line-height:1.15; }
 .compact-provider-source .subscription-warning { margin-top:5px; padding:5px 8px; font-size:10px; line-height:1.2; }
-.compact-provider-source .retry-summary,
-.compact-provider-source .source-remove { width:30px; height:30px; min-width:30px; min-height:30px; padding:0; }
 .header-include-toggle .tooltip-help { width:22px; height:22px; }
 
 /* Keep the max-price track flush with its pricing panel and preserve the

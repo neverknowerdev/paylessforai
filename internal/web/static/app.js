@@ -1355,9 +1355,7 @@
         const provider = document.createElement('strong');
         provider.className = 'selected-route-provider';
         provider.textContent = source.provider_name ? providerName(source.provider_name) : 'New providers';
-        const meta = document.createElement('small');
-        meta.textContent = source.model_id;
-        main.append(provider, meta);
+        main.append(provider);
         const route = source.provider_name ? routeForSource(source) : null;
         if (route && routeBilling(route) === 'subscription') {
           const warning = document.createElement('small');

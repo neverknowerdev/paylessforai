@@ -392,6 +392,19 @@ test('configures a subscription, records quota blocking, and shows dynamic prici
   const summary = await (await request.get('/api/stats/summary')).json();
   expect(summary.excluded_limit_requests).toBeGreaterThanOrEqual(1);
 
+  // Subscription provider-model routes are explicit single-route blocks: no
+  // model-wide provider switch or price-cap controls are shown.
+  await page.goto('/#groups');
+  await page.getByRole('button', { name: 'Create group' }).click();
+  await page.locator('#group-stage-list .source-search-toggle').click();
+  await page.locator('#group-stage-list .source-search').fill('subscription-model');
+  await page.locator('#group-stage-list .source-candidate[data-model-id="subscription-model"] .source-route-option[data-add-provider="subscription-mock"]').click();
+  await expect(page.locator('#group-stage-list .selected-source')).toHaveCount(1);
+  await expect(page.locator('#group-stage-list .selected-source .subscription-warning')).toContainText('may be rate limited');
+  await expect(page.locator('#group-stage-list .selected-source .source-include-new')).toHaveCount(0);
+  await expect(page.locator('#group-stage-list .selected-source .all-provider-pricing')).toHaveCount(0);
+  await expect(page.locator('#group-stage-list .selected-source .selected-provider-routes')).toHaveCount(0);
+
   await page.getByRole('link', { name: 'Statistics' }).click();
   await page.locator('#refresh-button').click();
   await expect(page.locator('[data-view-panel="stats"]')).toContainText('Subscription economics');

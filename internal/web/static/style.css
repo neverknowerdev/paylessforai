@@ -354,6 +354,7 @@ code { display: inline-block; max-width: 100%; overflow: hidden; padding: 10px 1
 .auction-cap-line span { color:#b7c8e7; }
 .auction-cap-line strong { color:#bce8d0; font-weight:800; }
 .auction-cap-status { display:block; margin-top:5px; color:#b7c8e7; font-size:10px; font-weight:700; }
+.subscription-warning { display:block; margin-top:9px; padding:7px 9px; border:1px solid #8d6b47; border-radius:7px; color:#f1d5a8; background:#2a241b; font-size:10px; font-weight:700; line-height:1.35; }
 
 /* Keep the max-price track flush with its pricing panel and preserve the
    filled portion while allowing the thumb to be dragged end to end. */

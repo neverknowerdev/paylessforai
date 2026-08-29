@@ -1150,10 +1150,40 @@
   }
   function sourceRoutesForModel(source) {
     const allowed = new Set(sourceProviderNames(source).map((provider) => provider.toLowerCase()));
-    return providerRoutesForModel(source.model_id).filter((route) => allowed.size === 0 || allowed.has(route.provider.toLowerCase()));
+    const routes = providerRoutesForModel(source.model_id).filter((route) => allowed.size === 0 || allowed.has(route.provider.toLowerCase()));
+    // A model-wide source represents the metered/free provider pool. A
+    // subscription plan is a single provider-model route and must be added
+    // explicitly so it can be shown with its rate-limit warning.
+    if (source.kind === 'model' && !source.provider_name) {
+      return routes.filter((route) => routeBilling(route) !== 'subscription');
+    }
+    return routes;
   }
+  const renderSelectedSourcesV9Original = renderSelectedSourcesV9;
+  function renderSelectedSourcesV10(card) {
+    renderSelectedSourcesV9Original(card);
+    card.querySelectorAll('.selected-source').forEach((row) => {
+      const source = card._sources?.[Number(row.dataset.sourceIndex)];
+      if (!source?.provider_name) return;
+      const route = routeForSource(source);
+      if (routeBilling(route) !== 'subscription') return;
+      // Subscription routes are intentionally single-provider blocks. They
+      // do not participate in the model-wide provider pool or its price cap.
+      row.querySelector('.include-new-providers')?.remove();
+      row.querySelector('.all-provider-pricing')?.remove();
+      row.querySelector('.selected-provider-routes')?.remove();
+      const controls = row.querySelector('.selected-source-controls');
+      if (!controls || controls.querySelector('.subscription-warning')) return;
+      const warning = document.createElement('small');
+      warning.className = 'subscription-warning';
+      warning.textContent = 'Subscription plan · may be rate limited';
+      controls.prepend(warning);
+    });
+  }
+  renderSelectedSourcesV4 = renderSelectedSourcesV10;
   function allProviderSource(modelId) {
-    return { kind: 'model', model_id: modelId, provider_names: providerNamesForModel(modelId), include_new_providers: true, retries: 1 };
+    const providers = [...new Set(providerRoutesForModel(modelId).filter((route) => routeBilling(route) !== 'subscription').map((route) => route.provider))];
+    return { kind: 'model', model_id: modelId, provider_names: providers, include_new_providers: true, retries: 1 };
   }
   function expandProviderSources(sources) {
     return (sources || []).map((source) => {

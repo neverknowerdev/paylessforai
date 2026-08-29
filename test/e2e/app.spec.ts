@@ -176,7 +176,7 @@ test('creates and exposes a callable group alias', async ({ page, request }) => 
   const futureProviderRow = page.locator('#group-stage-list .selected-source').filter({ hasText: 'New providers' }).first();
   await expect(futureProviderRow.locator('.source-remove, .source-duplicate, .retry-summary')).toHaveCount(0);
   await expect(futureProviderRow.locator('.selected-source-header-actions .source-include-new')).toHaveCount(1);
-  await expect(futureProviderRow.locator('.new-provider-explanation')).toHaveText('New providers are added automatically');
+  await expect(futureProviderRow.locator('.new-provider-explanation')).toContainText('When a new provider with Model A is added, it is automatically added to this group.');
   await expect(futureProviderRow.locator('.tooltip-help')).toHaveCount(0);
   await expect(futureProviderRow).toHaveClass(/new-provider-enabled/);
   const providerSwitch = page.locator('#group-stage-list .include-checkbox-mark').first();

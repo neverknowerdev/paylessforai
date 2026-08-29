@@ -1382,7 +1382,7 @@
           include.classList.add('header-include-toggle');
           const explanation = document.createElement('small');
           explanation.className = 'new-provider-explanation';
-          explanation.textContent = 'New providers are added automatically';
+          explanation.textContent = `When a new provider with ${model.name} is added, it is automatically added to this group.`;
           main.append(explanation);
           include.append(label);
           actions.append(include);

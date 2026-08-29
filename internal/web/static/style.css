@@ -311,8 +311,9 @@ code { display: inline-block; max-width: 100%; overflow: hidden; padding: 10px 1
 .retry-summary span:first-child { font-size:14px; line-height:1; }
 .source-duplicate { min-height:30px; padding:5px 8px; font-size:10px; }
 .route-icon-button { display:inline-grid; place-items:center; width:32px; height:32px; min-width:32px; min-height:32px; padding:0; border-radius:8px; font-size:17px; line-height:1; }
-.source-duplicate.route-icon-button { border-color:#4569a5; color:#cbdcff; background:#10203d; }
-.source-duplicate.route-icon-button:hover, .source-duplicate.route-icon-button:focus-visible { border-color:var(--blue-bright); background:#1a3158; }
+.source-duplicate.route-icon-button { border:0; color:#cbdcff; background:#10203d; }
+.source-duplicate.route-icon-button:hover { background:#1a3158; }
+.source-duplicate.route-icon-button:focus-visible { outline:2px solid var(--blue-bright); outline-offset:2px; }
 .source-remove.route-icon-button { position:static; border-color:#7d4e65; color:#ffb9c6; background:#2b182a; }
 .source-remove.route-icon-button:hover, .source-remove.route-icon-button:focus-visible { border-color:#ff8ea7; background:#3a1d32; }
 .remove-stage.route-icon-button { border-color:#7d4e65; color:#ffb9c6; background:#2b182a; }

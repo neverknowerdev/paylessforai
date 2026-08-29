@@ -289,6 +289,12 @@ test('creates and exposes a callable group alias', async ({ page, request }) => 
   expect(titleToggleLayout.gap).toBeGreaterThanOrEqual(0);
   expect(titleToggleLayout.gap).toBeLessThan(32);
   expect(titleToggleLayout.overflow).toBeFalsy();
+  const connectionLayout = await page.locator('#groups-list .group-row').first().evaluate((row) => {
+    const card = row.getBoundingClientRect();
+    const connection = row.querySelector('[data-connect-group]')?.getBoundingClientRect();
+    return { rightGap: card && connection ? card.right - connection.right : Number.POSITIVE_INFINITY };
+  });
+  expect(connectionLayout.rightGap).toBeLessThan(3);
   await groupToggle.click();
   await expect(page.locator('#groups-list [data-toggle-group]').first()).toHaveText('');
   await expect(page.locator('#groups-list [data-toggle-group]').first()).toHaveAttribute('aria-checked', 'false');

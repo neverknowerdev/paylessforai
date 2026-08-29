@@ -152,7 +152,7 @@ code { display: inline-block; max-width: 100%; overflow: hidden; padding: 10px 1
 .group-copy { position:absolute; top:50%; right:7px; display:grid; place-items:center; width:25px; height:25px; padding:0; border:0; border-radius:5px; color:var(--blue-bright); background:transparent; cursor:pointer; font-size:16px; font-weight:800; line-height:1; transform:translateY(-50%); }
 .group-copy:hover,.group-copy:focus-visible { border-color:#9ebaff; color:#fff; outline:0; }
 .group-copy:hover,.group-copy:focus-visible { background:#29436f; }
-.group-connect-link { position:absolute; top:16px; right:0; display:inline-flex; align-items:center; gap:6px; width:max-content; max-width:42%; min-width:0; padding:0; border:0; color:#aebff3; background:transparent; cursor:pointer; font:inherit; font-size:10px; font-weight:700; text-align:left; white-space:nowrap; transition:color .16s ease; }
+.group-connect-link { position:absolute; top:16px; right:12px; display:inline-flex; align-items:center; gap:6px; width:max-content; max-width:42%; min-width:0; padding:0; border:0; color:#aebff3; background:transparent; cursor:pointer; font:inherit; font-size:10px; font-weight:700; text-align:left; white-space:nowrap; transition:color .16s ease; }
 .group-connect-link:hover,.group-connect-link:focus-visible { color:#fff; outline:0; text-decoration:underline; }
 .group-connect-link:active { transform:translateY(1px); }
 .group-connect-help { display:inline-grid; place-items:center; width:18px; height:18px; flex:0 0 18px; box-sizing:border-box; border:1px solid #6f8fd1; border-radius:50%; color:#d3dfff; background:#162a4d; font-size:10px; font-weight:850; line-height:1; }

@@ -294,7 +294,8 @@ test('creates and exposes a callable group alias', async ({ page, request }) => 
     const connection = row.querySelector('[data-connect-group]')?.getBoundingClientRect();
     return { rightGap: card && connection ? card.right - connection.right : Number.POSITIVE_INFINITY };
   });
-  expect(connectionLayout.rightGap).toBeLessThan(3);
+  expect(connectionLayout.rightGap).toBeGreaterThanOrEqual(10);
+  expect(connectionLayout.rightGap).toBeLessThan(18);
   await groupToggle.click();
   await expect(page.locator('#groups-list [data-toggle-group]').first()).toHaveText('');
   await expect(page.locator('#groups-list [data-toggle-group]').first()).toHaveAttribute('aria-checked', 'false');

@@ -49,6 +49,8 @@ func Open(ctx context.Context, path string) (*repositories.Repositories, error) 
 }
 
 func configure(ctx context.Context, database *sql.DB) error {
+	// PRAGMA statements are SQLite connection setup, not application data
+	// access; Bob has no model/query-builder abstraction for them.
 	for _, statement := range []string{"PRAGMA foreign_keys = ON", "PRAGMA journal_mode = WAL", "PRAGMA busy_timeout = 5000"} {
 		if _, err := database.ExecContext(ctx, statement); err != nil {
 			return fmt.Errorf("configure sqlite: %s: %w", statement, err)
@@ -84,6 +86,10 @@ func loadMigrations() ([]migration, error) {
 // connection. It is used by the production database opener and integration tests
 // so both exercise exactly the same schema history.
 func MigrateDatabase(ctx context.Context, database *sql.DB, dialect SQLDialect) error {
+	// Migration bookkeeping and DDL intentionally stay as SQL: schema_migrations
+	// is bootstrap metadata and the application tables do not exist until their
+	// embedded migration files have been applied. All runtime table access uses
+	// generated Bob models through repositories.
 	if _, err := database.ExecContext(ctx, rebind(`CREATE TABLE IF NOT EXISTS schema_migrations (
 		name TEXT PRIMARY KEY,
 		checksum TEXT NOT NULL,

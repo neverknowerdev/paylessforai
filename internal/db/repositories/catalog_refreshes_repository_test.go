@@ -4,7 +4,9 @@ import (
 	"testing"
 	"time"
 
+	bobmodels "github.com/neverknowerdev/paylessforai/internal/db/bob/models"
 	"github.com/neverknowerdev/paylessforai/internal/db/models"
+	"github.com/stephenafamo/bob"
 )
 
 func TestCatalogRefreshesRepositoryIntegration(t *testing.T) {
@@ -14,11 +16,11 @@ func TestCatalogRefreshesRepositoryIntegration(t *testing.T) {
 	if err := i.repos.CatalogRefreshes.Create(i.ctx, refresh); err != nil {
 		t.Fatal(err)
 	}
-	var got string
-	if err := i.db.QueryRowContext(i.ctx, `SELECT provider FROM catalog_refreshes WHERE id = $1`, refresh.ID).Scan(&got); err != nil {
+	row, err := bobmodels.FindCatalogRefresh(i.ctx, bob.NewDB(i.db), refresh.ID)
+	if err != nil {
 		t.Fatal(err)
 	}
-	if got != refresh.Provider {
-		t.Fatalf("provider: %q", got)
+	if row.Provider != refresh.Provider {
+		t.Fatalf("provider: %q", row.Provider)
 	}
 }

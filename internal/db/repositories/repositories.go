@@ -57,8 +57,8 @@ func New(db DBTX) *Repositories {
 	}
 	if provider, ok := db.(SQLDBTX); ok {
 		result.database = provider.SQLDB()
-		result.Groups = &RoutingGroupsRepository{database: result.database}
-		result.Stats = &StatsRepository{database: result.database}
+		result.Groups = &RoutingGroupsRepository{bobRepository: bobRepository{exec: bobExec}, database: bob.NewDB(result.database)}
+		result.Stats = &StatsRepository{bobRepository: bobRepository{exec: bobExec}}
 		result.Subscriptions = &SubscriptionRepository{bobRepository: bobRepository{exec: bobExec}}
 	}
 	return result

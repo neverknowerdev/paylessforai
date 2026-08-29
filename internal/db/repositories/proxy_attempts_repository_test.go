@@ -2,6 +2,9 @@ package repositories_test
 
 import (
 	"testing"
+
+	bobmodels "github.com/neverknowerdev/paylessforai/internal/db/bob/models"
+	"github.com/stephenafamo/bob"
 )
 
 func TestProxyAttemptsRepositoryIntegration(t *testing.T) {
@@ -16,12 +19,11 @@ func TestProxyAttemptsRepositoryIntegration(t *testing.T) {
 	if err := i.repos.ProxyAttempts.Record(i.ctx, "request-1", 1, "provider", "model", "failed", "quota_exhausted", "quota"); err != nil {
 		t.Fatal(err)
 	}
-	var state, disposition string
-	var completedAt *string
-	if err := i.db.QueryRowContext(i.ctx, `SELECT state, stats_disposition, completed_at FROM proxy_attempts WHERE id = $1`, "request-1:1").Scan(&state, &disposition, &completedAt); err != nil {
+	row, err := bobmodels.FindProxyAttempt(i.ctx, bob.NewDB(i.db), "request-1:1")
+	if err != nil {
 		t.Fatal(err)
 	}
-	if state != "failed" || disposition != "excluded_limit" || completedAt == nil {
-		t.Fatalf("attempt row: state=%q disposition=%q completed_at=%v", state, disposition, completedAt)
+	if row.State != "failed" || row.StatsDisposition != "excluded_limit" || !row.CompletedAt.Valid {
+		t.Fatalf("attempt row: state=%q disposition=%q completed_at=%v", row.State, row.StatsDisposition, row.CompletedAt)
 	}
 }

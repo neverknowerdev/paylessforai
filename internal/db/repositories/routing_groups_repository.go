@@ -8,74 +8,69 @@ import (
 	"strings"
 	"time"
 
+	bobmodels "github.com/neverknowerdev/paylessforai/internal/db/bob/models"
 	"github.com/neverknowerdev/paylessforai/internal/groups"
 	"github.com/neverknowerdev/paylessforai/internal/ids"
+	"github.com/stephenafamo/bob"
+	"github.com/stephenafamo/bob/dialect/sqlite"
+	"github.com/stephenafamo/bob/dialect/sqlite/dm"
+	"github.com/stephenafamo/bob/dialect/sqlite/sm"
+	"github.com/stephenafamo/bob/dialect/sqlite/um"
 )
 
 // RoutingGroupsRepository owns the complete aggregate write/read path for a
-// routing group. Keeping the aggregate transaction here prevents handlers and
-// runtime code from reaching into database/sql directly.
-type RoutingGroupsRepository struct{ database *sql.DB }
+// routing group. Bob executes every table operation, including aggregate
+// operations that span several related tables in one transaction.
+type RoutingGroupsRepository struct {
+	bobRepository
+	database bob.DB
+}
 
-// ListGroups implements groups.Loader while List keeps the repository API
-// consistent with the other collection repositories.
 func (r *RoutingGroupsRepository) ListGroups(ctx context.Context) ([]groups.Definition, error) {
 	return r.List(ctx)
 }
 
 func (r *RoutingGroupsRepository) List(ctx context.Context) ([]groups.Definition, error) {
-	if r == nil || r.database == nil {
+	if r == nil || r.exec == nil {
 		return nil, fmt.Errorf("database unavailable")
 	}
-	rows, err := r.database.QueryContext(ctx, `SELECT id,name,slug,description,enabled,revision,created_at,updated_at FROM routing_groups ORDER BY name, id`)
+	rows, err := bobmodels.RoutingGroups.Query(
+		sm.OrderBy(bobmodels.RoutingGroups.Columns.Name),
+		sm.OrderBy(bobmodels.RoutingGroups.Columns.ID),
+	).All(ctx, r.exec)
 	if err != nil {
 		return nil, err
 	}
-	result := []groups.Definition{}
-	for rows.Next() {
-		var item groups.Definition
-		var enabled int
-		var created, updated string
-		if err := rows.Scan(&item.ID, &item.Name, &item.Slug, &item.Description, &enabled, &item.Revision, &created, &updated); err != nil {
-			return nil, err
-		}
-		item.Enabled = enabled != 0
-		item.CreatedAt, _ = time.Parse(time.RFC3339Nano, created)
-		item.UpdatedAt, _ = time.Parse(time.RFC3339Nano, updated)
-		result = append(result, item)
-	}
-	if err := rows.Err(); err != nil {
-		rows.Close()
-		return nil, err
-	}
-	if err := rows.Close(); err != nil {
-		return nil, err
-	}
-	for i := range result {
-		stages, err := r.loadStages(ctx, result[i].ID)
+	result := make([]groups.Definition, 0, len(rows))
+	for _, row := range rows {
+		item := groupDefinitionFromBob(row)
+		item.Stages, err = r.loadStages(ctx, item.ID)
 		if err != nil {
 			return nil, err
 		}
-		result[i].Stages = stages
+		result = append(result, item)
 	}
 	return result, nil
 }
 
 func (r *RoutingGroupsRepository) Get(ctx context.Context, id string) (groups.Definition, error) {
-	items, err := r.List(ctx)
+	if r == nil || r.exec == nil {
+		return groups.Definition{}, fmt.Errorf("database unavailable")
+	}
+	row, err := bobmodels.FindRoutingGroup(ctx, r.exec, id)
 	if err != nil {
 		return groups.Definition{}, err
 	}
-	for _, item := range items {
-		if item.ID == id {
-			return item, nil
-		}
+	item := groupDefinitionFromBob(row)
+	item.Stages, err = r.loadStages(ctx, id)
+	if err != nil {
+		return groups.Definition{}, err
 	}
-	return groups.Definition{}, sql.ErrNoRows
+	return item, nil
 }
 
 func (r *RoutingGroupsRepository) Save(ctx context.Context, definition groups.Definition, expectedRevision *int64) (groups.Definition, error) {
-	if r == nil || r.database == nil {
+	if r == nil || r.exec == nil {
 		return groups.Definition{}, fmt.Errorf("database unavailable")
 	}
 	definition.Slug = groups.NormalizeSlug(definition.Slug)
@@ -87,35 +82,51 @@ func (r *RoutingGroupsRepository) Save(ctx context.Context, definition groups.De
 	if definition.Revision <= 0 {
 		definition.Revision = 1
 	}
-	tx, err := r.database.BeginTx(ctx, nil)
+	tx, err := r.database.Begin(ctx)
 	if err != nil {
 		return groups.Definition{}, err
 	}
-	defer tx.Rollback()
-	var currentRevision int64
-	var created string
-	err = tx.QueryRowContext(ctx, `SELECT revision,created_at FROM routing_groups WHERE id = ?`, definition.ID).Scan(&currentRevision, &created)
+	defer tx.Rollback(ctx)
+
+	current, err := bobmodels.FindRoutingGroup(ctx, tx, definition.ID)
 	if err == sql.ErrNoRows {
 		if expectedRevision != nil {
 			return groups.Definition{}, fmt.Errorf("group_revision_conflict")
 		}
 		definition.Revision = 1
 		definition.CreatedAt = now
-		_, err = tx.ExecContext(ctx, `INSERT INTO routing_groups(id,name,slug,description,enabled,revision,created_at,updated_at) VALUES(?,?,?,?,?,?,?,?)`, definition.ID, definition.Name, definition.Slug, definition.Description, groupBoolInt(definition.Enabled), definition.Revision, now.Format(time.RFC3339Nano), now.Format(time.RFC3339Nano))
+		createdAt := now.Format(time.RFC3339Nano)
+		enabled := groupBoolInt(definition.Enabled)
+		revision := definition.Revision
+		id, name, slug, description := definition.ID, definition.Name, definition.Slug, definition.Description
+		_, err = bobmodels.RoutingGroups.Insert(&bobmodels.RoutingGroupSetter{ID: &id, Name: &name, Slug: &slug, Description: &description, Enabled: &enabled, Revision: &revision, CreatedAt: &createdAt, UpdatedAt: &createdAt}).One(ctx, tx)
 	} else if err == nil {
-		if expectedRevision == nil || *expectedRevision != currentRevision {
+		if expectedRevision == nil || *expectedRevision != current.Revision {
 			return groups.Definition{}, fmt.Errorf("group_revision_conflict")
 		}
-		definition.Revision = currentRevision + 1
-		definition.CreatedAt, _ = time.Parse(time.RFC3339Nano, created)
-		_, err = tx.ExecContext(ctx, `UPDATE routing_groups SET name=?,slug=?,description=?,enabled=?,revision=?,updated_at=? WHERE id=? AND revision=?`, definition.Name, definition.Slug, definition.Description, groupBoolInt(definition.Enabled), definition.Revision, now.Format(time.RFC3339Nano), definition.ID, currentRevision)
+		definition.Revision = current.Revision + 1
+		definition.CreatedAt, _ = time.Parse(time.RFC3339Nano, current.CreatedAt)
+		enabled := groupBoolInt(definition.Enabled)
+		revision := definition.Revision
+		updatedAt := now.Format(time.RFC3339Nano)
+		result, updateErr := bobmodels.RoutingGroups.Update(
+			(&bobmodels.RoutingGroupSetter{Name: &definition.Name, Slug: &definition.Slug, Description: &definition.Description, Enabled: &enabled, Revision: &revision, UpdatedAt: &updatedAt}).UpdateMod(),
+			um.Where(sqlite.And(bobmodels.RoutingGroups.Columns.ID.EQ(sqlite.Arg(definition.ID)), bobmodels.RoutingGroups.Columns.Revision.EQ(sqlite.Arg(current.Revision)))),
+		).Exec(ctx, tx)
+		if updateErr == nil {
+			affected := result
+			if affected == 0 {
+				updateErr = fmt.Errorf("group_revision_conflict")
+			}
+		}
+		err = updateErr
 	} else {
 		return groups.Definition{}, err
 	}
 	if err != nil {
 		return groups.Definition{}, err
 	}
-	if _, err = tx.ExecContext(ctx, `DELETE FROM routing_group_stages WHERE group_id=?`, definition.ID); err != nil {
+	if _, err = bobmodels.RoutingGroupStages.Delete(dm.Where(bobmodels.RoutingGroupStages.Columns.GroupID.EQ(sqlite.Arg(definition.ID)))).Exec(ctx, tx); err != nil {
 		return groups.Definition{}, err
 	}
 	for i, stage := range definition.Stages {
@@ -126,7 +137,10 @@ func (r *RoutingGroupsRepository) Save(ctx context.Context, definition groups.De
 		if stage.Selection == "" {
 			stage.Selection = groups.SelectionLowestExpectedCost
 		}
-		if _, err = tx.ExecContext(ctx, `INSERT INTO routing_group_stages(id,group_id,position,name,selection_strategy,maximum_input_pico_usd_per_token,maximum_output_pico_usd_per_token,maximum_expected_cost_pico_usd,same_route_retries,try_retries) VALUES(?,?,?,?,?,?,?,?,?,?)`, stage.ID, definition.ID, stage.Position, stage.Name, stage.Selection, nullableInt(stage.MaximumInputPicoUSDPerToken), nullableInt(stage.MaximumOutputPicoUSDPerToken), nullableInt(stage.MaximumExpectedCostPicoUSD), nullableRetry(stage.SameRouteRetries), nullableRetry(stage.TryRetries)); err != nil {
+		id, groupID, position, name, selection := stage.ID, definition.ID, int64(stage.Position), stage.Name, stage.Selection
+		in, out, total := nullableInt64FromPointer(stage.MaximumInputPicoUSDPerToken), nullableInt64FromPointer(stage.MaximumOutputPicoUSDPerToken), nullableInt64FromPointer(stage.MaximumExpectedCostPicoUSD)
+		sameRetries, tryRetries := nullableInt64FromInt(stage.SameRouteRetries), nullableInt64FromInt(stage.TryRetries)
+		if _, err = bobmodels.RoutingGroupStages.Insert(&bobmodels.RoutingGroupStageSetter{ID: &id, GroupID: &groupID, Position: &position, Name: &name, SelectionStrategy: &selection, MaximumInputPicoUsdPerToken: &in, MaximumOutputPicoUsdPerToken: &out, MaximumExpectedCostPicoUsd: &total, SameRouteRetries: &sameRetries, TryRetries: &tryRetries}).One(ctx, tx); err != nil {
 			return groups.Definition{}, err
 		}
 		billing := stage.BillingClasses
@@ -148,36 +162,42 @@ func (r *RoutingGroupsRepository) Save(ctx context.Context, definition groups.De
 			if marshalErr != nil {
 				return groups.Definition{}, marshalErr
 			}
-			if _, err = tx.ExecContext(ctx, `INSERT INTO routing_group_sources(id,stage_id,position,source_kind,model_id,nested_group_id,provider_name,provider_names,include_new_providers,retries,maximum_official_price_percent) VALUES(?,?,?,?,?,?,?,?,?,?,?)`, ids.New(), stage.ID, j, source.Kind, groupNullableString(source.ModelID), groupNullableString(source.GroupID), groupNullableString(strings.ToLower(strings.TrimSpace(source.ProviderName))), string(providerNames), groupBoolInt(source.IncludeNewProviders), nullableRetry(source.Retries), nullableRetry(source.MaximumOfficialPricePercent)); err != nil {
+			sourceID, stageID, sourcePosition, sourceKind, providerNamesJSON := ids.New(), stage.ID, int64(j), string(source.Kind), string(providerNames)
+			modelID, nestedGroupID, providerName := groupNullableString(source.ModelID), groupNullableString(source.GroupID), groupNullableString(strings.ToLower(strings.TrimSpace(source.ProviderName)))
+			retries, maxPrice := nullableInt64FromInt(source.Retries), nullableInt64FromInt(source.MaximumOfficialPricePercent)
+			includeNew := groupBoolInt(source.IncludeNewProviders)
+			if _, err = bobmodels.RoutingGroupSources.Insert(&bobmodels.RoutingGroupSourceSetter{ID: &sourceID, StageID: &stageID, Position: &sourcePosition, SourceKind: &sourceKind, ModelID: &modelID, NestedGroupID: &nestedGroupID, ProviderName: &providerName, ProviderNames: &providerNamesJSON, IncludeNewProviders: &includeNew, Retries: &retries, MaximumOfficialPricePercent: &maxPrice}).One(ctx, tx); err != nil {
 				return groups.Definition{}, err
 			}
 		}
 		for _, provider := range stage.ProviderNames {
-			if _, err = tx.ExecContext(ctx, `INSERT INTO routing_group_stage_providers(stage_id,provider_name) VALUES(?,?)`, stage.ID, strings.ToLower(strings.TrimSpace(provider))); err != nil {
+			stageID, providerName := stage.ID, strings.ToLower(strings.TrimSpace(provider))
+			if _, err = bobmodels.RoutingGroupStageProviders.Insert(&bobmodels.RoutingGroupStageProviderSetter{StageID: &stageID, ProviderName: &providerName}).One(ctx, tx); err != nil {
 				return groups.Definition{}, err
 			}
 		}
 		for _, class := range billing {
-			if _, err = tx.ExecContext(ctx, `INSERT INTO routing_group_stage_billing_classes(stage_id,billing_class) VALUES(?,?)`, stage.ID, class); err != nil {
+			stageID, billingClass := stage.ID, string(class)
+			if _, err = bobmodels.RoutingGroupStageBillingClasses.Insert(&bobmodels.RoutingGroupStageBillingClassSetter{StageID: &stageID, BillingClass: &billingClass}).One(ctx, tx); err != nil {
 				return groups.Definition{}, err
 			}
 		}
 	}
-	if err = tx.Commit(); err != nil {
+	if err = tx.Commit(ctx); err != nil {
 		return groups.Definition{}, err
 	}
 	return definition, nil
 }
 
 func (r *RoutingGroupsRepository) Delete(ctx context.Context, id string, expectedRevision int64) error {
-	if r == nil || r.database == nil {
+	if r == nil || r.exec == nil {
 		return fmt.Errorf("database unavailable")
 	}
-	result, err := r.database.ExecContext(ctx, `DELETE FROM routing_groups WHERE id=? AND revision=?`, id, expectedRevision)
+	result, err := bobmodels.RoutingGroups.Delete(dm.Where(sqlite.And(bobmodels.RoutingGroups.Columns.ID.EQ(sqlite.Arg(id)), bobmodels.RoutingGroups.Columns.Revision.EQ(sqlite.Arg(expectedRevision))))).Exec(ctx, r.exec)
 	if err != nil {
 		return err
 	}
-	count, _ := result.RowsAffected()
+	count := result
 	if count == 0 {
 		return fmt.Errorf("group_revision_conflict")
 	}
@@ -185,154 +205,104 @@ func (r *RoutingGroupsRepository) Delete(ctx context.Context, id string, expecte
 }
 
 func (r *RoutingGroupsRepository) loadStages(ctx context.Context, groupID string) ([]groups.Stage, error) {
-	rows, err := r.database.QueryContext(ctx, `SELECT id,position,name,selection_strategy,maximum_input_pico_usd_per_token,maximum_output_pico_usd_per_token,maximum_expected_cost_pico_usd,same_route_retries,try_retries FROM routing_group_stages WHERE group_id=? ORDER BY position`, groupID)
+	rows, err := bobmodels.RoutingGroupStages.Query(sm.Where(bobmodels.RoutingGroupStages.Columns.GroupID.EQ(sqlite.Arg(groupID))), sm.OrderBy(bobmodels.RoutingGroupStages.Columns.Position)).All(ctx, r.exec)
 	if err != nil {
 		return nil, err
 	}
-	defer rows.Close()
-	result := []groups.Stage{}
-	for rows.Next() {
-		var stage groups.Stage
-		var in, out, total, retries, tryRetries sql.NullInt64
-		if err := rows.Scan(&stage.ID, &stage.Position, &stage.Name, &stage.Selection, &in, &out, &total, &retries, &tryRetries); err != nil {
-			return nil, err
-		}
-		stage.MaximumInputPicoUSDPerToken = intPointer(in)
-		stage.MaximumOutputPicoUSDPerToken = intPointer(out)
-		stage.MaximumExpectedCostPicoUSD = intPointer(total)
-		if retries.Valid {
-			value := int(retries.Int64)
-			stage.SameRouteRetries = &value
-		}
-		if tryRetries.Valid {
-			value := int(tryRetries.Int64)
-			stage.TryRetries = &value
-		}
-		result = append(result, stage)
-	}
-	if err := rows.Err(); err != nil {
-		return nil, err
-	}
-	if err := rows.Close(); err != nil {
-		return nil, err
-	}
-	for i := range result {
-		sources, providers, billing, err := r.loadStageChildren(ctx, result[i].ID)
+	result := make([]groups.Stage, 0, len(rows))
+	for _, row := range rows {
+		stage := stageFromBob(row)
+		sources, providers, billing, err := r.loadStageChildren(ctx, stage.ID)
 		if err != nil {
 			return nil, err
 		}
-		result[i].Sources, result[i].ProviderNames, result[i].BillingClasses = sources, providers, billing
+		stage.Sources, stage.ProviderNames, stage.BillingClasses = sources, providers, billing
+		result = append(result, stage)
 	}
 	return result, nil
 }
 
 func (r *RoutingGroupsRepository) loadStageChildren(ctx context.Context, stageID string) ([]groups.Source, []string, []groups.BillingClass, error) {
-	sourceRows, err := r.database.QueryContext(ctx, `SELECT source_kind,COALESCE(model_id,''),COALESCE(nested_group_id,''),COALESCE(provider_name,''),COALESCE(provider_names,'[]'),COALESCE(include_new_providers,1),retries,maximum_official_price_percent FROM routing_group_sources WHERE stage_id=? ORDER BY position`, stageID)
+	sourcesRows, err := bobmodels.RoutingGroupSources.Query(sm.Where(bobmodels.RoutingGroupSources.Columns.StageID.EQ(sqlite.Arg(stageID))), sm.OrderBy(bobmodels.RoutingGroupSources.Columns.Position)).All(ctx, r.exec)
 	if err != nil {
 		return nil, nil, nil, err
 	}
-	sources := []groups.Source{}
-	for sourceRows.Next() {
-		var source groups.Source
-		var providerNames string
-		var includeNewProviders int
-		var retries, percent sql.NullInt64
-		if err := sourceRows.Scan(&source.Kind, &source.ModelID, &source.GroupID, &source.ProviderName, &providerNames, &includeNewProviders, &retries, &percent); err != nil {
-			return nil, nil, nil, err
-		}
-		if err := json.Unmarshal([]byte(providerNames), &source.ProviderNames); err != nil {
+	sources := make([]groups.Source, 0, len(sourcesRows))
+	for _, row := range sourcesRows {
+		var providerNames []string
+		if err := json.Unmarshal([]byte(row.ProviderNames), &providerNames); err != nil {
 			return nil, nil, nil, fmt.Errorf("decode group source provider names: %w", err)
 		}
-		source.IncludeNewProviders = includeNewProviders != 0
-		if retries.Valid {
-			value := int(retries.Int64)
-			source.Retries = &value
-		}
-		if percent.Valid {
-			value := int(percent.Int64)
-			source.MaximumOfficialPricePercent = &value
-		}
-		sources = append(sources, source)
+		sources = append(sources, groups.Source{Kind: groups.SourceKind(row.SourceKind), ModelID: stringValue(row.ModelID), GroupID: stringValue(row.NestedGroupID), ProviderName: stringValue(row.ProviderName), ProviderNames: providerNames, IncludeNewProviders: row.IncludeNewProviders != 0, Retries: intPointer(row.Retries), MaximumOfficialPricePercent: intPointer(row.MaximumOfficialPricePercent)})
 	}
-	if err := sourceRows.Err(); err != nil {
-		sourceRows.Close()
-		return nil, nil, nil, err
-	}
-	if err := sourceRows.Close(); err != nil {
-		return nil, nil, nil, err
-	}
-	providerRows, err := r.database.QueryContext(ctx, `SELECT provider_name FROM routing_group_stage_providers WHERE stage_id=? ORDER BY provider_name`, stageID)
+	providerRows, err := bobmodels.RoutingGroupStageProviders.Query(sm.Where(bobmodels.RoutingGroupStageProviders.Columns.StageID.EQ(sqlite.Arg(stageID))), sm.OrderBy(bobmodels.RoutingGroupStageProviders.Columns.ProviderName)).All(ctx, r.exec)
 	if err != nil {
 		return nil, nil, nil, err
 	}
-	providers := []string{}
-	for providerRows.Next() {
-		var value string
-		if err := providerRows.Scan(&value); err != nil {
-			providerRows.Close()
-			return nil, nil, nil, err
-		}
-		providers = append(providers, value)
+	providers := make([]string, 0, len(providerRows))
+	for _, row := range providerRows {
+		providers = append(providers, row.ProviderName)
 	}
-	if err := providerRows.Err(); err != nil {
-		providerRows.Close()
-		return nil, nil, nil, err
-	}
-	if err := providerRows.Close(); err != nil {
-		return nil, nil, nil, err
-	}
-	billingRows, err := r.database.QueryContext(ctx, `SELECT billing_class FROM routing_group_stage_billing_classes WHERE stage_id=? ORDER BY billing_class`, stageID)
+	billingRows, err := bobmodels.RoutingGroupStageBillingClasses.Query(sm.Where(bobmodels.RoutingGroupStageBillingClasses.Columns.StageID.EQ(sqlite.Arg(stageID))), sm.OrderBy(bobmodels.RoutingGroupStageBillingClasses.Columns.BillingClass)).All(ctx, r.exec)
 	if err != nil {
 		return nil, nil, nil, err
 	}
-	billing := []groups.BillingClass{}
-	for billingRows.Next() {
-		var value groups.BillingClass
-		if err := billingRows.Scan(&value); err != nil {
-			billingRows.Close()
-			return nil, nil, nil, err
-		}
-		billing = append(billing, value)
+	billing := make([]groups.BillingClass, 0, len(billingRows))
+	for _, row := range billingRows {
+		billing = append(billing, groups.BillingClass(row.BillingClass))
 	}
-	if err := billingRows.Err(); err != nil {
-		billingRows.Close()
-		return nil, nil, nil, err
-	}
-	return sources, providers, billing, billingRows.Close()
+	return sources, providers, billing, nil
 }
 
-func groupBoolInt(value bool) int {
+func groupDefinitionFromBob(row *bobmodels.RoutingGroup) groups.Definition {
+	created, _ := time.Parse(time.RFC3339Nano, row.CreatedAt)
+	updated, _ := time.Parse(time.RFC3339Nano, row.UpdatedAt)
+	return groups.Definition{ID: row.ID, Name: row.Name, Slug: row.Slug, Description: row.Description, Enabled: row.Enabled != 0, Revision: row.Revision, CreatedAt: created, UpdatedAt: updated}
+}
+
+func stageFromBob(row *bobmodels.RoutingGroupStage) groups.Stage {
+	return groups.Stage{ID: row.ID, Position: int(row.Position), Name: row.Name, Selection: row.SelectionStrategy, MaximumInputPicoUSDPerToken: int64Pointer(row.MaximumInputPicoUsdPerToken), MaximumOutputPicoUSDPerToken: int64Pointer(row.MaximumOutputPicoUsdPerToken), MaximumExpectedCostPicoUSD: int64Pointer(row.MaximumExpectedCostPicoUsd), SameRouteRetries: intPointer(row.SameRouteRetries), TryRetries: intPointer(row.TryRetries)}
+}
+
+func nullableInt64FromPointer(value *int64) sql.Null[int64] {
+	if value == nil {
+		return sql.Null[int64]{}
+	}
+	return sql.Null[int64]{V: *value, Valid: true}
+}
+
+func nullableInt64FromInt(value *int) sql.Null[int64] {
+	if value == nil {
+		return sql.Null[int64]{}
+	}
+	return sql.Null[int64]{V: int64(*value), Valid: true}
+}
+
+func groupNullableString(value string) sql.Null[string] {
+	if strings.TrimSpace(value) == "" {
+		return sql.Null[string]{}
+	}
+	return sql.Null[string]{V: value, Valid: true}
+}
+
+func stringValue(value sql.Null[string]) string {
+	if !value.Valid {
+		return ""
+	}
+	return value.V
+}
+
+func intPointer(value sql.Null[int64]) *int {
+	if !value.Valid {
+		return nil
+	}
+	result := int(value.V)
+	return &result
+}
+
+func groupBoolInt(value bool) int64 {
 	if value {
 		return 1
 	}
 	return 0
-}
-
-func nullableInt(value *int64) any {
-	if value == nil {
-		return nil
-	}
-	return *value
-}
-
-func nullableRetry(value *int) any {
-	if value == nil {
-		return nil
-	}
-	return *value
-}
-
-func groupNullableString(value string) any {
-	if strings.TrimSpace(value) == "" {
-		return nil
-	}
-	return value
-}
-
-func intPointer(value sql.NullInt64) *int64 {
-	if !value.Valid {
-		return nil
-	}
-	result := value.Int64
-	return &result
 }

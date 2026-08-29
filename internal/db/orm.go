@@ -21,28 +21,16 @@ const (
 // keeps driver-specific placeholder syntax out of repository SQL while
 // retaining database/sql connection ownership in the db package.
 type ORM struct {
-	*sql.DB
-	dialect SQLDialect
+	database *sql.DB
+	dialect  SQLDialect
 }
 
 func NewORM(database *sql.DB) *ORM {
-	return &ORM{DB: database, dialect: SQLiteDialect}
+	return &ORM{database: database, dialect: SQLiteDialect}
 }
 
 func NewPostgresORM(database *sql.DB) *ORM {
-	return &ORM{DB: database, dialect: PostgresDialect}
-}
-
-func (o *ORM) ExecContext(ctx context.Context, query string, args ...any) (sql.Result, error) {
-	return o.DB.ExecContext(ctx, rebind(query, o.dialect), args...)
-}
-
-func (o *ORM) QueryContext(ctx context.Context, query string, args ...any) (*sql.Rows, error) {
-	return o.DB.QueryContext(ctx, rebind(query, o.dialect), args...)
-}
-
-func (o *ORM) QueryRowContext(ctx context.Context, query string, args ...any) *sql.Row {
-	return o.DB.QueryRowContext(ctx, rebind(query, o.dialect), args...)
+	return &ORM{database: database, dialect: PostgresDialect}
 }
 
 // BobExecutor exposes the same connection through Bob's optimized executor
@@ -50,14 +38,13 @@ func (o *ORM) QueryRowContext(ctx context.Context, query string, args ...any) *s
 // reflection-free scanning while legacy reporting queries continue to use the
 // database/sql facade above.
 func (o *ORM) BobExecutor() bob.Executor {
-	return bobExecutor{db: o.DB, dialect: o.dialect}
+	return bobExecutor{db: o.database, dialect: o.dialect}
 }
 
-// SQLDB exposes the underlying connection to repositories that need a
-// read-only aggregate query or an explicit transaction. Mutations for
-// persisted tables still belong to the individual repositories.
-func (o *ORM) SQLDB() *sql.DB { return o.DB }
-
+// SQLDB exposes the underlying connection only to the database owner so it
+// can configure and migrate the connection. Runtime data access stays behind
+// Bob-backed repositories.
+func (o *ORM) SQLDB() *sql.DB { return o.database }
 
 type bobExecutor struct {
 	db      *sql.DB

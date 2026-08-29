@@ -2,6 +2,9 @@ package repositories_test
 
 import (
 	"testing"
+
+	bobmodels "github.com/neverknowerdev/paylessforai/internal/db/bob/models"
+	"github.com/stephenafamo/bob"
 )
 
 func TestProxyRequestsRepositoryIntegration(t *testing.T) {
@@ -20,16 +23,14 @@ func TestProxyRequestsRepositoryIntegration(t *testing.T) {
 	if err := i.repos.ProxyRequests.Complete(i.ctx, "request-1", "failed", "provider_quota_exhausted", "quota"); err != nil {
 		t.Fatal(err)
 	}
-	var provider, disposition, state, resolvedGroup, resolvedPlan, selectedModel string
-	var attempts int64
-	var revision int64
-	if err := i.db.QueryRowContext(i.ctx, `SELECT selected_provider, stats_disposition, state, attempt_count, resolved_group_id, resolved_group_revision, resolved_plan_json, selected_logical_model FROM proxy_requests WHERE id = $1`, "request-1").Scan(&provider, &disposition, &state, &attempts, &resolvedGroup, &revision, &resolvedPlan, &selectedModel); err != nil {
+	row, err := bobmodels.FindProxyRequest(i.ctx, bob.NewDB(i.db), "request-1")
+	if err != nil {
 		t.Fatal(err)
 	}
-	if provider != "provider" || disposition != "excluded_limit" || state != "failed" || attempts != 1 {
-		t.Fatalf("request row: provider=%q disposition=%q state=%q attempts=%d", provider, disposition, state, attempts)
+	if row.SelectedProvider.V != "provider" || row.StatsDisposition != "excluded_limit" || row.State != "failed" || row.AttemptCount != 1 {
+		t.Fatalf("request row: provider=%q disposition=%q state=%q attempts=%d", row.SelectedProvider.V, row.StatsDisposition, row.State, row.AttemptCount)
 	}
-	if resolvedGroup != "group-1" || revision != 3 || resolvedPlan != planJSON || selectedModel != "model" {
-		t.Fatalf("resolution row: group=%q revision=%d plan=%q selected=%q", resolvedGroup, revision, resolvedPlan, selectedModel)
+	if row.ResolvedGroupID.V != "group-1" || row.ResolvedGroupRevision.V != 3 || row.ResolvedPlanJSON.V != planJSON || row.SelectedLogicalModel.V != "model" {
+		t.Fatalf("resolution row: group=%q revision=%d plan=%q selected=%q", row.ResolvedGroupID.V, row.ResolvedGroupRevision.V, row.ResolvedPlanJSON.V, row.SelectedLogicalModel.V)
 	}
 }

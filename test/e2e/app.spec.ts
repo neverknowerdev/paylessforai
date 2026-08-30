@@ -361,6 +361,49 @@ test('creates and exposes a callable group alias', async ({ page, request }) => 
   expect(models.data.some((item: { id: string; paylessforai_type?: string }) => item.id === 'coding-pool' && item.paylessforai_type === 'group')).toBeTruthy();
 });
 
+test('syncs newly discovered provider routes into opted-in groups', async ({ page, request }) => {
+  const modelID = 'group-discovery-model';
+  await request.post('http://127.0.0.1:19474/__mock/scenario', {
+    data: { models: [{ id: modelID, name: 'Group Discovery Model', prompt_price: '0.000001', completion_price: '0.000002' }], response_text: 'seed response' },
+  });
+  const group = await request.post('/api/groups', {
+    data: {
+      name: 'Future group providers', slug: 'future-group-providers', enabled: true,
+      stages: [{ position: 0, name: 'primary', sources: [{ kind: 'model', model_id: modelID, include_new_providers: true, retries: 1 }], billing_classes: ['free', 'subscription', 'metered'], selection: 'lowest_expected_cost', try_retries: 1 }],
+    },
+  });
+  expect(group.ok()).toBeTruthy();
+  const seed = await request.post('/api/providers/credentials', {
+    data: { provider: 'seed-group-provider', base_url: 'http://127.0.0.1:19474/custom/v1', label: 'Seed group provider', api_key: 'seed-group-key' },
+  });
+  expect(seed.ok()).toBeTruthy();
+
+  await request.post('http://127.0.0.1:19475/__mock/scenario', {
+    data: { models: [{ id: modelID, name: 'Group Discovery Model', prompt_price: '0.000003', completion_price: '0.000004' }], response_text: 'new response' },
+  });
+  const discovered = await request.post('/api/providers/credentials', {
+    data: { provider: 'new-group-provider', base_url: 'http://127.0.0.1:19475/custom/v1', label: 'New group provider', api_key: 'new-group-key' },
+  });
+  expect(discovered.ok()).toBeTruthy();
+  const groups = await (await request.get('/api/groups')).json();
+  const saved = groups.data.find((item: { slug: string }) => item.slug === 'future-group-providers');
+  expect(saved).toBeTruthy();
+  const sources = saved.stages[0].sources;
+  expect(sources).toEqual(expect.arrayContaining([
+    expect.objectContaining({ model_id: modelID, provider_name: 'seed-group-provider' }),
+    expect.objectContaining({ model_id: modelID, provider_name: 'new-group-provider' }),
+    expect.objectContaining({ model_id: modelID, include_new_providers: true }),
+  ]));
+  expect(sources.filter((source: { provider_name?: string }) => source.provider_name === 'new-group-provider')).toHaveLength(1);
+
+  // Keep this discovery fixture isolated from the subscription test that
+  // follows: both mock providers point at a mutable scenario endpoint.
+  const credentials = await (await request.get('/api/providers/credentials')).json();
+  await Promise.all(credentials.data
+    .filter((item: { provider: string }) => item.provider === 'seed-group-provider' || item.provider === 'new-group-provider')
+    .map((item: { id: string }) => request.delete(`/api/providers/credentials/${item.id}`)));
+});
+
 test('keeps provider verification errors visible and verifies manual models before saving', async ({ page, request }) => {
   await request.post('http://127.0.0.1:19475/__mock/scenario', {
     data: { models: [], response_text: 'manual response' },

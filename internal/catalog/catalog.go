@@ -31,10 +31,11 @@ type Snapshot struct {
 }
 
 type Manager struct {
-	clients []providers.Client
-	mu      sync.RWMutex
-	current Snapshot
-	blocked map[string]*time.Time
+	clients   []providers.Client
+	mu        sync.RWMutex
+	current   Snapshot
+	blocked   map[string]*time.Time
+	onRefresh func(context.Context, []matcher.Route) error
 }
 
 func New(clients []providers.Client) *Manager {
@@ -81,6 +82,15 @@ func (m *Manager) Clients() []providers.Client {
 	return append([]providers.Client(nil), m.clients...)
 }
 
+// SetRefreshHook registers the single integration point for work that must
+// happen whenever provider discovery produces new routes (for example,
+// syncing groups that opted into future providers).
+func (m *Manager) SetRefreshHook(hook func(context.Context, []matcher.Route) error) {
+	m.mu.Lock()
+	m.onRefresh = hook
+	m.mu.Unlock()
+}
+
 func (m *Manager) Snapshot() Snapshot {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
@@ -91,6 +101,7 @@ func (m *Manager) Snapshot() Snapshot {
 }
 
 func (m *Manager) Refresh(ctx context.Context) error {
+	previous := m.Snapshot()
 	type discovered struct {
 		provider string
 		models   []providers.Model
@@ -175,11 +186,37 @@ func (m *Manager) Refresh(ctx context.Context) error {
 	sort.Slice(routes, func(i, j int) bool { return routes[i].ID < routes[j].ID })
 	m.mu.Lock()
 	m.current = Snapshot{UpdatedAt: now, Models: models, Routes: routes}
+	hook := m.onRefresh
 	m.mu.Unlock()
+	if hook != nil {
+		known := make(map[string]bool, len(previous.Routes))
+		for _, route := range previous.Routes {
+			known[routeProviderModelKey(route)] = true
+		}
+		newRoutes := make([]matcher.Route, 0)
+		seen := make(map[string]bool)
+		for _, route := range routes {
+			key := routeProviderModelKey(route)
+			if known[key] || seen[key] {
+				continue
+			}
+			seen[key] = true
+			newRoutes = append(newRoutes, route)
+		}
+		if len(newRoutes) > 0 {
+			if err := hook(ctx, newRoutes); err != nil {
+				failures = append(failures, "group provider sync: "+err.Error())
+			}
+		}
+	}
 	if len(failures) > 0 {
 		return fmt.Errorf("partial provider catalog refresh: %s", strings.Join(failures, "; "))
 	}
 	return nil
+}
+
+func routeProviderModelKey(route matcher.Route) string {
+	return route.Provider + "\x00" + route.LogicalModel
 }
 
 func (m *Manager) Client(provider string) providers.Client {

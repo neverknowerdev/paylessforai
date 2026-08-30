@@ -52,6 +52,16 @@ func Run(parent context.Context, args []string) error {
 	registry := providers.Builtin(c.ProviderBaseURLs)
 	clients := loadProviderClients(registry, db, secretBox)
 	catalogManager := catalog.New(clients)
+	groupManager := groups.NewManager(db.Groups)
+	if err := groupManager.Reload(parent); err != nil {
+		slog.Warn("group load failed", "error", err)
+	}
+	catalogManager.SetRefreshHook(func(ctx context.Context, routes []matcher.Route) error {
+		if err := db.Groups.IncludeDiscoveredRoutes(ctx, routes); err != nil {
+			return err
+		}
+		return groupManager.Reload(ctx)
+	})
 	if stored, err := db.ProviderCredentials.List(parent); err == nil {
 		for _, credential := range stored {
 			if credential.SubscriptionStatus == "limited" {
@@ -78,10 +88,6 @@ func Run(parent context.Context, args []string) error {
 		return catalogManager.Refresh(appContext)
 	}
 	proxyHandler := proxy.New(catalogManager, db)
-	groupManager := groups.NewManager(db.Groups)
-	if err := groupManager.Reload(appContext); err != nil {
-		slog.Warn("group load failed", "error", err)
-	}
 	proxyHandler.SetGroups(groupManager)
 	server, err := controlplane.NewWithDeps(
 		c.ListenAddr,

@@ -11,6 +11,7 @@ import (
 	bobmodels "github.com/neverknowerdev/paylessforai/internal/db/bob/models"
 	"github.com/neverknowerdev/paylessforai/internal/groups"
 	"github.com/neverknowerdev/paylessforai/internal/ids"
+	"github.com/neverknowerdev/paylessforai/internal/matcher"
 	"github.com/stephenafamo/bob"
 	"github.com/stephenafamo/bob/dialect/sqlite"
 	"github.com/stephenafamo/bob/dialect/sqlite/dm"
@@ -24,6 +25,67 @@ import (
 type RoutingGroupsRepository struct {
 	bobRepository
 	database bob.DB
+}
+
+// IncludeDiscoveredRoutes adds concrete provider-model sources to every group
+// source that opted into future providers for that model. The future-provider
+// source is deliberately left in place and enabled, so later discoveries are
+// still covered by the same rule.
+func (r *RoutingGroupsRepository) IncludeDiscoveredRoutes(ctx context.Context, routes []matcher.Route) error {
+	if r == nil || r.exec == nil {
+		return fmt.Errorf("database unavailable")
+	}
+	if len(routes) == 0 {
+		return nil
+	}
+	groupsList, err := r.List(ctx)
+	if err != nil {
+		return err
+	}
+	for groupIndex := range groupsList {
+		definition := groupsList[groupIndex]
+		changed := false
+		for stageIndex := range definition.Stages {
+			stage := &definition.Stages[stageIndex]
+			for sourceIndex := range stage.Sources {
+				source := &stage.Sources[sourceIndex]
+				if source.Kind != groups.SourceModel || source.ModelID == "" || source.ProviderName != "" || !source.IncludeNewProviders {
+					continue
+				}
+				// A legacy all-provider source may still carry a provider list;
+				// with the toggle enabled that list is redundant and would make
+				// the editor render duplicate concrete rows after this sync.
+				source.ProviderNames = nil
+				for _, route := range routes {
+					if route.LogicalModel != source.ModelID || route.Provider == "" || hasProviderSource(stage.Sources, source.ModelID, route.Provider) {
+						continue
+					}
+					concrete := *source
+					concrete.ProviderName = route.Provider
+					concrete.ProviderNames = nil
+					concrete.IncludeNewProviders = false
+					stage.Sources = append(stage.Sources, concrete)
+					changed = true
+				}
+			}
+		}
+		if !changed {
+			continue
+		}
+		if _, err := r.Save(ctx, definition, &definition.Revision); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func hasProviderSource(sources []groups.Source, modelID, provider string) bool {
+	for _, source := range sources {
+		if source.Kind == groups.SourceModel && source.ModelID == modelID && strings.EqualFold(source.ProviderName, provider) {
+			return true
+		}
+	}
+	return false
 }
 
 func (r *RoutingGroupsRepository) ListGroups(ctx context.Context) ([]groups.Definition, error) {

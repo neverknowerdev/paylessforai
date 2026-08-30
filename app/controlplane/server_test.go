@@ -15,6 +15,7 @@ import (
 	dbpkg "github.com/neverknowerdev/paylessforai/internal/db"
 	"github.com/neverknowerdev/paylessforai/internal/db/models"
 	"github.com/neverknowerdev/paylessforai/internal/db/repositories"
+	"github.com/neverknowerdev/paylessforai/internal/groups"
 	"github.com/neverknowerdev/paylessforai/internal/matcher"
 	"github.com/neverknowerdev/paylessforai/internal/providers"
 	"github.com/neverknowerdev/paylessforai/internal/secrets"
@@ -106,6 +107,13 @@ func TestRequestStatsAPI(t *testing.T) {
 	if err := db.ProxyRequests.Create(context.Background(), "request-1", "", "chat_completions", "model-a"); err != nil {
 		t.Fatal(err)
 	}
+	group, err := db.Groups.Save(context.Background(), groups.Definition{ID: "stats-group", Name: "Stats group", Slug: "stats-group", Enabled: true, Stages: []groups.Stage{{Name: "primary", Sources: []groups.Source{{Kind: groups.SourceModel, ModelID: "model-a"}}}}}, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := db.ProxyRequests.RecordResolution(context.Background(), "request-1", group.ID, group.Revision, "{}", "model-a"); err != nil {
+		t.Fatal(err)
+	}
 	if err := recordAttempt(db, context.Background(), "request-1", 1, "surplus", "model-a", "succeeded", "", ""); err != nil {
 		t.Fatal(err)
 	}
@@ -135,6 +143,11 @@ func TestRequestStatsAPI(t *testing.T) {
 	server.httpServer.Handler.ServeHTTP(providerSummary, httptest.NewRequest(http.MethodGet, "/api/stats/providers", nil))
 	if providerSummary.Code != http.StatusOK || !strings.Contains(providerSummary.Body.String(), `"provider":"surplus"`) {
 		t.Fatalf("unexpected provider stats response: %d %s", providerSummary.Code, providerSummary.Body.String())
+	}
+	groupSummary := httptest.NewRecorder()
+	server.httpServer.Handler.ServeHTTP(groupSummary, httptest.NewRequest(http.MethodGet, "/api/stats/groups", nil))
+	if groupSummary.Code != http.StatusOK || !strings.Contains(groupSummary.Body.String(), `"group":"Stats group"`) || !strings.Contains(groupSummary.Body.String(), `"slug":"stats-group"`) {
+		t.Fatalf("unexpected group stats response: %d %s", groupSummary.Code, groupSummary.Body.String())
 	}
 }
 

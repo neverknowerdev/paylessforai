@@ -12,6 +12,7 @@ type RequestStat = models.RequestStat
 type StatsSummary = models.StatsSummary
 type ModelStats = models.ModelStats
 type ProviderStats = models.ProviderStats
+type GroupStats = models.GroupStats
 type CatalogRefresh = models.CatalogRefresh
 type ModelRecord = models.ModelRecord
 type ModelRouteRecord = models.ModelRouteRecord

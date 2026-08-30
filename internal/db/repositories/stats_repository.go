@@ -20,11 +20,13 @@ type AttemptStat = models.AttemptStat
 type StatsSummary = models.StatsSummary
 type ModelStats = models.ModelStats
 type ProviderStats = models.ProviderStats
+type GroupStats = models.GroupStats
 
 type statsData struct {
 	requests []*bobmodels.ProxyRequest
 	usage    map[string]*bobmodels.RequestUsage
 	attempts map[string][]*bobmodels.ProxyAttempt
+	groups   map[string]*bobmodels.RoutingGroup
 }
 
 func (r *StatsRepository) load(ctx context.Context) (statsData, error) {
@@ -43,7 +45,14 @@ func (r *StatsRepository) load(ctx context.Context) (statsData, error) {
 	if err != nil {
 		return statsData{}, err
 	}
-	data := statsData{requests: requests, usage: make(map[string]*bobmodels.RequestUsage, len(usageRows)), attempts: make(map[string][]*bobmodels.ProxyAttempt)}
+	groupRows, err := bobmodels.RoutingGroups.Query().All(ctx, r.exec)
+	if err != nil {
+		return statsData{}, err
+	}
+	data := statsData{requests: requests, usage: make(map[string]*bobmodels.RequestUsage, len(usageRows)), attempts: make(map[string][]*bobmodels.ProxyAttempt), groups: make(map[string]*bobmodels.RoutingGroup, len(groupRows))}
+	for _, row := range groupRows {
+		data.groups[row.ID] = row
+	}
 	for _, row := range usageRows {
 		data.usage[row.RequestID] = row
 	}
@@ -56,6 +65,117 @@ func (r *StatsRepository) load(ctx context.Context) (statsData, error) {
 		})
 	}
 	return data, nil
+}
+
+// GroupStats aggregates requests by the routing group that resolved them.
+// Requests that were sent directly to a model are intentionally omitted: this
+// view answers how each configured group is performing.
+func (r *StatsRepository) GroupStats(ctx context.Context) ([]GroupStats, error) {
+	data, err := r.load(ctx)
+	if err != nil {
+		return nil, err
+	}
+	type aggregate struct {
+		item      GroupStats
+		durations []int64
+	}
+	byGroup := make(map[string]*aggregate)
+	for _, request := range data.requests {
+		if !request.ResolvedGroupID.Valid || request.ResolvedGroupID.V == "" {
+			continue
+		}
+		groupID := request.ResolvedGroupID.V
+		entry := byGroup[groupID]
+		if entry == nil {
+			item := GroupStats{GroupID: groupID, Group: groupID}
+			if group := data.groups[groupID]; group != nil {
+				item.Group, item.Slug = group.Name, group.Slug
+			}
+			entry = &aggregate{item: item}
+			byGroup[groupID] = entry
+		}
+		item := &entry.item
+		item.Requests++
+		if request.StatsDisposition == "included" {
+			item.EligibleRequests++
+		} else if request.StatsDisposition == "excluded_limit" {
+			item.ExcludedLimitRequests++
+		}
+		switch request.State {
+		case "succeeded":
+			item.SucceededRequests++
+		case "failed":
+			item.FailedRequests++
+		case "partial":
+			item.PartialRequests++
+		}
+		item.TotalAttempts += request.AttemptCount
+		if request.AttemptCount > 1 {
+			item.RetriedRequests++
+		}
+		if request.DurationMS.Valid {
+			item.RequestsWithTime++
+			entry.durations = append(entry.durations, request.DurationMS.V)
+		}
+		if usage := data.usage[request.ID]; usage != nil {
+			item.InputTokens += usage.InputTokens
+			item.OutputTokens += usage.OutputTokens
+			item.TotalTokens += usage.TotalTokens
+			item.CachedReadTokens += usage.CachedReadTokens
+			item.CacheWriteTokens += usage.CacheWriteTokens
+			item.ReasoningTokens += usage.ReasoningTokens
+			item.EstimatedCostPico += usage.EstimatedCostPicoUsd
+			item.OfficialCostPico += usage.OfficialCostPicoUsd
+			if usage.ActualCostPicoUsd.Valid {
+				item.ActualCostPico += usage.ActualCostPicoUsd.V
+			}
+			if usage.DiscountPicoUsd.Valid && usage.DiscountPicoUsd.V > 0 {
+				item.SavedCostPico += usage.DiscountPicoUsd.V
+			}
+		}
+	}
+	result := make([]GroupStats, 0, len(byGroup))
+	for _, entry := range byGroup {
+		item := entry.item
+		if item.Requests > 0 {
+			if item.EligibleRequests > 0 {
+				item.SuccessRateBPS = item.SucceededRequests * 10000 / item.EligibleRequests
+			}
+			item.RetryRateBPS = item.RetriedRequests * 10000 / item.Requests
+		}
+		if item.OfficialCostPico > 0 {
+			value := item.SavedCostPico * 10000 / item.OfficialCostPico
+			if value < 0 {
+				value = 0
+			}
+			if value > 10000 {
+				value = 10000
+			}
+			item.DiscountBPS = &value
+		}
+		if len(entry.durations) > 0 {
+			min, max, total := entry.durations[0], entry.durations[0], int64(0)
+			for _, value := range entry.durations {
+				if value < min {
+					min = value
+				}
+				if value > max {
+					max = value
+				}
+				total += value
+			}
+			average := total / int64(len(entry.durations))
+			item.FastestMS, item.SlowestMS, item.AverageMS = &min, &max, &average
+		}
+		result = append(result, item)
+	}
+	sort.Slice(result, func(i, j int) bool {
+		if result[i].Requests == result[j].Requests {
+			return result[i].Group < result[j].Group
+		}
+		return result[i].Requests > result[j].Requests
+	})
+	return result, nil
 }
 
 func (r *StatsRepository) ListRequestStats(ctx context.Context, limit int) ([]RequestStat, error) {

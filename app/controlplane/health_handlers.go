@@ -26,7 +26,7 @@ func (s *Server) handleReady(w http.ResponseWriter, _ *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]any{"ready": true})
 }
 
-func (s *Server) handleStatus(w http.ResponseWriter, _ *http.Request) {
+func (s *Server) handleStatus(w http.ResponseWriter, r *http.Request) {
 	ready := s.db != nil && s.db.DB().Ping() == nil
 	status := map[string]any{"ready": ready}
 	if s.catalog != nil {
@@ -34,6 +34,12 @@ func (s *Server) handleStatus(w http.ResponseWriter, _ *http.Request) {
 		status["catalog_updated_at"] = snapshot.UpdatedAt
 		status["model_count"] = len(snapshot.Models)
 		status["route_count"] = len(snapshot.Routes)
+	}
+	if s.credentials.Updates != nil {
+		if updates, err := s.credentials.Updates.Snapshot(r.Context()); err == nil {
+			status["version"] = updates.Build.Version
+			status["update_phase"] = updates.State.Phase
+		}
 	}
 	writeJSON(w, http.StatusOK, status)
 }

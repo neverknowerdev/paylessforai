@@ -108,6 +108,14 @@ func (s *Store) ListProviderCredentials(ctx context.Context) ([]ProviderCredenti
 	return s.Repositories.ProviderCredentials.List(ctx)
 }
 
+func (s *Store) GetSetting(ctx context.Context, key string) (string, bool, error) {
+	return s.Repositories.Settings.Get(ctx, key)
+}
+
+func (s *Store) SetSetting(ctx context.Context, key, value string) error {
+	return s.Repositories.Settings.Set(ctx, key, value)
+}
+
 // MarkProviderLimited persists a provider/account limit and its best-known reset time.
 func (s *Store) MarkProviderLimited(ctx context.Context, provider string, next *time.Time, reason string) error {
 	return s.Repositories.ProviderCredentials.MarkLimited(ctx, provider, next, reason)

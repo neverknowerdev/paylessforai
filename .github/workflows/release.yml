@@ -1,0 +1,43 @@
+name: Publish release
+
+on:
+  push:
+    tags: ['v*']
+
+permissions:
+  contents: write
+  id-token: write
+  attestations: write
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Qualify
+        run: |
+          GOCACHE="$RUNNER_TEMP/go-cache" go test ./...
+          GOCACHE="$RUNNER_TEMP/go-cache" go vet ./...
+      - name: Browser qualification
+        working-directory: test/e2e
+        run: |
+          npm install --no-audit --no-fund
+          npx playwright install --with-deps chromium
+          npm test
+      - name: Build signed release
+        env:
+          OFFICIAL_BUILD: "true"
+          UPDATE_PUBLIC_KEY: ${{ vars.UPDATE_PUBLIC_KEY }}
+          UPDATE_SIGNING_PRIVATE_KEY: ${{ secrets.UPDATE_SIGNING_PRIVATE_KEY }}
+        run: bash scripts/build-release.sh "$GITHUB_REF_NAME" releases "$GITHUB_REF_NAME" dist
+      - name: Publish release after all assets are ready
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh release create "$GITHUB_REF_NAME" dist/assets/* dist/update-manifest.json dist/update-manifest.json.sig dist/checksums.txt --repo "$GITHUB_REPOSITORY" --target "$GITHUB_SHA" --title "$GITHUB_REF_NAME" --generate-notes

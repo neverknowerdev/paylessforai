@@ -1,0 +1,22 @@
+name: Prune main snapshots
+
+on:
+  schedule:
+    - cron: '17 3 * * 0'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  prune:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Keep the newest 30 main snapshots
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh api --paginate "/repos/${GITHUB_REPOSITORY}/releases?per_page=100" --jq '.[] | select(.prerelease == true and (.tag_name | test("^main-[0-9a-f]{40}$"))) | [.id, .tag_name, .created_at] | @tsv' | sort -k3 -r | tail -n +31 | while IFS=$'\t' read -r id tag created; do
+            gh api --method DELETE "/repos/${GITHUB_REPOSITORY}/releases/${id}"
+            gh api --method DELETE "/repos/${GITHUB_REPOSITORY}/git/refs/tags/${tag}" || true
+          done

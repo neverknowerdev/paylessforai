@@ -26,7 +26,10 @@ import (
 	"github.com/neverknowerdev/paylessforai/internal/providers"
 	"github.com/neverknowerdev/paylessforai/internal/proxy"
 	"github.com/neverknowerdev/paylessforai/internal/secrets"
+	"github.com/neverknowerdev/paylessforai/internal/updater"
 )
+
+var ErrUpdateRequested = errors.New("restart requested for update")
 
 // Run starts the local app and blocks until it exits or receives a termination
 // signal. args are command-line arguments for the app config.
@@ -64,6 +67,12 @@ func Run(parent context.Context, args []string) error {
 	}
 	appContext, cancel := context.WithCancel(parent)
 	defer cancel()
+	updates, err := updater.NewService(c.DataDir, db, cancel)
+	if err != nil {
+		return err
+	}
+	defer updates.Close()
+	updates.Start(appContext)
 	if len(clients) > 0 {
 		if refreshErr := catalogManager.Refresh(appContext); refreshErr != nil {
 			slog.Warn("provider catalog refresh failed", "error", refreshErr)
@@ -82,14 +91,21 @@ func Run(parent context.Context, args []string) error {
 		db,
 		catalogManager,
 		proxyHandler,
-		controlplane.CredentialDeps{Box: secretBox, Registry: registry, Reload: reloadProviders},
+		controlplane.CredentialDeps{Box: secretBox, Registry: registry, Reload: reloadProviders, Updates: updates},
 	)
 	if err != nil {
 		return fmt.Errorf("create app HTTP server: %w", err)
 	}
 
+	listener, err := server.Start()
+	if err != nil {
+		return fmt.Errorf("listen: %w", err)
+	}
+	if readyPath, token := os.Getenv("PAYLESSFORAI_READY_PATH"), os.Getenv("PAYLESSFORAI_READY_TOKEN"); readyPath != "" && token != "" {
+		_ = updater.MarkReady(readyPath, token)
+	}
 	serverErr := make(chan error, 1)
-	go func() { serverErr <- server.ListenAndServe() }()
+	go func() { serverErr <- server.Serve(listener) }()
 	signals := make(chan os.Signal, 1)
 	signal.Notify(signals, syscall.SIGINT, syscall.SIGTERM)
 	defer signal.Stop(signals)
@@ -107,7 +123,30 @@ func Run(parent context.Context, args []string) error {
 		shutdownCtx, cancel := context.WithTimeout(context.Background(), c.ShutdownTimeout)
 		defer cancel()
 		return server.Shutdown(shutdownCtx)
+	case <-appContext.Done():
+		shutdownCtx, cancel := context.WithTimeout(context.Background(), c.ShutdownTimeout)
+		defer cancel()
+		_ = server.Shutdown(shutdownCtx)
+		if updates.IsUpdateRequested() {
+			return ErrUpdateRequested
+		}
+		return nil
 	}
+}
+
+// Preflight opens the candidate against a disposable data directory. Opening
+// the store exercises the embedded migration set without binding a listener or
+// touching provider credentials.
+func Preflight(args []string) error {
+	c, err := config.Parse(args)
+	if err != nil {
+		return err
+	}
+	store, err := db.Open(context.Background(), filepath.Join(c.DataDir, "paylessforai.db"))
+	if err != nil {
+		return err
+	}
+	return store.Close()
 }
 
 func refreshCatalogPeriodically(ctx context.Context, manager *catalog.Manager, interval time.Duration) {

@@ -43,6 +43,13 @@ Surplus routes are marked free only when the provider metadata explicitly labels
 them free (for example `hy3-free`); zero prompt/completion fields alone are not
 enough because media models may use a separate image, audio, video, or job meter.
 
+Official binaries include a durable self-updater. A supervisor stages signed
+GitHub release or main-branch artifacts, verifies checksums, snapshots SQLite,
+and promotes a candidate only after startup succeeds. Migration or startup
+failure restores the snapshot and previous binary; diagnostics remain visible
+in the Settings view. Development builds identify themselves as `dev` and do
+not auto-update.
+
 ## Quick start
 
 PayLessForAI currently requires Go 1.26 to build:
@@ -104,6 +111,10 @@ configured in the UI.
 | `POST` | `/anthropic/v1/messages` | Anthropic compatibility alias |
 | `GET` | `/healthz` | Process health |
 | `GET` | `/readyz` | Database readiness |
+| `GET` | `/api/updates` | Update settings, status, available version, and history |
+| `PUT` | `/api/updates/settings` | Change update channel, interval, or enablement |
+| `POST` | `/api/updates/check` | Check GitHub for an eligible artifact |
+| `POST` | `/api/updates/install` | Install the checked artifact and restart |
 
 Inference endpoints require `Authorization: Bearer <client-key>`. Anthropic
 Messages also accepts `x-api-key: <client-key>`. Every proxied response includes

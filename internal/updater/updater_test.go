@@ -72,7 +72,10 @@ func TestVerifyManifestSignatureUsesCanonicalManifestBytes(t *testing.T) {
 	old := buildinfo.UpdatePublicKey
 	buildinfo.UpdatePublicKey = hex.EncodeToString(public)
 	defer func() { buildinfo.UpdatePublicKey = old }()
-	manifest := Manifest{Schema: 1, Channel: "releases", Version: "v1.0.0", Commit: "abc", Artifacts: []Artifact{{OS: "darwin", Arch: "arm64", URL: "https://example.invalid/a", Size: 1, SHA256: "00"}}}
+	manifest := Manifest{Schema: 1, Channel: "releases", Version: "v1.0.0", Commit: "abc", Artifacts: []Artifact{
+		{OS: "darwin", Arch: "arm64", URL: "https://example.invalid/a", Size: 1, SHA256: "00"},
+		{OS: "linux", Arch: "amd64", URL: "https://example.invalid/b", Size: 1, SHA256: "00"},
+	}}
 	contents, err := manifest.CanonicalBytes()
 	if err != nil {
 		t.Fatal(err)

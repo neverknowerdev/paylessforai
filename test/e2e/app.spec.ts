@@ -499,6 +499,7 @@ test('configures a subscription, records quota blocking, and shows dynamic prici
 test('shows listener settings and saves a port for the next restart', async ({ page, request }) => {
   await page.goto('/#settings');
   await expect(page.locator('#page-title')).toHaveText('Settings');
+  await expect(page.getByRole('heading', { name: 'Tailscale access' })).toBeVisible();
   await expect(page.locator('#network-active')).toContainText('127.0.0.1:19477');
   await expect(page.locator('#network-base-url')).toHaveText('http://127.0.0.1:19477/v1');
   await page.locator('#network-port').fill('19490');

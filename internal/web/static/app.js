@@ -1534,5 +1534,8 @@
   $('#remote-access-retry')?.addEventListener('click', async () => { try { await fetchJSON('/api/remote-access/retry', { method: 'POST' }); await loadRemoteAccess(); } catch (error) { setText('#remote-access-error', error.message); $('#remote-access-error').hidden = false; } });
   $('#remote-access-stop')?.addEventListener('click', async () => { if (!window.confirm('Stop sharing PayLessForAI remotely?')) return; try { await fetchJSON('/api/remote-access', { method: 'PUT', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ mode: 'disabled', hostname: $('#remote-access-hostname').value }) }); await loadRemoteAccess(); } catch (error) { setText('#remote-access-error', error.message); $('#remote-access-error').hidden = false; } });
   $('#remote-access-forget')?.addEventListener('click', async () => { if (!window.confirm('Forget the saved Tailscale identity? You may need to remove the device from Tailscale separately.')) return; try { await fetchJSON('/api/remote-access/identity', { method: 'DELETE' }); await loadRemoteAccess(); } catch (error) { setText('#remote-access-error', error.message); $('#remote-access-error').hidden = false; } });
+  const remoteAccessCard = document.querySelector('.remote-access-card');
+  const settingsGrid = document.querySelector('[data-view-panel="settings"] .settings-grid');
+  if (remoteAccessCard && settingsGrid) settingsGrid.prepend(remoteAccessCard);
   loadRemoteAccess();
 })();

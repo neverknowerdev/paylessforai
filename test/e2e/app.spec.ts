@@ -500,6 +500,11 @@ test('shows listener settings and saves a port for the next restart', async ({ p
   await page.goto('/#settings');
   await expect(page.locator('#page-title')).toHaveText('Settings');
   await expect(page.getByRole('heading', { name: 'Tailscale access' })).toBeVisible();
+  const remoteModeStyle = await page.locator('#remote-access-mode').evaluate((element) => {
+    const style = getComputedStyle(element);
+    return { appearance: style.appearance, backgroundColor: style.backgroundColor, color: style.color };
+  });
+  expect(remoteModeStyle).toEqual({ appearance: 'none', backgroundColor: 'rgb(16, 24, 43)', color: 'rgb(244, 247, 251)' });
   await expect(page.locator('#network-active')).toContainText('127.0.0.1:19477');
   await expect(page.locator('#network-base-url')).toHaveText('http://127.0.0.1:19477/v1');
   await page.locator('#network-port').fill('19490');

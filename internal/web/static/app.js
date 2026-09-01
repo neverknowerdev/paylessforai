@@ -1520,6 +1520,8 @@
   $('#updates-install')?.addEventListener('click', async () => { const payload = await fetchJSON('/api/updates'); if (!payload.available) return; setText('#updates-feedback', 'Downloading and restarting…'); await fetchJSON('/api/updates/install', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ version: payload.available.version }) }); });
   $('#refresh-button')?.addEventListener('click', loadUpdates);
   navigate = function(view) { const valid = ['overview', 'models', 'groups', 'stats', 'requests', 'access', 'settings']; state.view = valid.includes(view) ? view : 'overview'; $$('.view-panel').forEach((panel) => panel.classList.toggle('active', panel.dataset.viewPanel === state.view)); $$('.nav-item').forEach((item) => item.classList.toggle('active', item.dataset.view === state.view)); const meta = { overview: ['Overview', 'Your local routing desk at a glance.'], models: ['Models', 'Search provider routes and compare live pricing.'], groups: ['Groups', 'Callable aliases with ordered routing rules and fallbacks.'], stats: ['Statistics', 'Reliability, retries, response time, and cost by group, provider, and model.'], requests: ['Requests', 'Detailed usage, cost, and request outcomes.'], access: ['Access & keys', 'Manage the keys and providers behind your proxy.'], settings: ['Settings', 'Configure self-updating and inspect version history.'] }[state.view]; setText('#page-title', meta[0]); setText('#page-kicker', meta[0].toUpperCase()); setText('#page-description', meta[1]); $('#sidebar').classList.remove('open'); if (window.location.hash !== `#${state.view}`) history.replaceState(null, '', `#${state.view}`); };
+  const navigateWithSettingsDescription = navigate;
+  navigate = (view) => { navigateWithSettingsDescription(view); if (state.view === 'settings') setText('#page-description', 'Configure Tailscale access, the local listener, and application updates.'); };
   navigate(window.location.hash.slice(1) || 'overview');
   loadSubscriptionStats();
   loadUpdates();
@@ -1536,6 +1538,13 @@
   $('#remote-access-forget')?.addEventListener('click', async () => { if (!window.confirm('Forget the saved Tailscale identity? You may need to remove the device from Tailscale separately.')) return; try { await fetchJSON('/api/remote-access/identity', { method: 'DELETE' }); await loadRemoteAccess(); } catch (error) { setText('#remote-access-error', error.message); $('#remote-access-error').hidden = false; } });
   const remoteAccessCard = document.querySelector('.remote-access-card');
   const settingsGrid = document.querySelector('[data-view-panel="settings"] .settings-grid');
-  if (remoteAccessCard && settingsGrid) settingsGrid.prepend(remoteAccessCard);
+  if (remoteAccessCard && settingsGrid) {
+    settingsGrid.prepend(remoteAccessCard);
+    const settingsIntro = document.querySelector('[data-view-panel="settings"] .page-intro');
+    if (settingsIntro) {
+      settingsIntro.querySelector('h3').textContent = 'Remote access & updates';
+      settingsIntro.querySelector('p').textContent = 'Control Tailscale sharing, the local listener, and application updates.';
+    }
+  }
   loadRemoteAccess();
 })();

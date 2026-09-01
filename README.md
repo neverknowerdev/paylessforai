@@ -30,6 +30,8 @@ cost with the actual charged cost and records the dollar and percentage discount
 default, while the original raw payload remains available from the request
 detail view.
 - Local client API keys and encrypted provider-credential management.
+- Callable model groups: user-defined slugs with ordered model/provider/billing
+  stages, price ceilings, retries, and nested fallback groups.
 - Embedded UI for the base URL, keys, provider credentials, and recent request
   statistics. The Statistics view shows overall attempts/retries, success rate,
   fastest/average/slowest response time, tokens, cost, and per-model breakdowns;
@@ -42,6 +44,12 @@ OpenRouter price for that logical model.
 Surplus routes are marked free only when the provider metadata explicitly labels
 them free (for example `hy3-free`); zero prompt/completion fields alone are not
 enough because media models may use a separate image, audio, video, or job meter.
+
+The Groups view creates virtual model aliases. Each alias is an ordered ladder
+of stages (for example free routes, then a subscription route, then a metered
+fallback). Stages can select explicit models or one nested group, restrict
+providers and billing classes, set separate input/output price caps, and retry
+a route before advancing.
 
 Official binaries include a durable self-updater. A supervisor stages signed
 GitHub release or main-branch artifacts, verifies checksums, snapshots SQLite,
@@ -111,10 +119,10 @@ configured in the UI.
 | `POST` | `/anthropic/v1/messages` | Anthropic compatibility alias |
 | `GET` | `/healthz` | Process health |
 | `GET` | `/readyz` | Database readiness |
-| `GET` | `/api/updates` | Update settings, status, available version, and history |
-| `PUT` | `/api/updates/settings` | Change update channel, interval, or enablement |
-| `POST` | `/api/updates/check` | Check GitHub for an eligible artifact |
-| `POST` | `/api/updates/install` | Install the checked artifact and restart |
+
+Group management is available under `/api/groups` (list/create/get/replace/
+delete) and `/api/groups/preview` for server-backed validation and route
+previews.
 
 Inference endpoints require `Authorization: Bearer <client-key>`. Anthropic
 Messages also accepts `x-api-key: <client-key>`. Every proxied response includes

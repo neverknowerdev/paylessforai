@@ -3,6 +3,7 @@ package controlplane
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -13,6 +14,8 @@ import (
 
 	dbpkg "github.com/neverknowerdev/paylessforai/internal/db"
 	"github.com/neverknowerdev/paylessforai/internal/db/models"
+	"github.com/neverknowerdev/paylessforai/internal/db/repositories"
+	"github.com/neverknowerdev/paylessforai/internal/groups"
 	"github.com/neverknowerdev/paylessforai/internal/matcher"
 	"github.com/neverknowerdev/paylessforai/internal/providers"
 	"github.com/neverknowerdev/paylessforai/internal/secrets"
@@ -27,6 +30,13 @@ func (c credentialTestClient) Discover(context.Context) ([]providers.Model, erro
 }
 func (c credentialTestClient) Do(context.Context, matcher.Protocol, string, []byte) (*http.Response, error) {
 	return &http.Response{StatusCode: http.StatusOK, Body: io.NopCloser(strings.NewReader(`{"choices":[]}`)), Header: make(http.Header)}, nil
+}
+
+func recordAttempt(repos *repositories.Repositories, ctx context.Context, requestID string, attempt int, provider, upstream, state, errorClass, errorMessage string, rawError ...string) error {
+	if err := repos.ProxyRequests.RecordAttemptRoute(ctx, requestID, attempt, provider, upstream); err != nil {
+		return err
+	}
+	return repos.ProxyAttempts.Record(ctx, requestID, attempt, provider, upstream, state, errorClass, errorMessage, rawError...)
 }
 
 func testServer(t *testing.T) (*Server, func()) {
@@ -94,13 +104,20 @@ func TestRequestStatsAPI(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer db.Close()
-	if err := db.CreateProxyRequest(context.Background(), "request-1", "", "chat_completions", "model-a"); err != nil {
+	if err := db.ProxyRequests.Create(context.Background(), "request-1", "", "chat_completions", "model-a"); err != nil {
 		t.Fatal(err)
 	}
-	if err := db.RecordProxyAttempt(context.Background(), "request-1", 1, "surplus", "model-a", "succeeded", "", ""); err != nil {
+	group, err := db.Groups.Save(context.Background(), groups.Definition{ID: "stats-group", Name: "Stats group", Slug: "stats-group", Enabled: true, Stages: []groups.Stage{{Name: "primary", Sources: []groups.Source{{Kind: groups.SourceModel, ModelID: "model-a"}}}}}, nil)
+	if err != nil {
 		t.Fatal(err)
 	}
-	if err := db.RecordUsage(context.Background(), models.RequestUsage{RequestID: "request-1", TotalTokens: 5, EstimatedCostPico: 7}); err != nil {
+	if err := db.ProxyRequests.RecordResolution(context.Background(), "request-1", group.ID, group.Revision, "{}", "model-a"); err != nil {
+		t.Fatal(err)
+	}
+	if err := recordAttempt(db, context.Background(), "request-1", 1, "surplus", "model-a", "succeeded", "", ""); err != nil {
+		t.Fatal(err)
+	}
+	if err := db.RequestUsage.Upsert(context.Background(), models.RequestUsage{RequestID: "request-1", TotalTokens: 5, EstimatedCostPico: 7}); err != nil {
 		t.Fatal(err)
 	}
 	server, err := New("127.0.0.1:0", time.Second, time.Second, db)
@@ -126,6 +143,11 @@ func TestRequestStatsAPI(t *testing.T) {
 	server.httpServer.Handler.ServeHTTP(providerSummary, httptest.NewRequest(http.MethodGet, "/api/stats/providers", nil))
 	if providerSummary.Code != http.StatusOK || !strings.Contains(providerSummary.Body.String(), `"provider":"surplus"`) {
 		t.Fatalf("unexpected provider stats response: %d %s", providerSummary.Code, providerSummary.Body.String())
+	}
+	groupSummary := httptest.NewRecorder()
+	server.httpServer.Handler.ServeHTTP(groupSummary, httptest.NewRequest(http.MethodGet, "/api/stats/groups", nil))
+	if groupSummary.Code != http.StatusOK || !strings.Contains(groupSummary.Body.String(), `"group":"Stats group"`) || !strings.Contains(groupSummary.Body.String(), `"slug":"stats-group"`) {
+		t.Fatalf("unexpected group stats response: %d %s", groupSummary.Code, groupSummary.Body.String())
 	}
 }
 
@@ -168,13 +190,13 @@ func TestProviderCredentialManagementAPI(t *testing.T) {
 		providers.Definition{Name: "openrouter", DisplayName: "OpenRouter", DefaultBaseURL: "http://provider.invalid/v1", NewClient: func(string, string) providers.Client { return credentialTestClient{provider: "openrouter"} }},
 		providers.Definition{Name: "local-llm", DisplayName: "Local LLM", DefaultBaseURL: "http://provider.invalid/v1", NewClient: func(string, string) providers.Client { return credentialTestClient{provider: "local-llm"} }},
 	)
-	server, err := NewWithDeps("127.0.0.1:0", time.Second, time.Second, db, nil, nil, CredentialDeps{Box: box, Registry: registry})
+	server, err := NewWithDeps("127.0.0.1:0", time.Second, time.Second, db, nil, nil, CredentialDeps{Box: box, Registry: registry, Reload: func() error { return errors.New("partial provider catalog refresh: subscription-mock unavailable") }})
 	if err != nil {
 		t.Fatal(err)
 	}
 	create := httptest.NewRecorder()
 	server.httpServer.Handler.ServeHTTP(create, httptest.NewRequest(http.MethodPost, "/api/providers/credentials", strings.NewReader(`{"provider":"openrouter","label":"main","api_key":"secret-value"}`)))
-	if create.Code != http.StatusCreated || strings.Contains(create.Body.String(), "secret-value") || strings.Contains(create.Body.String(), "ciphertext") {
+	if create.Code != http.StatusCreated || !strings.Contains(create.Body.String(), "catalog_refresh_warning") || strings.Contains(create.Body.String(), "secret-value") || strings.Contains(create.Body.String(), "ciphertext") {
 		t.Fatalf("unexpected credential response: %d %s", create.Code, create.Body.String())
 	}
 	list := httptest.NewRecorder()

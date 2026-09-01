@@ -31,10 +31,11 @@ type Snapshot struct {
 }
 
 type Manager struct {
-	clients []providers.Client
-	mu      sync.RWMutex
-	current Snapshot
-	blocked map[string]*time.Time
+	clients   []providers.Client
+	mu        sync.RWMutex
+	current   Snapshot
+	blocked   map[string]*time.Time
+	onRefresh func(context.Context, []matcher.Route) error
 }
 
 func New(clients []providers.Client) *Manager {
@@ -81,6 +82,15 @@ func (m *Manager) Clients() []providers.Client {
 	return append([]providers.Client(nil), m.clients...)
 }
 
+// SetRefreshHook registers the single integration point for work that must
+// happen whenever provider discovery produces new routes (for example,
+// syncing groups that opted into future providers).
+func (m *Manager) SetRefreshHook(hook func(context.Context, []matcher.Route) error) {
+	m.mu.Lock()
+	m.onRefresh = hook
+	m.mu.Unlock()
+}
+
 func (m *Manager) Snapshot() Snapshot {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
@@ -91,9 +101,11 @@ func (m *Manager) Snapshot() Snapshot {
 }
 
 func (m *Manager) Refresh(ctx context.Context) error {
+	previous := m.Snapshot()
 	type discovered struct {
 		provider string
 		models   []providers.Model
+		client   providers.Client
 	}
 	clients := m.Clients()
 	all := make([]discovered, 0, len(clients))
@@ -104,7 +116,7 @@ func (m *Manager) Refresh(ctx context.Context) error {
 			failures = append(failures, client.Name()+": "+err.Error())
 			continue
 		}
-		all = append(all, discovered{provider: client.Name(), models: models})
+		all = append(all, discovered{provider: client.Name(), models: models, client: client})
 	}
 	if len(all) == 0 {
 		return fmt.Errorf("all provider catalog refreshes failed: %s", strings.Join(failures, "; "))
@@ -121,6 +133,17 @@ func (m *Manager) Refresh(ctx context.Context) error {
 	modelMap := map[string]Model{}
 	routes := make([]matcher.Route, 0)
 	for _, batch := range all {
+		executionKey, credentialID := batch.provider, ""
+		billingClass := matcher.BillingMetered
+		if metadata, ok := batch.client.(providers.ClientMetadata); ok {
+			if value := metadata.ExecutionKey(); value != "" {
+				executionKey = value
+			}
+			credentialID = metadata.CredentialID()
+			if value := metadata.BillingClass(); value != "" {
+				billingClass = value
+			}
+		}
 		for _, model := range batch.models {
 			logical := logicalModel(batch.provider, model.ID, openRouterIDs)
 			// Providers classify free routes while parsing their native catalog
@@ -148,7 +171,11 @@ func (m *Manager) Refresh(ctx context.Context) error {
 			for _, modality := range model.OutputModalities {
 				outputModalities[strings.ToLower(modality)] = true
 			}
-			routes = append(routes, matcher.Route{ID: batch.provider + ":" + model.ID, Provider: batch.provider, LogicalModel: logical, UpstreamModel: model.ID, Free: free, Price: model.Pricing, PriceAvailable: model.PriceAvailable, OfficialPrice: model.OfficialPricing, OfficialPriceAvailable: model.OfficialPriceAvailable, Capabilities: matcher.Capabilities{Protocols: protocols, Parameters: parameters, Tools: parameters["tools"], StructuredOutput: parameters["response_format"] || parameters["structured_outputs"], MaxContext: model.ContextLength, MaxOutput: model.MaxCompletionTokens, InputModalities: inputModalities, OutputModalities: outputModalities, Tags: append([]string(nil), model.Tags...)}, Health: matcher.HealthHealthy, Trusted: true})
+			routeBilling := billingClass
+			if free {
+				routeBilling = matcher.BillingFree
+			}
+			routes = append(routes, matcher.Route{ID: executionKey + ":" + model.ID, Provider: batch.provider, LogicalModel: logical, UpstreamModel: model.ID, Free: free, Price: model.Pricing, PriceAvailable: model.PriceAvailable, OfficialPrice: model.OfficialPricing, OfficialPriceAvailable: model.OfficialPriceAvailable, CredentialID: credentialID, ExecutionKey: executionKey, BillingClass: routeBilling, Capabilities: matcher.Capabilities{Protocols: protocols, Parameters: parameters, Tools: parameters["tools"], StructuredOutput: parameters["response_format"] || parameters["structured_outputs"], MaxContext: model.ContextLength, MaxOutput: model.MaxCompletionTokens, InputModalities: inputModalities, OutputModalities: outputModalities, Tags: append([]string(nil), model.Tags...)}, Health: matcher.HealthHealthy, Trusted: true})
 		}
 	}
 	models := make([]Model, 0, len(modelMap))
@@ -159,11 +186,37 @@ func (m *Manager) Refresh(ctx context.Context) error {
 	sort.Slice(routes, func(i, j int) bool { return routes[i].ID < routes[j].ID })
 	m.mu.Lock()
 	m.current = Snapshot{UpdatedAt: now, Models: models, Routes: routes}
+	hook := m.onRefresh
 	m.mu.Unlock()
+	if hook != nil {
+		known := make(map[string]bool, len(previous.Routes))
+		for _, route := range previous.Routes {
+			known[routeProviderModelKey(route)] = true
+		}
+		newRoutes := make([]matcher.Route, 0)
+		seen := make(map[string]bool)
+		for _, route := range routes {
+			key := routeProviderModelKey(route)
+			if known[key] || seen[key] {
+				continue
+			}
+			seen[key] = true
+			newRoutes = append(newRoutes, route)
+		}
+		if len(newRoutes) > 0 {
+			if err := hook(ctx, newRoutes); err != nil {
+				failures = append(failures, "group provider sync: "+err.Error())
+			}
+		}
+	}
 	if len(failures) > 0 {
 		return fmt.Errorf("partial provider catalog refresh: %s", strings.Join(failures, "; "))
 	}
 	return nil
+}
+
+func routeProviderModelKey(route matcher.Route) string {
+	return route.Provider + "\x00" + route.LogicalModel
 }
 
 func (m *Manager) Client(provider string) providers.Client {
@@ -173,6 +226,18 @@ func (m *Manager) Client(provider string) providers.Client {
 		}
 	}
 	return nil
+}
+
+func (m *Manager) ClientForRoute(route matcher.Route) providers.Client {
+	if route.ExecutionKey == "" {
+		return m.Client(route.Provider)
+	}
+	for _, client := range m.Clients() {
+		if metadata, ok := client.(providers.ClientMetadata); ok && metadata.ExecutionKey() == route.ExecutionKey {
+			return client
+		}
+	}
+	return m.Client(route.Provider)
 }
 
 func logicalModel(provider, id string, openRouterIDs []string) string {

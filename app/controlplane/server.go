@@ -9,7 +9,8 @@ import (
 
 	"github.com/neverknowerdev/paylessforai/app/gateway"
 	"github.com/neverknowerdev/paylessforai/internal/catalog"
-	"github.com/neverknowerdev/paylessforai/internal/db"
+	"github.com/neverknowerdev/paylessforai/internal/db/repositories"
+	"github.com/neverknowerdev/paylessforai/internal/groups"
 	"github.com/neverknowerdev/paylessforai/internal/providers"
 	proxyservice "github.com/neverknowerdev/paylessforai/internal/proxy"
 	"github.com/neverknowerdev/paylessforai/internal/secrets"
@@ -19,10 +20,11 @@ import (
 
 type Server struct {
 	httpServer  *http.Server
-	db          *db.Store
+	db          *repositories.Repositories
 	catalog     *catalog.Manager
 	proxy       *proxyservice.Proxy
 	credentials CredentialDeps
+	groups      *groups.Manager
 }
 
 type CredentialDeps struct {
@@ -30,13 +32,14 @@ type CredentialDeps struct {
 	Registry *providers.Registry
 	Reload   func() error
 	Updates  *updater.Service
+	Groups   *groups.Manager
 }
 
-func New(addr string, readHeaderTimeout, idleTimeout time.Duration, db *db.Store) (*Server, error) {
+func New(addr string, readHeaderTimeout, idleTimeout time.Duration, db *repositories.Repositories) (*Server, error) {
 	return NewWithDeps(addr, readHeaderTimeout, idleTimeout, db, nil, nil)
 }
 
-func NewWithDeps(addr string, readHeaderTimeout, idleTimeout time.Duration, db *db.Store, catalogManager *catalog.Manager, proxyHandler *proxyservice.Proxy, credentialConfig ...CredentialDeps) (*Server, error) {
+func NewWithDeps(addr string, readHeaderTimeout, idleTimeout time.Duration, db *repositories.Repositories, catalogManager *catalog.Manager, proxyHandler *proxyservice.Proxy, credentialConfig ...CredentialDeps) (*Server, error) {
 	credentials := CredentialDeps{}
 	if len(credentialConfig) > 0 {
 		credentials = credentialConfig[0]
@@ -45,7 +48,12 @@ func NewWithDeps(addr string, readHeaderTimeout, idleTimeout time.Duration, db *
 	if err != nil {
 		return nil, err
 	}
-	server := &Server{db: db, catalog: catalogManager, proxy: proxyHandler, credentials: credentials}
+	groupManager := credentials.Groups
+	if groupManager == nil && db != nil {
+		groupManager = groups.NewManager(db.Groups)
+		_ = groupManager.Reload(context.Background())
+	}
+	server := &Server{db: db, catalog: catalogManager, proxy: proxyHandler, credentials: credentials, groups: groupManager}
 	mux := http.NewServeMux()
 	server.registerHealthRoutes(mux)
 	server.registerStatsRoutes(mux)
@@ -53,8 +61,9 @@ func NewWithDeps(addr string, readHeaderTimeout, idleTimeout time.Duration, db *
 	server.registerProviderRoutes(mux)
 	server.registerModelRoutes(mux)
 	server.registerUpdateRoutes(mux)
+	server.registerGroupRoutes(mux)
 	mux.Handle("/", ui)
-	public := gateway.NewHandler(catalogManager, proxyHandler)
+	public := gateway.NewHandler(catalogManager, proxyHandler, server.groups)
 	mux.Handle("/v1/", public)
 	mux.Handle("/anthropic/v1/messages", public)
 	var handler http.Handler = withRequestID(mux)
@@ -72,6 +81,8 @@ func NewWithDeps(addr string, readHeaderTimeout, idleTimeout time.Duration, db *
 	server.httpServer = &http.Server{Addr: addr, Handler: handler, ReadHeaderTimeout: readHeaderTimeout, IdleTimeout: idleTimeout}
 	return server, nil
 }
+
+func (s *Server) SetGroups(manager *groups.Manager) { s.groups = manager }
 
 func (s *Server) ListenAndServe() error { return s.httpServer.ListenAndServe() }
 

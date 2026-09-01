@@ -69,15 +69,19 @@ func DefaultPolicy() Policy {
 }
 
 type Input struct {
-	Policy             Policy
-	AttemptNumber      int // 1-based completed attempt number.
-	StartedAt          time.Time
-	Now                time.Time
-	Deadline           time.Time
-	Error              ClassifiedError
-	Delivery           DeliveryState
-	SameRouteAvailable bool
-	FallbacksRemaining int
+	Policy                    Policy
+	AttemptNumber             int // 1-based completed attempt number.
+	StartedAt                 time.Time
+	Now                       time.Time
+	Deadline                  time.Time
+	Error                     ClassifiedError
+	Delivery                  DeliveryState
+	SameRouteAvailable        bool
+	FallbacksRemaining        int
+	PlanMode                  bool
+	SameRouteRetriesRemaining int
+	PlanEntriesRemaining      int
+	TotalAttemptsRemaining    int
 }
 
 type Decision struct {
@@ -102,12 +106,17 @@ func (Engine) Decide(input Input) Decision {
 		return Decision{Action: TerminalError, HealthEffect: NoHealthChange, Reason: "request validation errors are terminal"}
 	}
 	if input.Error.Class == ErrorQuotaExhausted {
-		if input.FallbacksRemaining > 0 {
+		if (input.PlanMode && input.PlanEntriesRemaining > 0) || (!input.PlanMode && input.FallbacksRemaining > 0) {
 			return Decision{Action: FailOver, HealthEffect: BlockCredential, Reason: "provider quota is exhausted until its reset"}
 		}
 		return Decision{Action: TerminalError, HealthEffect: BlockCredential, Reason: "provider quota is exhausted"}
 	}
 	policy := normalizePolicy(input.Policy)
+	if input.PlanMode {
+		if input.TotalAttemptsRemaining <= 1 {
+			return Decision{Action: TerminalError, HealthEffect: NoHealthChange, Reason: "global attempt budget exhausted"}
+		}
+	}
 	if input.AttemptNumber < 1 || input.AttemptNumber >= policy.MaximumAttempts {
 		return Decision{Action: TerminalError, HealthEffect: NoHealthChange, Reason: "retry attempt budget exhausted"}
 	}
@@ -127,7 +136,15 @@ func (Engine) Decide(input Input) Decision {
 	}
 
 	action := RetrySameRoute
-	if !input.SameRouteAvailable || input.AttemptNumber > 1 || input.Error.Class == ErrorAuthentication || input.Error.Class == ErrorPayment || input.Error.Class == ErrorModelNotFound || input.Error.Class == ErrorMalformedResponse {
+	if input.PlanMode {
+		if input.Error.Class == ErrorAuthentication || input.Error.Class == ErrorPayment || input.Error.Class == ErrorModelNotFound || input.Error.Class == ErrorMalformedResponse || input.SameRouteRetriesRemaining <= 0 {
+			if input.PlanEntriesRemaining > 0 {
+				action = FailOver
+			} else {
+				return Decision{Action: TerminalError, HealthEffect: health, Reason: "no retry route remains"}
+			}
+		}
+	} else if !input.SameRouteAvailable || input.AttemptNumber > 1 || input.Error.Class == ErrorAuthentication || input.Error.Class == ErrorPayment || input.Error.Class == ErrorModelNotFound || input.Error.Class == ErrorMalformedResponse {
 		if input.FallbacksRemaining > 0 {
 			action = FailOver
 		} else if !input.SameRouteAvailable {

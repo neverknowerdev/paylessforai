@@ -11,7 +11,6 @@ import (
 
 func TestModelsRepositoryIntegration(t *testing.T) {
 	i := newIntegrationDB(t)
-	i.reset(t)
 	model := models.ModelRecord{ID: "model-1", DisplayName: "Model", ContextLength: 1000, MaxOutputTokens: 500, MetadataJSON: "{}", ObservedAt: time.Now().UTC().Format(time.RFC3339Nano)}
 	if err := i.repos.Models.Upsert(i.ctx, model); err != nil {
 		t.Fatal(err)

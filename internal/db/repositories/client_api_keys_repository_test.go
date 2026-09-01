@@ -4,7 +4,6 @@ import "testing"
 
 func TestClientAPIKeysRepositoryIntegration(t *testing.T) {
 	i := newIntegrationDB(t)
-	i.reset(t)
 	key, secret, err := i.repos.ClientAPIKeys.Create(i.ctx, "integration")
 	if err != nil {
 		t.Fatal(err)

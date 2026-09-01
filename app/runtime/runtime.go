@@ -23,6 +23,9 @@ import (
 	"github.com/neverknowerdev/paylessforai/internal/catalog"
 	"github.com/neverknowerdev/paylessforai/internal/config"
 	"github.com/neverknowerdev/paylessforai/internal/db"
+	"github.com/neverknowerdev/paylessforai/internal/db/repositories"
+	"github.com/neverknowerdev/paylessforai/internal/groups"
+	"github.com/neverknowerdev/paylessforai/internal/matcher"
 	"github.com/neverknowerdev/paylessforai/internal/providers"
 	"github.com/neverknowerdev/paylessforai/internal/proxy"
 	"github.com/neverknowerdev/paylessforai/internal/secrets"
@@ -52,7 +55,17 @@ func Run(parent context.Context, args []string) error {
 	registry := providers.Builtin(c.ProviderBaseURLs)
 	clients := loadProviderClients(registry, db, secretBox)
 	catalogManager := catalog.New(clients)
-	if stored, err := db.ListProviderCredentials(parent); err == nil {
+	groupManager := groups.NewManager(db.Groups)
+	if err := groupManager.Reload(parent); err != nil {
+		slog.Warn("group load failed", "error", err)
+	}
+	catalogManager.SetRefreshHook(func(ctx context.Context, routes []matcher.Route) error {
+		if err := db.Groups.IncludeDiscoveredRoutes(ctx, routes); err != nil {
+			return err
+		}
+		return groupManager.Reload(ctx)
+	})
+	if stored, err := db.ProviderCredentials.List(parent); err == nil {
 		for _, credential := range stored {
 			if credential.SubscriptionStatus == "limited" {
 				var until *time.Time
@@ -61,7 +74,7 @@ func Run(parent context.Context, args []string) error {
 						until = &parsed
 					}
 				}
-				catalogManager.SetProviderBlocked(credential.Provider, until)
+				catalogManager.SetProviderBlocked(credential.ID, until)
 			}
 		}
 	}
@@ -84,6 +97,7 @@ func Run(parent context.Context, args []string) error {
 		return catalogManager.Refresh(appContext)
 	}
 	proxyHandler := proxy.New(catalogManager, db)
+	proxyHandler.SetGroups(groupManager)
 	server, err := controlplane.NewWithDeps(
 		c.ListenAddr,
 		c.ReadHeaderTimeout,
@@ -91,7 +105,7 @@ func Run(parent context.Context, args []string) error {
 		db,
 		catalogManager,
 		proxyHandler,
-		controlplane.CredentialDeps{Box: secretBox, Registry: registry, Reload: reloadProviders, Updates: updates},
+		controlplane.CredentialDeps{Box: secretBox, Registry: registry, Reload: reloadProviders, Updates: updates, Groups: groupManager},
 	)
 	if err != nil {
 		return fmt.Errorf("create app HTTP server: %w", err)
@@ -167,14 +181,13 @@ func refreshCatalogPeriodically(ctx context.Context, manager *catalog.Manager, i
 	}
 }
 
-func loadProviderClients(registry *providers.Registry, dataStore *db.Store, box *secrets.Box) []providers.Client {
+func loadProviderClients(registry *providers.Registry, repos *repositories.Repositories, box *secrets.Box) []providers.Client {
 	clients := make([]providers.Client, 0)
-	configured := make(map[string]bool)
-	stored, err := dataStore.ListProviderCredentials(context.Background())
+	stored, err := repos.ProviderCredentials.List(context.Background())
 	if err == nil {
 		for _, credential := range stored {
 			provider := strings.ToLower(strings.TrimSpace(credential.Provider))
-			if !credential.Enabled || configured[provider] {
+			if !credential.Enabled {
 				continue
 			}
 			secret, err := box.Open(credential.Ciphertext, credential.Nonce)
@@ -191,9 +204,22 @@ func loadProviderClients(registry *providers.Registry, dataStore *db.Store, box 
 					client = providers.WithManualModels{Client: client, Models: manual}
 				}
 			}
-			clients = append(clients, client)
-			configured[provider] = true
+			billing := matcher.BillingMetered
+			if credential.AccessMode == "subscription" {
+				billing = matcher.BillingSubscription
+			}
+			clients = append(clients, credentialClient{Client: client, id: credential.ID, billing: billing})
 		}
 	}
 	return clients
 }
+
+type credentialClient struct {
+	providers.Client
+	id      string
+	billing matcher.BillingClass
+}
+
+func (c credentialClient) ExecutionKey() string               { return c.id }
+func (c credentialClient) CredentialID() string               { return c.id }
+func (c credentialClient) BillingClass() matcher.BillingClass { return c.billing }

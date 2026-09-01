@@ -71,6 +71,35 @@ func (r *ProviderCredentialsRepository) MarkLimited(ctx context.Context, provide
 	_, err := bobmodels.ProviderCredentials.Update(setter.UpdateMod(), um.Where(bobmodels.ProviderCredentials.Columns.Provider.EQ(sqlite.Arg(provider)))).Exec(ctx, r.exec)
 	return err
 }
+
+func (r *ProviderCredentialsRepository) MarkLimitedByID(ctx context.Context, credentialID string, next *time.Time, reason string) error {
+	if credentialID == "" {
+		return nil
+	}
+	row, err := bobmodels.FindProviderCredential(ctx, r.exec, credentialID)
+	if err != nil {
+		return err
+	}
+	var nextValue *string
+	if next != nil {
+		value := next.UTC().Format(time.RFC3339Nano)
+		nextValue = &value
+	}
+	now := time.Now().UTC().Format(time.RFC3339Nano)
+	limited := "limited"
+	reasonValue := nullableString(pointerIfNonEmpty(reason))
+	nextNullable := nullableString(nextValue)
+	lastChecked := nullableString(&now)
+	return row.Update(ctx, r.exec, &bobmodels.ProviderCredentialSetter{
+		SubscriptionStatus: &limited,
+		NextAvailableAt:    &nextNullable,
+		StatusReason:       &reasonValue,
+		LastError:          &reasonValue,
+		LastCheckedAt:      &lastChecked,
+		UpdatedAt:          &now,
+	})
+}
+
 func (r *ProviderCredentialsRepository) ClearExpired(ctx context.Context, now time.Time) error {
 	available := "available"
 	empty := sql.Null[string]{}

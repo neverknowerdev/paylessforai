@@ -14,6 +14,7 @@ import (
 type Config struct {
 	DataDir           string
 	ListenAddr        string
+	ListenExplicit    bool
 	ReadHeaderTimeout time.Duration
 	IdleTimeout       time.Duration
 	ShutdownTimeout   time.Duration
@@ -48,6 +49,11 @@ func Parse(args []string) (Config, error) {
 	if err := flags.Parse(args); err != nil {
 		return Config{}, err
 	}
+	flags.Visit(func(flag *flag.Flag) {
+		if flag.Name == "listen" {
+			c.ListenExplicit = true
+		}
+	})
 	if openRouterBaseURL != "" {
 		baseURLs["openrouter"] = openRouterBaseURL
 	}

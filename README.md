@@ -69,10 +69,15 @@ CGO_ENABLED=0 go build -o paylessforai-app ./cmd/paylessforai-app
 ./paylessforai-app
 ```
 
-The default listener is `127.0.0.1:9472`. Open
-<http://127.0.0.1:9472/> in a browser, add provider credentials, and create a
-local client key. The default data directory is the operating-system user
-configuration directory under `paylessforai`; override it with `-data-dir`.
+The first launch prefers `127.0.0.1:9472`, then selects the first available
+port in the local startup range (falling back to an OS-assigned port if that
+range is full) and persists the result in the data directory.
+Later launches reuse that port, so API clients keep the same endpoint across
+binary updates and restarts. Open the URL printed at startup, add provider
+credentials, and create a local client key. The Settings page shows the active
+and configured ports; a changed port takes effect after restart. The default
+data directory is the operating-system user configuration directory under
+`paylessforai`; override it with `-data-dir`.
 
 ## Run a downloaded official binary
 
@@ -89,9 +94,10 @@ chmod 700 "$HOME/paylessforai/paylessforai-app"
 ```
 
 On Windows, extract the `.zip` archive and run `paylessforai-app.exe`. The
-default listener is `127.0.0.1:9472`; open <http://127.0.0.1:9472/> after the
-`/readyz` endpoint responds successfully. The binary starts its application
-child and supervises updates automatically, so do not pass `--internal-serve`.
+first launch prefers `127.0.0.1:9472` and persists the selected available port;
+open the URL printed at startup after the `/readyz` endpoint responds
+successfully. The binary starts its application child and supervises updates
+automatically, so do not pass `--internal-serve`.
 
 Unless `--data-dir` is supplied, the database, encrypted credentials,
 `master.key`, updater journal, backups, and staged releases are stored under
@@ -131,11 +137,11 @@ After creating a client key in the UI, configure an OpenAI-compatible client
 with:
 
 ```text
-Base URL: http://127.0.0.1:9472/v1
+Base URL: the `/v1` URL printed at startup (also shown in Settings)
 API key:  <the PayLessForAI client key>
 ```
 
-Anthropic-compatible clients should use `http://127.0.0.1:9472` as their base
+Anthropic-compatible clients should use the printed listener URL as their base
 URL, send the local key in `x-api-key`, and call `/v1/messages` (the
 `/anthropic/v1/messages` alias is also available).
 
@@ -204,7 +210,7 @@ Useful command-line flags include:
 
 ```text
 -data-dir                 Database and master-key directory
--listen                   HTTP address (default: 127.0.0.1:9472)
+-listen                   One-launch HTTP address override (default selection prefers 127.0.0.1:9472)
 -refresh-interval         Catalog refresh interval (default: 5m)
 -provider-base-url        Provider endpoint override (repeatable: name=url)
 -openrouter-base-url      OpenRouter endpoint override (compatibility alias)

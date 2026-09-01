@@ -11,6 +11,7 @@ import (
 	"github.com/neverknowerdev/paylessforai/internal/catalog"
 	"github.com/neverknowerdev/paylessforai/internal/db/repositories"
 	"github.com/neverknowerdev/paylessforai/internal/groups"
+	"github.com/neverknowerdev/paylessforai/internal/network"
 	"github.com/neverknowerdev/paylessforai/internal/providers"
 	proxyservice "github.com/neverknowerdev/paylessforai/internal/proxy"
 	"github.com/neverknowerdev/paylessforai/internal/secrets"
@@ -25,6 +26,7 @@ type Server struct {
 	proxy       *proxyservice.Proxy
 	credentials CredentialDeps
 	groups      *groups.Manager
+	network     *network.Service
 }
 
 type CredentialDeps struct {
@@ -33,6 +35,7 @@ type CredentialDeps struct {
 	Reload   func() error
 	Updates  *updater.Service
 	Groups   *groups.Manager
+	Network  *network.Service
 }
 
 func New(addr string, readHeaderTimeout, idleTimeout time.Duration, db *repositories.Repositories) (*Server, error) {
@@ -53,7 +56,7 @@ func NewWithDeps(addr string, readHeaderTimeout, idleTimeout time.Duration, db *
 		groupManager = groups.NewManager(db.Groups)
 		_ = groupManager.Reload(context.Background())
 	}
-	server := &Server{db: db, catalog: catalogManager, proxy: proxyHandler, credentials: credentials, groups: groupManager}
+	server := &Server{db: db, catalog: catalogManager, proxy: proxyHandler, credentials: credentials, groups: groupManager, network: credentials.Network}
 	mux := http.NewServeMux()
 	server.registerHealthRoutes(mux)
 	server.registerStatsRoutes(mux)
@@ -62,6 +65,7 @@ func NewWithDeps(addr string, readHeaderTimeout, idleTimeout time.Duration, db *
 	server.registerModelRoutes(mux)
 	server.registerUpdateRoutes(mux)
 	server.registerGroupRoutes(mux)
+	server.registerSettingsRoutes(mux)
 	mux.Handle("/", ui)
 	public := gateway.NewHandler(catalogManager, proxyHandler, server.groups)
 	mux.Handle("/v1/", public)

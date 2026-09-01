@@ -10,6 +10,19 @@ func TestParseAndValidate(t *testing.T) {
 	if c.DataDir != "/tmp/payless-test" || c.ListenAddr != "127.0.0.1:1234" {
 		t.Fatalf("unexpected config: %#v", c)
 	}
+	if !c.ListenExplicit {
+		t.Fatal("expected explicit listen flag")
+	}
+}
+
+func TestDefaultListenIsNotAnExplicitOverride(t *testing.T) {
+	c, err := Parse([]string{"-data-dir", "/tmp/payless-test"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if c.ListenExplicit {
+		t.Fatal("default listen address must allow persisted port resolution")
+	}
 }
 
 func TestValidateRejectsInvalidValues(t *testing.T) {

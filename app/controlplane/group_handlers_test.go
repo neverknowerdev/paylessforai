@@ -24,6 +24,10 @@ func TestGroupManagementAPIAndModelAlias(t *testing.T) {
 		t.Fatal(err)
 	}
 	handler := server.httpServer.Handler
+	_, secret, err := db.ClientAPIKeys.Create(context.Background(), "test")
+	if err != nil {
+		t.Fatal(err)
+	}
 	createBody := `{"name":"Coding","slug":"coding","enabled":true,"stages":[{"position":0,"name":"cheapest","sources":[{"kind":"model","model_id":"model-a"}],"billing_classes":["metered"],"selection":"lowest_expected_cost"}]}`
 	create := httptest.NewRecorder()
 	handler.ServeHTTP(create, httptest.NewRequest(http.MethodPost, "/api/groups", strings.NewReader(createBody)))
@@ -59,7 +63,9 @@ func TestGroupManagementAPIAndModelAlias(t *testing.T) {
 		t.Fatalf("re-enable: %d %s", enable.Code, enable.Body.String())
 	}
 	models := httptest.NewRecorder()
-	handler.ServeHTTP(models, httptest.NewRequest(http.MethodGet, "/v1/models", nil))
+	modelRequest := httptest.NewRequest(http.MethodGet, "/v1/models", nil)
+	modelRequest.Header.Set("Authorization", "Bearer "+secret)
+	handler.ServeHTTP(models, modelRequest)
 	if models.Code != http.StatusOK || !strings.Contains(models.Body.String(), `"id":"coding"`) || !strings.Contains(models.Body.String(), `"paylessforai_type":"group"`) {
 		t.Fatalf("models: %d %s", models.Code, models.Body.String())
 	}

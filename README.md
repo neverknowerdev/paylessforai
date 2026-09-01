@@ -146,7 +146,7 @@ configured in the UI.
 
 | Method | Endpoint | Purpose |
 | --- | --- | --- |
-| `GET` | `/v1/models` | Current merged model catalog |
+| `GET` | `/v1/models` | Current merged model catalog (client key required) |
 | `POST` | `/v1/chat/completions` | OpenAI Chat Completions |
 | `POST` | `/v1/responses` | OpenAI Responses |
 | `POST` | `/v1/messages` | Anthropic Messages |
@@ -158,13 +158,39 @@ Group management is available under `/api/groups` (list/create/get/replace/
 delete) and `/api/groups/preview` for server-backed validation and route
 previews.
 
-Inference endpoints require `Authorization: Bearer <client-key>`. Anthropic
-Messages also accepts `x-api-key: <client-key>`. Every proxied response includes
-an `X-PayLess-Request-ID` header for tracing.
+All inference endpoints, including `/v1/models`, require
+`Authorization: Bearer <client-key>`. Anthropic Messages also accepts
+`x-api-key: <client-key>`. Every proxied response includes an
+`X-PayLess-Request-ID` header for tracing.
 
 The local UI uses management endpoints under `/api/` for client keys, provider
 credentials, request statistics, model statistics, and status. Keep the listener bound to
 loopback unless those endpoints are protected by an external access layer.
+
+## Remote access with Tailscale
+
+Open Access & keys → Tailscale access to choose **Private devices** or the
+**Public API link**. PayLessForAI embeds Tailscale (`tsnet`), so no separate
+Tailscale daemon, public IP, port forwarding, or router configuration is
+needed. On first use, open the authorization link shown by the UI. The
+embedded node keeps its identity under `<data-dir>/tailscale/` and reconnects
+after restart.
+
+Private devices exposes the dashboard and key-protected inference API only to
+the owning Tailscale user. Public API link is beta: Tailscale Funnel exposes
+only the four inference routes and `/v1/models`; the dashboard, management,
+health, static, and unknown paths return `404`. Public callers do not need
+Tailscale, but every inference request still needs a PayLessForAI client key.
+
+Turn the mode back to **Off** to stop sharing. Forget identity is available
+only after sharing is stopped and removes the local embedded-node state. The
+feature is disabled by default. Tailscale's current plan terms apply; personal
+use is normally free, while business or organizational use may require a paid
+plan. See [Tailscale pricing](https://tailscale.com/pricing) and the
+[tsnet documentation](https://tailscale.com/docs/features/tsnet).
+
+The binary includes Tailscale under its BSD-3-Clause license; retain the
+upstream notices when redistributing builds.
 
 ## Routing and pricing
 

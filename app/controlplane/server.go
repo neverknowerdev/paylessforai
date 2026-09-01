@@ -9,10 +9,12 @@ import (
 
 	"github.com/neverknowerdev/paylessforai/app/gateway"
 	"github.com/neverknowerdev/paylessforai/internal/catalog"
+	"github.com/neverknowerdev/paylessforai/internal/clientauth"
 	"github.com/neverknowerdev/paylessforai/internal/db/repositories"
 	"github.com/neverknowerdev/paylessforai/internal/groups"
 	"github.com/neverknowerdev/paylessforai/internal/providers"
 	proxyservice "github.com/neverknowerdev/paylessforai/internal/proxy"
+	"github.com/neverknowerdev/paylessforai/internal/remoteaccess"
 	"github.com/neverknowerdev/paylessforai/internal/secrets"
 	"github.com/neverknowerdev/paylessforai/internal/updater"
 	"github.com/neverknowerdev/paylessforai/internal/web"
@@ -25,6 +27,11 @@ type Server struct {
 	proxy       *proxyservice.Proxy
 	credentials CredentialDeps
 	groups      *groups.Manager
+	control     http.Handler
+	controlMux  *http.ServeMux
+	gateway     http.Handler
+	remote      remoteaccess.Controller
+	remoteAdded bool
 }
 
 type CredentialDeps struct {
@@ -54,18 +61,22 @@ func NewWithDeps(addr string, readHeaderTimeout, idleTimeout time.Duration, db *
 		_ = groupManager.Reload(context.Background())
 	}
 	server := &Server{db: db, catalog: catalogManager, proxy: proxyHandler, credentials: credentials, groups: groupManager}
+	controlMux := http.NewServeMux()
+	server.registerHealthRoutes(controlMux)
+	server.registerStatsRoutes(controlMux)
+	server.registerKeyRoutes(controlMux)
+	server.registerProviderRoutes(controlMux)
+	server.registerModelRoutes(controlMux)
+	server.registerUpdateRoutes(controlMux)
+	server.registerGroupRoutes(controlMux)
+	controlMux.Handle("/", ui)
+	server.control = withRequestID(controlMux)
+	server.controlMux = controlMux
+	server.gateway = gateway.NewHandler(catalogManager, proxyHandler, clientauth.Middleware(dbClientKeys(db)), server.groups)
 	mux := http.NewServeMux()
-	server.registerHealthRoutes(mux)
-	server.registerStatsRoutes(mux)
-	server.registerKeyRoutes(mux)
-	server.registerProviderRoutes(mux)
-	server.registerModelRoutes(mux)
-	server.registerUpdateRoutes(mux)
-	server.registerGroupRoutes(mux)
-	mux.Handle("/", ui)
-	public := gateway.NewHandler(catalogManager, proxyHandler, server.groups)
-	mux.Handle("/v1/", public)
-	mux.Handle("/anthropic/v1/messages", public)
+	mux.Handle("/", server.control)
+	mux.Handle("/v1/", server.gateway)
+	mux.Handle("/anthropic/v1/messages", server.gateway)
 	var handler http.Handler = withRequestID(mux)
 	if gatePath := os.Getenv("PAYLESSFORAI_GATE_PATH"); gatePath != "" {
 		handler = http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -82,7 +93,38 @@ func NewWithDeps(addr string, readHeaderTimeout, idleTimeout time.Duration, db *
 	return server, nil
 }
 
+func dbClientKeys(db *repositories.Repositories) clientauth.Authenticator {
+	if db == nil {
+		return nil
+	}
+	return db.ClientAPIKeys
+}
+
 func (s *Server) SetGroups(manager *groups.Manager) { s.groups = manager }
+
+func (s *Server) GatewayHandler() http.Handler { return s.gateway }
+
+func (s *Server) PrivateHandler(authorize remoteaccess.Authorizer) http.Handler {
+	mux := http.NewServeMux()
+	mux.Handle("/", authorize(remoteaccess.ProtectManagement(s.control)))
+	mux.Handle("/v1/", s.gateway)
+	mux.Handle("/anthropic/v1/messages", s.gateway)
+	return withRequestID(mux)
+}
+
+func (s *Server) SetRemoteAccess(controller remoteaccess.Controller) {
+	s.remote = controller
+	if s.remoteAdded || s.control == nil {
+		return
+	}
+	// The control handler is backed by a ServeMux, so adding these routes here
+	// is safe before any listener is served and keeps remote control available
+	// on loopback and the owner-authorized private listener only.
+	if s.controlMux != nil {
+		s.registerRemoteAccessRoutes(s.controlMux)
+		s.remoteAdded = true
+	}
+}
 
 func (s *Server) ListenAndServe() error { return s.httpServer.ListenAndServe() }
 

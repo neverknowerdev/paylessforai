@@ -18,6 +18,7 @@ import (
 	"github.com/neverknowerdev/paylessforai/internal/groups"
 	"github.com/neverknowerdev/paylessforai/internal/matcher"
 	"github.com/neverknowerdev/paylessforai/internal/providers"
+	"github.com/neverknowerdev/paylessforai/internal/remoteaccess"
 	"github.com/neverknowerdev/paylessforai/internal/secrets"
 )
 
@@ -56,6 +57,10 @@ func testServer(t *testing.T) (*Server, func()) {
 func TestServerHealthModelsAndNotImplementedEndpoints(t *testing.T) {
 	server, cleanup := testServer(t)
 	defer cleanup()
+	_, secret, err := server.db.ClientAPIKeys.Create(context.Background(), "test")
+	if err != nil {
+		t.Fatal(err)
+	}
 	for _, test := range []struct {
 		path string
 		code int
@@ -72,6 +77,9 @@ func TestServerHealthModelsAndNotImplementedEndpoints(t *testing.T) {
 			method = http.MethodPost
 		}
 		req := httptest.NewRequest(method, test.path, nil)
+		if strings.HasPrefix(test.path, "/v1/") {
+			req.Header.Set("Authorization", "Bearer "+secret)
+		}
 		response := httptest.NewRecorder()
 		server.httpServer.Handler.ServeHTTP(response, req)
 		if response.Code != test.code {
@@ -86,8 +94,13 @@ func TestServerHealthModelsAndNotImplementedEndpoints(t *testing.T) {
 func TestServerModelsShape(t *testing.T) {
 	server, cleanup := testServer(t)
 	defer cleanup()
+	_, secret, err := server.db.ClientAPIKeys.Create(context.Background(), "test")
+	if err != nil {
+		t.Fatal(err)
+	}
 	response := httptest.NewRecorder()
 	req := httptest.NewRequest(http.MethodGet, "/v1/models", nil)
+	req.Header.Set("Authorization", "Bearer "+secret)
 	server.httpServer.Handler.ServeHTTP(response, req)
 	var body map[string]any
 	if err := json.Unmarshal(response.Body.Bytes(), &body); err != nil {
@@ -213,6 +226,40 @@ func TestProviderCredentialManagementAPI(t *testing.T) {
 	server.httpServer.Handler.ServeHTTP(duplicate, httptest.NewRequest(http.MethodPost, "/api/providers/credentials", strings.NewReader(`{"provider":"openrouter","label":"duplicate","api_key":"secret-value"}`)))
 	if duplicate.Code != http.StatusConflict || !strings.Contains(duplicate.Body.String(), `"code":"duplicate_provider_credential"`) {
 		t.Fatalf("expected duplicate credential rejection: %d %s", duplicate.Code, duplicate.Body.String())
+	}
+}
+
+type remoteControllerFake struct {
+	status remoteaccess.Status
+	config remoteaccess.Config
+}
+
+func (f *remoteControllerFake) Status(context.Context) remoteaccess.Status { return f.status }
+func (f *remoteControllerFake) Configure(_ context.Context, config remoteaccess.Config) error {
+	f.config = config
+	f.status.DesiredMode = config.Mode
+	f.status.Hostname = config.Hostname
+	return nil
+}
+func (f *remoteControllerFake) Retry(context.Context) error          { return nil }
+func (f *remoteControllerFake) Stop(context.Context) error           { return nil }
+func (f *remoteControllerFake) ForgetIdentity(context.Context) error { return nil }
+
+func TestRemoteAccessControlAPIIsRegisteredOnLoopback(t *testing.T) {
+	server, cleanup := testServer(t)
+	defer cleanup()
+	fake := &remoteControllerFake{status: remoteaccess.Status{Phase: remoteaccess.PhaseDisabled, DesiredMode: remoteaccess.ModeDisabled, Hostname: "paylessforai"}}
+	server.SetRemoteAccess(fake)
+	get := httptest.NewRecorder()
+	server.httpServer.Handler.ServeHTTP(get, httptest.NewRequest(http.MethodGet, "/api/remote-access", nil))
+	if get.Code != http.StatusOK || !strings.Contains(get.Body.String(), `"phase":"disabled"`) {
+		t.Fatalf("status: %d %s", get.Code, get.Body.String())
+	}
+	put := httptest.NewRequest(http.MethodPut, "/api/remote-access", strings.NewReader(`{"mode":"private","hostname":"node"}`))
+	response := httptest.NewRecorder()
+	server.httpServer.Handler.ServeHTTP(response, put)
+	if response.Code != http.StatusAccepted || fake.config.Mode != remoteaccess.ModePrivate {
+		t.Fatalf("configure: %d %s", response.Code, response.Body.String())
 	}
 }
 

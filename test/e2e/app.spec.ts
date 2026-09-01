@@ -357,7 +357,15 @@ test('creates and exposes a callable group alias', async ({ page, request }) => 
   });
   expect(groupInputSurface).toEqual({ color: 'rgb(244, 247, 251)', backgroundColor: 'rgb(10, 17, 34)' });
   await page.locator('#close-group-editor').click();
-  const models = await (await request.get('/v1/models')).json();
+  await page.getByRole('link', { name: 'Access & keys' }).click();
+  await page.getByRole('button', { name: 'Create API key' }).click();
+  await page.locator('#key-label').fill('group-models');
+  await page.locator('#key-modal').getByRole('button', { name: 'Create key' }).click();
+  await expect(page.locator('#new-key')).toContainText('plai_');
+  const keyText = await page.locator('#new-key').textContent();
+  const clientKey = keyText?.match(/plai_[0-9a-f]+/)?.[0];
+  expect(clientKey).toBeTruthy();
+  const models = await (await request.get('/v1/models', { headers: { Authorization: `Bearer ${clientKey}` } })).json();
   expect(models.data.some((item: { id: string; paylessforai_type?: string }) => item.id === 'coding-pool' && item.paylessforai_type === 'group')).toBeTruthy();
 });
 

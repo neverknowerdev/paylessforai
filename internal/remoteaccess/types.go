@@ -22,6 +22,7 @@ const (
 	PhaseStarting     Phase = "starting"
 	PhaseAuthRequired Phase = "auth_required"
 	PhaseConnecting   Phase = "connecting"
+	PhasePublishing   Phase = "publishing"
 	PhaseOnline       Phase = "online"
 	PhaseStopping     Phase = "stopping"
 	PhaseError        Phase = "error"

@@ -578,3 +578,39 @@ test('switches remote access modes with direct Tailscale auth and a running-serv
   await expect(page.locator('#remote-access-details')).toBeHidden();
   expect(putModes).toEqual(['private', 'disabled', 'private', 'disabled']);
 });
+
+test('waits for public Funnel DNS before showing the public API URL', async ({ page }) => {
+  let mode = 'disabled';
+  let phase = 'disabled';
+  let dnsReady = false;
+  await page.route('**/api/remote-access', async (route) => {
+    if (route.request().method() === 'PUT') {
+      mode = route.request().postDataJSON().mode;
+      phase = mode === 'funnel' ? 'publishing' : 'disabled';
+    } else if (phase === 'publishing' && dnsReady) {
+      phase = 'online';
+    }
+    const remote = mode === 'funnel';
+    await route.fulfill({
+      contentType: 'application/json',
+      body: JSON.stringify(remote ? {
+        desired_mode: mode,
+        effective_mode: phase === 'online' ? mode : 'disabled',
+        phase,
+        hostname: 'paylessforai',
+        dns_name: 'paylessforai.example.ts.net',
+        dashboard_url: 'https://paylessforai.example.ts.net/',
+        base_url: 'https://paylessforai.example.ts.net/v1',
+      } : { desired_mode: 'disabled', effective_mode: 'disabled', phase: 'disabled', hostname: 'paylessforai' }),
+    });
+  });
+  await page.goto('/#settings');
+  await page.getByRole('button', { name: /^Public API link/ }).click();
+  await expect(page.locator('#remote-access-phase')).toHaveText('Preparing public link');
+  await expect(page.locator('#remote-access-description')).toContainText('Public DNS can take a few minutes');
+  await expect(page.locator('#remote-access-links')).toBeHidden();
+  dnsReady = true;
+  await expect(page.locator('#remote-access-links')).toBeVisible({ timeout: 3000 });
+  await expect(page.locator('#remote-access-base')).toHaveText('https://paylessforai.example.ts.net/v1');
+  await expect(page.locator('#remote-access-dashboard').locator('..')).toBeHidden();
+});

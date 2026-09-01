@@ -21,6 +21,13 @@ var ErrShutdown = errors.New("remote access manager is shut down")
 type Option func(*Manager)
 
 func WithNodeFactory(factory NodeFactory) Option { return func(m *Manager) { m.factory = factory } }
+func WithFunnelDNSChecker(checker func(context.Context, string) bool) Option {
+	return func(m *Manager) {
+		if checker != nil {
+			m.funnelDNSChecker = checker
+		}
+	}
+}
 func WithPollInterval(interval time.Duration) Option {
 	return func(m *Manager) {
 		if interval > 0 {
@@ -30,12 +37,13 @@ func WithPollInterval(interval time.Duration) Option {
 }
 
 type Manager struct {
-	store          SettingsStore
-	stateDir       string
-	privateFactory PrivateHandlerFactory
-	publicHandler  http.Handler
-	factory        NodeFactory
-	pollInterval   time.Duration
+	store            SettingsStore
+	stateDir         string
+	privateFactory   PrivateHandlerFactory
+	publicHandler    http.Handler
+	factory          NodeFactory
+	pollInterval     time.Duration
+	funnelDNSChecker func(context.Context, string) bool
 
 	mu          sync.RWMutex
 	desired     Config
@@ -64,7 +72,7 @@ func New(store SettingsStore, dataDir string, privateFactory PrivateHandlerFacto
 	_ = os.Chmod(stateDir, 0o700)
 	m := &Manager{
 		store: store, stateDir: stateDir, privateFactory: privateFactory, publicHandler: publicHandler,
-		factory: productionNodeFactory, pollInterval: 500 * time.Millisecond,
+		factory: productionNodeFactory, pollInterval: 500 * time.Millisecond, funnelDNSChecker: publicFunnelDNSReady,
 		desired: config,
 		status:  Status{DesiredMode: config.Mode, EffectiveMode: ModeDisabled, Phase: PhaseDisabled, Hostname: config.Hostname, UpdatedAt: time.Now().UTC()},
 	}
@@ -149,7 +157,7 @@ func (m *Manager) Retry(ctx context.Context) error {
 	if mode == ModeDisabled {
 		return nil
 	}
-	if phase == PhaseStarting || phase == PhaseConnecting || phase == PhaseAuthRequired || phase == PhaseOnline || phase == PhaseStopping {
+	if phase == PhaseStarting || phase == PhaseConnecting || phase == PhaseAuthRequired || phase == PhasePublishing || phase == PhaseOnline || phase == PhaseStopping {
 		return nil
 	}
 	m.begin(context.Background(), false)
@@ -314,6 +322,21 @@ func (m *Manager) reconcile(ctx context.Context, generation uint64, done chan st
 			listeners = append(listeners, publicLn)
 			servers = append(servers, &http.Server{Handler: m.publicHandler})
 		}
+		dnsName := strings.TrimSuffix(state.DNSName, ".")
+		publishedOnline := false
+		defer func() {
+			if publishedOnline {
+				return
+			}
+			for _, server := range servers {
+				shutdownCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+				_ = server.Shutdown(shutdownCtx)
+				cancel()
+			}
+			for _, listener := range listeners {
+				_ = listener.Close()
+			}
+		}()
 		for i := range servers {
 			go func(server *http.Server, listener net.Listener) {
 				if serveErr := server.Serve(listener); serveErr != nil && !errors.Is(serveErr, http.ErrServerClosed) && !errors.Is(serveErr, net.ErrClosed) {
@@ -322,8 +345,17 @@ func (m *Manager) reconcile(ctx context.Context, generation uint64, done chan st
 				}
 			}(servers[i], listeners[i])
 		}
-		dnsName := strings.TrimSuffix(state.DNSName, ".")
+		if config.Mode == ModeFunnel {
+			m.publish(generation, Status{DesiredMode: config.Mode, EffectiveMode: config.Mode, Phase: PhasePublishing, Hostname: config.Hostname, DNSName: dnsName, DashboardURL: "https://" + dnsName + "/", BaseURL: "https://" + dnsName + "/v1", UpdatedAt: time.Now().UTC()})
+			if !m.waitForFunnelDNS(ctx, dnsName) {
+				if ctx.Err() == nil {
+					m.fail(generation, config, "funnel_dns_pending", "public Funnel DNS is still propagating; try again in a few minutes")
+				}
+				return
+			}
+		}
 		m.publish(generation, Status{DesiredMode: config.Mode, EffectiveMode: config.Mode, Phase: PhaseOnline, Hostname: config.Hostname, DNSName: dnsName, DashboardURL: "https://" + dnsName + "/", BaseURL: "https://" + dnsName + "/v1", UpdatedAt: time.Now().UTC()})
+		publishedOnline = true
 		<-ctx.Done()
 		for _, server := range servers {
 			shutdownCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
@@ -335,6 +367,42 @@ func (m *Manager) reconcile(ctx context.Context, generation uint64, done chan st
 		}
 		return
 	}
+}
+
+const funnelDNSWaitTimeout = 10 * time.Minute
+
+func (m *Manager) waitForFunnelDNS(ctx context.Context, hostname string) bool {
+	deadline := time.NewTimer(funnelDNSWaitTimeout)
+	defer deadline.Stop()
+	for {
+		checkCtx, cancel := context.WithTimeout(ctx, 2*time.Second)
+		ready := m.funnelDNSChecker(checkCtx, hostname)
+		cancel()
+		if ready {
+			return true
+		}
+		timer := time.NewTimer(m.pollInterval)
+		select {
+		case <-timer.C:
+		case <-ctx.Done():
+			timer.Stop()
+			return false
+		case <-deadline.C:
+			timer.Stop()
+			return false
+		}
+	}
+}
+
+func publicFunnelDNSReady(ctx context.Context, hostname string) bool {
+	resolver := &net.Resolver{
+		PreferGo: true,
+		Dial: func(ctx context.Context, _, _ string) (net.Conn, error) {
+			return (&net.Dialer{}).DialContext(ctx, "udp", "1.1.1.1:53")
+		},
+	}
+	addresses, err := resolver.LookupHost(ctx, hostname)
+	return err == nil && len(addresses) > 0
 }
 
 func (m *Manager) ensureNode(config Config) (Node, error) {
@@ -415,7 +483,7 @@ func (m *Manager) fail(generation uint64, config Config, code, message string) {
 }
 
 func (m *Manager) activeLocked() bool {
-	return m.node != nil || m.done != nil || m.status.Phase == PhaseOnline || m.status.Phase == PhaseStarting || m.status.Phase == PhaseConnecting || m.status.Phase == PhaseAuthRequired
+	return m.node != nil || m.done != nil || m.status.Phase == PhaseOnline || m.status.Phase == PhaseStarting || m.status.Phase == PhaseConnecting || m.status.Phase == PhaseAuthRequired || m.status.Phase == PhasePublishing
 }
 
 func wait(ctx context.Context, duration time.Duration) bool {

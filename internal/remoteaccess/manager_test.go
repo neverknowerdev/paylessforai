@@ -102,7 +102,7 @@ func TestManagerFunnelUsesPrivateAndFunnelOnlyListeners(t *testing.T) {
 	m, err := New(store, t.TempDir(), func(authorizer Authorizer) http.Handler {
 		wrapped = authorizer
 		return http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) { io.WriteString(w, "private") })
-	}, http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) { io.WriteString(w, "public") }), WithNodeFactory(func(string, string) Node { return node }), WithPollInterval(time.Millisecond))
+	}, http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) { io.WriteString(w, "public") }), WithNodeFactory(func(string, string) Node { return node }), WithFunnelDNSChecker(func(context.Context, string) bool { return true }), WithPollInterval(time.Millisecond))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -164,7 +164,7 @@ func TestManagerReusesNodeWhenSwitchingModes(t *testing.T) {
 	m, err := New(store, t.TempDir(), func(Authorizer) http.Handler { return http.NotFoundHandler() }, http.NotFoundHandler(), WithNodeFactory(func(string, string) Node {
 		factoryCalls++
 		return node
-	}), WithPollInterval(time.Millisecond))
+	}), WithFunnelDNSChecker(func(context.Context, string) bool { return true }), WithPollInterval(time.Millisecond))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -199,6 +199,36 @@ func TestManagerReusesNodeWhenSwitchingModes(t *testing.T) {
 	node.mu.Unlock()
 	if !closed {
 		t.Fatal("node was not closed on shutdown")
+	}
+}
+
+func TestManagerWaitsForPublicDNSBeforePublishingOnline(t *testing.T) {
+	store := &memoryStore{values: map[string]string{}}
+	node := &fakeNode{}
+	var checksMu sync.Mutex
+	checks := 0
+	m, err := New(store, t.TempDir(), func(Authorizer) http.Handler { return http.NotFoundHandler() }, http.NotFoundHandler(), WithNodeFactory(func(string, string) Node {
+		return node
+	}), WithFunnelDNSChecker(func(context.Context, string) bool {
+		checksMu.Lock()
+		defer checksMu.Unlock()
+		checks++
+		return checks >= 2
+	}), WithPollInterval(time.Millisecond))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := m.Configure(context.Background(), Config{Mode: ModeFunnel, Hostname: "node"}); err != nil {
+		t.Fatal(err)
+	}
+	waitFor(t, func() bool { return m.Status(context.Background()).Phase == PhaseOnline })
+	checksMu.Lock()
+	defer checksMu.Unlock()
+	if checks < 2 {
+		t.Fatalf("public DNS was not checked until ready: %d check(s)", checks)
+	}
+	if err := m.Shutdown(context.Background()); err != nil {
+		t.Fatal(err)
 	}
 }
 

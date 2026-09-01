@@ -35,12 +35,19 @@ type fakeNode struct {
 	mu          sync.Mutex
 	statuses    []*NodeStatus
 	started     bool
+	startCalls  int
 	closed      bool
 	tlsCalls    int
 	funnelCalls int
 }
 
-func (n *fakeNode) Start() error { n.mu.Lock(); n.started = true; n.mu.Unlock(); return nil }
+func (n *fakeNode) Start() error {
+	n.mu.Lock()
+	n.started = true
+	n.startCalls++
+	n.mu.Unlock()
+	return nil
+}
 func (n *fakeNode) Status(context.Context) (*NodeStatus, error) {
 	n.mu.Lock()
 	defer n.mu.Unlock()
@@ -148,6 +155,51 @@ func TestManagerKeepsAuthURLInMemoryOnly(t *testing.T) {
 		t.Fatal("authorization URL was persisted")
 	}
 	_ = m.Shutdown(context.Background())
+}
+
+func TestManagerReusesNodeWhenSwitchingModes(t *testing.T) {
+	store := &memoryStore{values: map[string]string{}}
+	node := &fakeNode{}
+	factoryCalls := 0
+	m, err := New(store, t.TempDir(), func(Authorizer) http.Handler { return http.NotFoundHandler() }, http.NotFoundHandler(), WithNodeFactory(func(string, string) Node {
+		factoryCalls++
+		return node
+	}), WithPollInterval(time.Millisecond))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := m.Configure(context.Background(), Config{Mode: ModePrivate, Hostname: "node"}); err != nil {
+		t.Fatal(err)
+	}
+	waitFor(t, func() bool { return m.Status(context.Background()).Phase == PhaseOnline })
+	if err := m.Configure(context.Background(), Config{Mode: ModeFunnel, Hostname: "node"}); err != nil {
+		t.Fatal(err)
+	}
+	waitFor(t, func() bool {
+		return m.Status(context.Background()).Phase == PhaseOnline && m.Status(context.Background()).EffectiveMode == ModeFunnel
+	})
+
+	node.mu.Lock()
+	startCalls, tlsCalls, funnelCalls, closed := node.startCalls, node.tlsCalls, node.funnelCalls, node.closed
+	node.mu.Unlock()
+	if factoryCalls != 1 || startCalls != 1 {
+		t.Fatalf("node was not reused: factory calls=%d, start calls=%d", factoryCalls, startCalls)
+	}
+	if tlsCalls != 2 || funnelCalls != 1 {
+		t.Fatalf("listeners: TLS=%d Funnel=%d", tlsCalls, funnelCalls)
+	}
+	if closed {
+		t.Fatal("node was closed while switching modes")
+	}
+	if err := m.Shutdown(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	node.mu.Lock()
+	closed = node.closed
+	node.mu.Unlock()
+	if !closed {
+		t.Fatal("node was not closed on shutdown")
+	}
 }
 
 func TestOwnerAuthorizerFailsClosedAndDoesNotTrustHeaders(t *testing.T) {

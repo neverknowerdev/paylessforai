@@ -37,13 +37,16 @@ type Manager struct {
 	factory        NodeFactory
 	pollInterval   time.Duration
 
-	mu         sync.RWMutex
-	desired    Config
-	status     Status
-	generation uint64
-	cancel     context.CancelFunc
-	done       chan struct{}
-	closed     bool
+	mu          sync.RWMutex
+	desired     Config
+	status      Status
+	generation  uint64
+	cancel      context.CancelFunc
+	done        chan struct{}
+	node        Node
+	nodeHost    string
+	nodeStarted bool
+	closed      bool
 }
 
 func New(store SettingsStore, dataDir string, privateFactory PrivateHandlerFactory, publicHandler http.Handler, options ...Option) (*Manager, error) {
@@ -61,7 +64,7 @@ func New(store SettingsStore, dataDir string, privateFactory PrivateHandlerFacto
 	_ = os.Chmod(stateDir, 0o700)
 	m := &Manager{
 		store: store, stateDir: stateDir, privateFactory: privateFactory, publicHandler: publicHandler,
-		factory: productionNodeFactory, pollInterval: 2 * time.Second,
+		factory: productionNodeFactory, pollInterval: 500 * time.Millisecond,
 		desired: config,
 		status:  Status{DesiredMode: config.Mode, EffectiveMode: ModeDisabled, Phase: PhaseDisabled, Hostname: config.Hostname, UpdatedAt: time.Now().UTC()},
 	}
@@ -194,10 +197,12 @@ func (m *Manager) Shutdown(ctx context.Context) error {
 	done := m.done
 	m.mu.Unlock()
 	if done == nil {
+		m.stopNode()
 		return nil
 	}
 	select {
 	case <-done:
+		m.stopNode()
 		return nil
 	case <-ctx.Done():
 		return ctx.Err()
@@ -250,17 +255,13 @@ func (m *Manager) reconcile(ctx context.Context, generation uint64, done chan st
 	config := m.desired
 	m.mu.RUnlock()
 	if config.Mode == ModeDisabled {
+		m.stopNode()
 		m.publish(generation, Status{DesiredMode: ModeDisabled, EffectiveMode: ModeDisabled, Phase: PhaseDisabled, Hostname: config.Hostname, UpdatedAt: time.Now().UTC()})
 		return
 	}
-	node := m.factory(config.Hostname, m.stateDir)
-	if node == nil {
+	node, err := m.ensureNode(config)
+	if err != nil {
 		m.fail(generation, config, "node_unavailable", "Tailscale node could not be created")
-		return
-	}
-	defer node.Close()
-	if err := node.Start(); err != nil {
-		m.fail(generation, config, "node_start_failed", "Tailscale node could not start")
 		return
 	}
 	for {
@@ -307,7 +308,7 @@ func (m *Manager) reconcile(ctx context.Context, generation uint64, done chan st
 			publicLn, publicErr := node.ListenFunnel("tcp", ":443")
 			if publicErr != nil {
 				_ = privateLn.Close()
-				m.fail(generation, config, "funnel_listener_failed", "public Funnel listener could not start")
+				m.fail(generation, config, "funnel_listener_failed", fmt.Sprintf("public Funnel is unavailable: %v", publicErr))
 				return
 			}
 			listeners = append(listeners, publicLn)
@@ -336,6 +337,67 @@ func (m *Manager) reconcile(ctx context.Context, generation uint64, done chan st
 	}
 }
 
+func (m *Manager) ensureNode(config Config) (Node, error) {
+	var old Node
+	m.mu.Lock()
+	if m.node != nil && m.nodeHost != config.Hostname {
+		old = m.node
+		m.node = nil
+		m.nodeHost = ""
+		m.nodeStarted = false
+	}
+	node := m.node
+	started := m.nodeStarted
+	if node == nil {
+		node = m.factory(config.Hostname, m.stateDir)
+		if node != nil {
+			m.node = node
+			m.nodeHost = config.Hostname
+			m.nodeStarted = false
+		}
+	}
+	if node != nil && !started {
+		m.nodeStarted = true
+	}
+	m.mu.Unlock()
+	if old != nil {
+		_ = old.Close()
+	}
+	if node == nil {
+		return nil, errors.New("Tailscale node could not be created")
+	}
+	if !started {
+		if err := node.Start(); err != nil {
+			m.discardNode(node)
+			return nil, fmt.Errorf("Tailscale node could not start: %w", err)
+		}
+	}
+	return node, nil
+}
+
+func (m *Manager) discardNode(node Node) {
+	m.mu.Lock()
+	if m.node == node {
+		m.node = nil
+		m.nodeHost = ""
+		m.nodeStarted = false
+	}
+	m.mu.Unlock()
+	_ = node.Close()
+}
+
+func (m *Manager) stopNode() {
+	m.mu.Lock()
+	node := m.node
+	m.node = nil
+	m.nodeHost = ""
+	m.nodeStarted = false
+	m.mu.Unlock()
+	if node != nil {
+		_ = node.Close()
+	}
+}
+
 func (m *Manager) publish(generation uint64, status Status) {
 	m.mu.Lock()
 	if m.generation != generation {
@@ -353,7 +415,7 @@ func (m *Manager) fail(generation uint64, config Config, code, message string) {
 }
 
 func (m *Manager) activeLocked() bool {
-	return m.done != nil || m.status.Phase == PhaseOnline || m.status.Phase == PhaseStarting || m.status.Phase == PhaseConnecting || m.status.Phase == PhaseAuthRequired
+	return m.node != nil || m.done != nil || m.status.Phase == PhaseOnline || m.status.Phase == PhaseStarting || m.status.Phase == PhaseConnecting || m.status.Phase == PhaseAuthRequired
 }
 
 func wait(ctx context.Context, duration time.Duration) bool {

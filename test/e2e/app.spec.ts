@@ -508,6 +508,8 @@ test('shows listener settings and saves a port for the next restart', async ({ p
   await expect(page.locator('#network-settings-form')).toBeVisible();
   await expect(page.locator('#remote-access-details')).toBeHidden();
   await expect(page.locator('#remote-access-mode')).toHaveCount(0);
+  await expect(page.locator('#network-active')).toContainText('127.0.0.1:19477');
+  await expect(page.locator('#network-settings-form').locator('..').locator('.credential-main strong').first()).toHaveText('Local server address');
   const modeStyle = await page.locator('.access-mode-option[data-access-mode="private"]').evaluate((element) => {
     const style = getComputedStyle(element);
     return { backgroundColor: style.backgroundColor, borderRadius: style.borderRadius };
@@ -524,21 +526,32 @@ test('shows listener settings and saves a port for the next restart', async ({ p
   expect(settings.restart_required).toBeTruthy();
 });
 
-test('switches remote access modes and opens the Tailscale auth modal', async ({ page }) => {
+test('switches remote access modes with direct Tailscale auth and a running-server stop confirmation', async ({ page }) => {
   let mode = 'disabled';
+  let phase = 'disabled';
+  const putModes: string[] = [];
   await page.route('**/api/remote-access', async (route) => {
-    if (route.request().method() === 'PUT') mode = route.request().postDataJSON().mode;
-    const remote = mode !== 'disabled';
+    if (route.request().method() === 'PUT') {
+      mode = route.request().postDataJSON().mode;
+      putModes.push(mode);
+      phase = mode === 'disabled' ? 'disabled' : putModes.length === 1 ? 'auth_required' : 'online';
+    }
     await route.fulfill({
       contentType: 'application/json',
-      body: JSON.stringify(remote ? {
+      body: JSON.stringify(mode !== 'disabled' ? {
         desired_mode: mode,
-        effective_mode: 'disabled',
-        phase: 'auth_required',
+        effective_mode: phase === 'online' ? mode : 'disabled',
+        phase,
         hostname: 'paylessforai',
-        action: { kind: 'authorize_node', label: 'Authorize with Tailscale', url: 'https://login.tailscale.com/a/test-auth' },
+        ...(phase === 'auth_required' ? { action: { kind: 'authorize_node', label: 'Authorize with Tailscale', url: 'https://login.tailscale.com/a/test-auth' } } : {}),
       } : { desired_mode: 'disabled', effective_mode: 'disabled', phase: 'disabled', hostname: 'paylessforai' }),
     });
+  });
+  let dialogSeen = false;
+  let dialogAction: 'dismiss' | 'accept' = 'dismiss';
+  page.on('dialog', async (dialog) => {
+    dialogSeen = true;
+    if (dialogAction === 'accept') await dialog.accept(); else await dialog.dismiss();
   });
   await page.goto('/#settings');
   await expect(page.locator('.access-mode-option[data-access-mode="disabled"]')).toHaveAttribute('aria-pressed', 'true');
@@ -547,18 +560,21 @@ test('switches remote access modes and opens the Tailscale auth modal', async ({
   await expect(page.locator('#remote-access-details')).toBeVisible();
   await expect(page.locator('#remote-access-action')).toBeVisible();
   await expect(page.locator('#remote-access-action-link')).toHaveText('Auth Tailscale');
+  await expect(page.locator('#remote-access-action-link')).toHaveAttribute('href', 'https://login.tailscale.com/a/test-auth');
+  await expect(page.locator('#remote-auth-modal')).toHaveCount(0);
   await expect(page.locator('#remote-access-links')).toBeHidden();
-  await page.locator('#remote-access-action-link').click();
-  await expect(page.locator('#remote-auth-modal')).toBeVisible();
-  await expect(page.locator('#remote-auth-modal-title')).toHaveText('Connect Private devices');
-  await expect(page.locator('#remote-auth-modal-link')).toHaveAttribute('href', 'https://login.tailscale.com/a/test-auth');
-  await page.locator('#remote-auth-modal').getByRole('button', { name: 'Close', exact: true }).click();
-  page.once('dialog', (dialog) => dialog.dismiss());
+  await page.getByRole('button', { name: /^Off/ }).click();
+  await expect(page.locator('.access-mode-option[data-access-mode="disabled"]')).toHaveAttribute('aria-pressed', 'true');
+  expect(dialogSeen).toBeFalsy();
+  await page.getByRole('button', { name: /^Private devices/ }).click();
+  await expect(page.locator('#remote-access-phase')).toHaveText('Online');
+  dialogAction = 'dismiss';
   await page.getByRole('button', { name: /^Off/ }).click();
   await expect(page.locator('.access-mode-option[data-access-mode="private"]')).toHaveAttribute('aria-pressed', 'true');
-  page.once('dialog', (dialog) => dialog.accept());
+  expect(dialogSeen).toBeTruthy();
+  dialogAction = 'accept';
   await page.getByRole('button', { name: /^Off/ }).click();
-  await expect(page.locator('#remote-auth-modal')).toBeHidden();
   await expect(page.locator('#network-settings-form')).toBeVisible();
   await expect(page.locator('#remote-access-details')).toBeHidden();
+  expect(putModes).toEqual(['private', 'disabled', 'private', 'disabled']);
 });

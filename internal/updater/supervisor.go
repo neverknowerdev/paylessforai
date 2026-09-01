@@ -241,7 +241,7 @@ func promoteCandidate(ctx context.Context, dataDir string, journal *Journal, pre
 	dbPath := filepath.Join(dataDir, "paylessforai.db")
 	backupDir := filepath.Join(dataDir, "updater", "backups", request.OperationID)
 	backupPath := filepath.Join(backupDir, "paylessforai.db")
-	state := State{OperationID: request.OperationID, Phase: PhaseSnapshotting, FailedPhase: PhaseSnapshotting, CurrentPath: previousPath, PreviousPath: previousPath, CandidatePath: request.CandidatePath, CandidateVersion: request.CandidateVersion, CandidateCommit: request.Commit, CandidateChannel: request.Channel, BackupPath: backupPath}
+	state := State{OperationID: request.OperationID, Phase: PhaseSnapshotting, FailedPhase: PhaseSnapshotting, CurrentPath: previousPath, CurrentVersion: buildinfo.Current().Version, PreviousPath: previousPath, CandidatePath: request.CandidatePath, CandidateVersion: request.CandidateVersion, CandidateCommit: request.Commit, CandidateChannel: request.Channel, BackupPath: backupPath}
 	if err := journal.Transition(state); err != nil {
 		return err
 	}

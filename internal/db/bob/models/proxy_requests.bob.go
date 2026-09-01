@@ -35,6 +35,10 @@ type ProxyRequest struct {
 	ErrorCode             sql.Null[string] `db:"error_code" `
 	ErrorMessage          sql.Null[string] `db:"error_message" `
 	StatsDisposition      string           `db:"stats_disposition" `
+	ResolvedGroupID       sql.Null[string] `db:"resolved_group_id" `
+	ResolvedGroupRevision sql.Null[int64]  `db:"resolved_group_revision" `
+	ResolvedPlanJSON      sql.Null[string] `db:"resolved_plan_json" `
+	SelectedLogicalModel  sql.Null[string] `db:"selected_logical_model" `
 
 	R proxyRequestR `db:"-" `
 }
@@ -67,7 +71,7 @@ type proxyRequestRLoaded struct {
 
 func buildProxyRequestColumns(tableName string) proxyRequestColumns {
 	columnsExpr := expr.NewColumnsExpr(
-		"id", "client_key_id", "protocol", "logical_model", "state", "received_at", "completed_at", "selected_provider", "selected_upstream_model", "attempt_count", "duration_ms", "error_code", "error_message", "stats_disposition",
+		"id", "client_key_id", "protocol", "logical_model", "state", "received_at", "completed_at", "selected_provider", "selected_upstream_model", "attempt_count", "duration_ms", "error_code", "error_message", "stats_disposition", "resolved_group_id", "resolved_group_revision", "resolved_plan_json", "selected_logical_model",
 	)
 
 	if tableName != "" {
@@ -91,6 +95,10 @@ func buildProxyRequestColumns(tableName string) proxyRequestColumns {
 		ErrorCode:             buildProxyRequestColumn(tableName, "error_code"),
 		ErrorMessage:          buildProxyRequestColumn(tableName, "error_message"),
 		StatsDisposition:      buildProxyRequestColumn(tableName, "stats_disposition"),
+		ResolvedGroupID:       buildProxyRequestColumn(tableName, "resolved_group_id"),
+		ResolvedGroupRevision: buildProxyRequestColumn(tableName, "resolved_group_revision"),
+		ResolvedPlanJSON:      buildProxyRequestColumn(tableName, "resolved_plan_json"),
+		SelectedLogicalModel:  buildProxyRequestColumn(tableName, "selected_logical_model"),
 	}
 }
 
@@ -111,6 +119,10 @@ type proxyRequestColumns struct {
 	ErrorCode             proxyRequestColumn
 	ErrorMessage          proxyRequestColumn
 	StatsDisposition      proxyRequestColumn
+	ResolvedGroupID       proxyRequestColumn
+	ResolvedGroupRevision proxyRequestColumn
+	ResolvedPlanJSON      proxyRequestColumn
+	SelectedLogicalModel  proxyRequestColumn
 }
 
 // Alias returns the current table alias for the columns set.
@@ -170,10 +182,14 @@ type ProxyRequestSetter struct {
 	ErrorCode             *sql.Null[string] `db:"error_code" `
 	ErrorMessage          *sql.Null[string] `db:"error_message" `
 	StatsDisposition      *string           `db:"stats_disposition" `
+	ResolvedGroupID       *sql.Null[string] `db:"resolved_group_id" `
+	ResolvedGroupRevision *sql.Null[int64]  `db:"resolved_group_revision" `
+	ResolvedPlanJSON      *sql.Null[string] `db:"resolved_plan_json" `
+	SelectedLogicalModel  *sql.Null[string] `db:"selected_logical_model" `
 }
 
 func (s ProxyRequestSetter) SetColumns() []string {
-	vals := make([]string, 0, 14)
+	vals := make([]string, 0, 18)
 	if s.ID != nil {
 		vals = append(vals, "id")
 	}
@@ -215,6 +231,18 @@ func (s ProxyRequestSetter) SetColumns() []string {
 	}
 	if s.StatsDisposition != nil {
 		vals = append(vals, "stats_disposition")
+	}
+	if s.ResolvedGroupID != nil {
+		vals = append(vals, "resolved_group_id")
+	}
+	if s.ResolvedGroupRevision != nil {
+		vals = append(vals, "resolved_group_revision")
+	}
+	if s.ResolvedPlanJSON != nil {
+		vals = append(vals, "resolved_plan_json")
+	}
+	if s.SelectedLogicalModel != nil {
+		vals = append(vals, "selected_logical_model")
 	}
 	return vals
 }
@@ -337,6 +365,42 @@ func (s ProxyRequestSetter) Overwrite(t *ProxyRequest) {
 				return *new(string)
 			}
 			return *s.StatsDisposition
+		}()
+	}
+	if s.ResolvedGroupID != nil {
+		t.ResolvedGroupID = func() sql.Null[string] {
+			if s.ResolvedGroupID == nil {
+				return *new(sql.Null[string])
+			}
+			v := s.ResolvedGroupID
+			return *v
+		}()
+	}
+	if s.ResolvedGroupRevision != nil {
+		t.ResolvedGroupRevision = func() sql.Null[int64] {
+			if s.ResolvedGroupRevision == nil {
+				return *new(sql.Null[int64])
+			}
+			v := s.ResolvedGroupRevision
+			return *v
+		}()
+	}
+	if s.ResolvedPlanJSON != nil {
+		t.ResolvedPlanJSON = func() sql.Null[string] {
+			if s.ResolvedPlanJSON == nil {
+				return *new(sql.Null[string])
+			}
+			v := s.ResolvedPlanJSON
+			return *v
+		}()
+	}
+	if s.SelectedLogicalModel != nil {
+		t.SelectedLogicalModel = func() sql.Null[string] {
+			if s.SelectedLogicalModel == nil {
+				return *new(sql.Null[string])
+			}
+			v := s.SelectedLogicalModel
+			return *v
 		}()
 	}
 }
@@ -532,6 +596,58 @@ func (s *ProxyRequestSetter) Apply(q *dialect.InsertQuery) {
 					return *s.StatsDisposition
 				}()).WriteSQL(ctx, w, d, start)
 			}))
+		case "resolved_group_id":
+			vals = append(vals, bob.ExpressionFunc(func(ctx context.Context, w io.StringWriter, d bob.Dialect, start int) ([]any, error) {
+				if s.ResolvedGroupID == nil {
+					return sqlite.Arg(nil).WriteSQL(ctx, w, d, start)
+				}
+				return sqlite.Arg(func() sql.Null[string] {
+					if s.ResolvedGroupID == nil {
+						return *new(sql.Null[string])
+					}
+					v := s.ResolvedGroupID
+					return *v
+				}()).WriteSQL(ctx, w, d, start)
+			}))
+		case "resolved_group_revision":
+			vals = append(vals, bob.ExpressionFunc(func(ctx context.Context, w io.StringWriter, d bob.Dialect, start int) ([]any, error) {
+				if s.ResolvedGroupRevision == nil {
+					return sqlite.Arg(nil).WriteSQL(ctx, w, d, start)
+				}
+				return sqlite.Arg(func() sql.Null[int64] {
+					if s.ResolvedGroupRevision == nil {
+						return *new(sql.Null[int64])
+					}
+					v := s.ResolvedGroupRevision
+					return *v
+				}()).WriteSQL(ctx, w, d, start)
+			}))
+		case "resolved_plan_json":
+			vals = append(vals, bob.ExpressionFunc(func(ctx context.Context, w io.StringWriter, d bob.Dialect, start int) ([]any, error) {
+				if s.ResolvedPlanJSON == nil {
+					return sqlite.Arg(nil).WriteSQL(ctx, w, d, start)
+				}
+				return sqlite.Arg(func() sql.Null[string] {
+					if s.ResolvedPlanJSON == nil {
+						return *new(sql.Null[string])
+					}
+					v := s.ResolvedPlanJSON
+					return *v
+				}()).WriteSQL(ctx, w, d, start)
+			}))
+		case "selected_logical_model":
+			vals = append(vals, bob.ExpressionFunc(func(ctx context.Context, w io.StringWriter, d bob.Dialect, start int) ([]any, error) {
+				if s.SelectedLogicalModel == nil {
+					return sqlite.Arg(nil).WriteSQL(ctx, w, d, start)
+				}
+				return sqlite.Arg(func() sql.Null[string] {
+					if s.SelectedLogicalModel == nil {
+						return *new(sql.Null[string])
+					}
+					v := s.SelectedLogicalModel
+					return *v
+				}()).WriteSQL(ctx, w, d, start)
+			}))
 		}
 	}
 
@@ -543,7 +659,7 @@ func (s ProxyRequestSetter) UpdateMod() bob.Mod[*dialect.UpdateQuery] {
 }
 
 func (s ProxyRequestSetter) Expressions(prefix ...string) []bob.Expression {
-	exprs := make([]bob.Expression, 0, 14)
+	exprs := make([]bob.Expression, 0, 18)
 
 	if s.ID != nil {
 		exprs = append(exprs, expr.Join{Sep: " = ", Exprs: []bob.Expression{
@@ -643,6 +759,34 @@ func (s ProxyRequestSetter) Expressions(prefix ...string) []bob.Expression {
 		}})
 	}
 
+	if s.ResolvedGroupID != nil {
+		exprs = append(exprs, expr.Join{Sep: " = ", Exprs: []bob.Expression{
+			sqlite.Quote(append(prefix, "resolved_group_id")...),
+			sqlite.Arg(s.ResolvedGroupID),
+		}})
+	}
+
+	if s.ResolvedGroupRevision != nil {
+		exprs = append(exprs, expr.Join{Sep: " = ", Exprs: []bob.Expression{
+			sqlite.Quote(append(prefix, "resolved_group_revision")...),
+			sqlite.Arg(s.ResolvedGroupRevision),
+		}})
+	}
+
+	if s.ResolvedPlanJSON != nil {
+		exprs = append(exprs, expr.Join{Sep: " = ", Exprs: []bob.Expression{
+			sqlite.Quote(append(prefix, "resolved_plan_json")...),
+			sqlite.Arg(s.ResolvedPlanJSON),
+		}})
+	}
+
+	if s.SelectedLogicalModel != nil {
+		exprs = append(exprs, expr.Join{Sep: " = ", Exprs: []bob.Expression{
+			sqlite.Quote(append(prefix, "selected_logical_model")...),
+			sqlite.Arg(s.SelectedLogicalModel),
+		}})
+	}
+
 	return exprs
 }
 
@@ -653,7 +797,7 @@ func proxyRequestScanMapper(ctx context.Context, cols []string) (scan.BeforeFunc
 		idx int
 		dst func(o *ProxyRequest) any
 	}
-	targets := make([]target, 0, 14)
+	targets := make([]target, 0, 18)
 	for i, col := range cols {
 		switch col {
 		case "id":
@@ -684,6 +828,14 @@ func proxyRequestScanMapper(ctx context.Context, cols []string) (scan.BeforeFunc
 			targets = append(targets, target{i, func(o *ProxyRequest) any { return &o.ErrorMessage }})
 		case "stats_disposition":
 			targets = append(targets, target{i, func(o *ProxyRequest) any { return &o.StatsDisposition }})
+		case "resolved_group_id":
+			targets = append(targets, target{i, func(o *ProxyRequest) any { return &o.ResolvedGroupID }})
+		case "resolved_group_revision":
+			targets = append(targets, target{i, func(o *ProxyRequest) any { return &o.ResolvedGroupRevision }})
+		case "resolved_plan_json":
+			targets = append(targets, target{i, func(o *ProxyRequest) any { return &o.ResolvedPlanJSON }})
+		case "selected_logical_model":
+			targets = append(targets, target{i, func(o *ProxyRequest) any { return &o.SelectedLogicalModel }})
 		}
 	}
 

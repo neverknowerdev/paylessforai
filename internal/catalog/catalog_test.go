@@ -73,3 +73,23 @@ func TestRefreshPropagatesModalitiesAndTags(t *testing.T) {
 		t.Fatalf("metadata not propagated: %#v", route.Capabilities)
 	}
 }
+
+func TestRefreshHookReceivesOnlyNewProviderModelRoutes(t *testing.T) {
+	client := &fakeClient{name: "provider-a", models: []providers.Model{{ID: "model-a", Name: "Model A"}}}
+	manager := New([]providers.Client{client})
+	var batches [][]matcher.Route
+	manager.SetRefreshHook(func(_ context.Context, routes []matcher.Route) error {
+		batches = append(batches, routes)
+		return nil
+	})
+	if err := manager.Refresh(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	client.models = append(client.models, providers.Model{ID: "model-b", Name: "Model B"})
+	if err := manager.Refresh(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	if len(batches) != 2 || len(batches[0]) != 1 || batches[0][0].LogicalModel != "model-a" || len(batches[1]) != 1 || batches[1][0].LogicalModel != "model-b" {
+		t.Fatalf("unexpected discovery hook batches: %#v", batches)
+	}
+}

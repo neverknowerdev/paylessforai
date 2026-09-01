@@ -37,6 +37,9 @@ type ProxyAttempt struct {
 	DurationMS       sql.Null[int64]  `db:"duration_ms" `
 	DeliveryState    string           `db:"delivery_state" `
 	StatsDisposition string           `db:"stats_disposition" `
+	GroupStageID     sql.Null[string] `db:"group_stage_id" `
+	GroupStagePath   sql.Null[string] `db:"group_stage_path" `
+	CredentialID     sql.Null[string] `db:"credential_id" `
 
 	R proxyAttemptR `db:"-" `
 }
@@ -67,7 +70,7 @@ type proxyAttemptRLoaded struct {
 
 func buildProxyAttemptColumns(tableName string) proxyAttemptColumns {
 	columnsExpr := expr.NewColumnsExpr(
-		"id", "request_id", "attempt_number", "route_id", "provider", "upstream_model", "state", "started_at", "completed_at", "http_status", "error_class", "error_message", "error_raw", "duration_ms", "delivery_state", "stats_disposition",
+		"id", "request_id", "attempt_number", "route_id", "provider", "upstream_model", "state", "started_at", "completed_at", "http_status", "error_class", "error_message", "error_raw", "duration_ms", "delivery_state", "stats_disposition", "group_stage_id", "group_stage_path", "credential_id",
 	)
 
 	if tableName != "" {
@@ -93,6 +96,9 @@ func buildProxyAttemptColumns(tableName string) proxyAttemptColumns {
 		DurationMS:       buildProxyAttemptColumn(tableName, "duration_ms"),
 		DeliveryState:    buildProxyAttemptColumn(tableName, "delivery_state"),
 		StatsDisposition: buildProxyAttemptColumn(tableName, "stats_disposition"),
+		GroupStageID:     buildProxyAttemptColumn(tableName, "group_stage_id"),
+		GroupStagePath:   buildProxyAttemptColumn(tableName, "group_stage_path"),
+		CredentialID:     buildProxyAttemptColumn(tableName, "credential_id"),
 	}
 }
 
@@ -115,6 +121,9 @@ type proxyAttemptColumns struct {
 	DurationMS       proxyAttemptColumn
 	DeliveryState    proxyAttemptColumn
 	StatsDisposition proxyAttemptColumn
+	GroupStageID     proxyAttemptColumn
+	GroupStagePath   proxyAttemptColumn
+	CredentialID     proxyAttemptColumn
 }
 
 // Alias returns the current table alias for the columns set.
@@ -176,10 +185,13 @@ type ProxyAttemptSetter struct {
 	DurationMS       *sql.Null[int64]  `db:"duration_ms" `
 	DeliveryState    *string           `db:"delivery_state" `
 	StatsDisposition *string           `db:"stats_disposition" `
+	GroupStageID     *sql.Null[string] `db:"group_stage_id" `
+	GroupStagePath   *sql.Null[string] `db:"group_stage_path" `
+	CredentialID     *sql.Null[string] `db:"credential_id" `
 }
 
 func (s ProxyAttemptSetter) SetColumns() []string {
-	vals := make([]string, 0, 16)
+	vals := make([]string, 0, 19)
 	if s.ID != nil {
 		vals = append(vals, "id")
 	}
@@ -227,6 +239,15 @@ func (s ProxyAttemptSetter) SetColumns() []string {
 	}
 	if s.StatsDisposition != nil {
 		vals = append(vals, "stats_disposition")
+	}
+	if s.GroupStageID != nil {
+		vals = append(vals, "group_stage_id")
+	}
+	if s.GroupStagePath != nil {
+		vals = append(vals, "group_stage_path")
+	}
+	if s.CredentialID != nil {
+		vals = append(vals, "credential_id")
 	}
 	return vals
 }
@@ -367,6 +388,33 @@ func (s ProxyAttemptSetter) Overwrite(t *ProxyAttempt) {
 				return *new(string)
 			}
 			return *s.StatsDisposition
+		}()
+	}
+	if s.GroupStageID != nil {
+		t.GroupStageID = func() sql.Null[string] {
+			if s.GroupStageID == nil {
+				return *new(sql.Null[string])
+			}
+			v := s.GroupStageID
+			return *v
+		}()
+	}
+	if s.GroupStagePath != nil {
+		t.GroupStagePath = func() sql.Null[string] {
+			if s.GroupStagePath == nil {
+				return *new(sql.Null[string])
+			}
+			v := s.GroupStagePath
+			return *v
+		}()
+	}
+	if s.CredentialID != nil {
+		t.CredentialID = func() sql.Null[string] {
+			if s.CredentialID == nil {
+				return *new(sql.Null[string])
+			}
+			v := s.CredentialID
+			return *v
 		}()
 	}
 }
@@ -588,6 +636,45 @@ func (s *ProxyAttemptSetter) Apply(q *dialect.InsertQuery) {
 					return *s.StatsDisposition
 				}()).WriteSQL(ctx, w, d, start)
 			}))
+		case "group_stage_id":
+			vals = append(vals, bob.ExpressionFunc(func(ctx context.Context, w io.StringWriter, d bob.Dialect, start int) ([]any, error) {
+				if s.GroupStageID == nil {
+					return sqlite.Arg(nil).WriteSQL(ctx, w, d, start)
+				}
+				return sqlite.Arg(func() sql.Null[string] {
+					if s.GroupStageID == nil {
+						return *new(sql.Null[string])
+					}
+					v := s.GroupStageID
+					return *v
+				}()).WriteSQL(ctx, w, d, start)
+			}))
+		case "group_stage_path":
+			vals = append(vals, bob.ExpressionFunc(func(ctx context.Context, w io.StringWriter, d bob.Dialect, start int) ([]any, error) {
+				if s.GroupStagePath == nil {
+					return sqlite.Arg(nil).WriteSQL(ctx, w, d, start)
+				}
+				return sqlite.Arg(func() sql.Null[string] {
+					if s.GroupStagePath == nil {
+						return *new(sql.Null[string])
+					}
+					v := s.GroupStagePath
+					return *v
+				}()).WriteSQL(ctx, w, d, start)
+			}))
+		case "credential_id":
+			vals = append(vals, bob.ExpressionFunc(func(ctx context.Context, w io.StringWriter, d bob.Dialect, start int) ([]any, error) {
+				if s.CredentialID == nil {
+					return sqlite.Arg(nil).WriteSQL(ctx, w, d, start)
+				}
+				return sqlite.Arg(func() sql.Null[string] {
+					if s.CredentialID == nil {
+						return *new(sql.Null[string])
+					}
+					v := s.CredentialID
+					return *v
+				}()).WriteSQL(ctx, w, d, start)
+			}))
 		}
 	}
 
@@ -599,7 +686,7 @@ func (s ProxyAttemptSetter) UpdateMod() bob.Mod[*dialect.UpdateQuery] {
 }
 
 func (s ProxyAttemptSetter) Expressions(prefix ...string) []bob.Expression {
-	exprs := make([]bob.Expression, 0, 16)
+	exprs := make([]bob.Expression, 0, 19)
 
 	if s.ID != nil {
 		exprs = append(exprs, expr.Join{Sep: " = ", Exprs: []bob.Expression{
@@ -713,6 +800,27 @@ func (s ProxyAttemptSetter) Expressions(prefix ...string) []bob.Expression {
 		}})
 	}
 
+	if s.GroupStageID != nil {
+		exprs = append(exprs, expr.Join{Sep: " = ", Exprs: []bob.Expression{
+			sqlite.Quote(append(prefix, "group_stage_id")...),
+			sqlite.Arg(s.GroupStageID),
+		}})
+	}
+
+	if s.GroupStagePath != nil {
+		exprs = append(exprs, expr.Join{Sep: " = ", Exprs: []bob.Expression{
+			sqlite.Quote(append(prefix, "group_stage_path")...),
+			sqlite.Arg(s.GroupStagePath),
+		}})
+	}
+
+	if s.CredentialID != nil {
+		exprs = append(exprs, expr.Join{Sep: " = ", Exprs: []bob.Expression{
+			sqlite.Quote(append(prefix, "credential_id")...),
+			sqlite.Arg(s.CredentialID),
+		}})
+	}
+
 	return exprs
 }
 
@@ -723,7 +831,7 @@ func proxyAttemptScanMapper(ctx context.Context, cols []string) (scan.BeforeFunc
 		idx int
 		dst func(o *ProxyAttempt) any
 	}
-	targets := make([]target, 0, 16)
+	targets := make([]target, 0, 19)
 	for i, col := range cols {
 		switch col {
 		case "id":
@@ -758,6 +866,12 @@ func proxyAttemptScanMapper(ctx context.Context, cols []string) (scan.BeforeFunc
 			targets = append(targets, target{i, func(o *ProxyAttempt) any { return &o.DeliveryState }})
 		case "stats_disposition":
 			targets = append(targets, target{i, func(o *ProxyAttempt) any { return &o.StatsDisposition }})
+		case "group_stage_id":
+			targets = append(targets, target{i, func(o *ProxyAttempt) any { return &o.GroupStageID }})
+		case "group_stage_path":
+			targets = append(targets, target{i, func(o *ProxyAttempt) any { return &o.GroupStagePath }})
+		case "credential_id":
+			targets = append(targets, target{i, func(o *ProxyAttempt) any { return &o.CredentialID }})
 		}
 	}
 

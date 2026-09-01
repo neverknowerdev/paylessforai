@@ -26,7 +26,7 @@ func TestLoadProviderClientsPrefersOneStoredCredentialPerProvider(t *testing.T) 
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := db.UpsertProviderCredential(context.Background(), models.ProviderCredential{
+	if err := db.ProviderCredentials.Upsert(context.Background(), models.ProviderCredential{
 		ID: ids.New(), Provider: "openrouter", Label: "stored", Ciphertext: ciphertext, Nonce: nonce, Enabled: true,
 	}); err != nil {
 		t.Fatal(err)
@@ -68,7 +68,7 @@ func TestLoadProviderClientsSupportsCustomProviderEndpoint(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := db.UpsertProviderCredential(context.Background(), models.ProviderCredential{ID: ids.New(), Provider: "local-llm", Label: "local", BaseURL: "http://127.0.0.1:9999/v1", Ciphertext: ciphertext, Nonce: nonce, Enabled: true}); err != nil {
+	if err := db.ProviderCredentials.Upsert(context.Background(), models.ProviderCredential{ID: ids.New(), Provider: "local-llm", Label: "local", BaseURL: "http://127.0.0.1:9999/v1", Ciphertext: ciphertext, Nonce: nonce, Enabled: true}); err != nil {
 		t.Fatal(err)
 	}
 	clients := loadProviderClients(providers.Builtin(nil), db, box)

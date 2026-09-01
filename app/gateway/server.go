@@ -8,6 +8,7 @@ import (
 	"net/http"
 
 	"github.com/neverknowerdev/paylessforai/internal/catalog"
+	"github.com/neverknowerdev/paylessforai/internal/groups"
 	"github.com/neverknowerdev/paylessforai/internal/matcher"
 	proxyservice "github.com/neverknowerdev/paylessforai/internal/proxy"
 )
@@ -15,18 +16,17 @@ import (
 // NewHandler builds the public models and inference handler. Authentication,
 // routing, retries, usage recording, and provider failover remain in the
 // shared proxy service used by the local app.
-func NewHandler(catalogManager *catalog.Manager, proxyHandler *proxyservice.Proxy) http.Handler {
+func NewHandler(catalogManager *catalog.Manager, proxyHandler *proxyservice.Proxy, groupManagers ...*groups.Manager) http.Handler {
 	mux := http.NewServeMux()
 	mux.HandleFunc("/v1/models", func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodGet {
 			writeError(w, http.StatusMethodNotAllowed, "method_not_allowed", "models endpoint only accepts GET")
 			return
 		}
-		if catalogManager == nil {
-			writeJSON(w, http.StatusOK, map[string]any{"object": "list", "data": []any{}})
-			return
+		models := []catalog.Model{}
+		if catalogManager != nil {
+			models = catalogManager.Snapshot().Models
 		}
-		models := catalogManager.Snapshot().Models
 		data := make([]map[string]any, 0, len(models))
 		for _, model := range models {
 			data = append(data, map[string]any{
@@ -36,6 +36,14 @@ func NewHandler(catalogManager *catalog.Manager, proxyHandler *proxyservice.Prox
 				"supported_parameters":  model.SupportedParameters,
 				"input_modalities":      model.InputModalities, "output_modalities": model.OutputModalities, "tags": model.Tags,
 			})
+		}
+		if len(groupManagers) > 0 && groupManagers[0] != nil {
+			for _, group := range groupManagers[0].Snapshot() {
+				if !group.Enabled {
+					continue
+				}
+				data = append(data, map[string]any{"id": group.Slug, "object": "model", "owned_by": "paylessforai", "name": group.Name, "paylessforai_type": "group", "paylessforai_revision": group.Revision})
+			}
 		}
 		writeJSON(w, http.StatusOK, map[string]any{"object": "list", "data": data})
 	})

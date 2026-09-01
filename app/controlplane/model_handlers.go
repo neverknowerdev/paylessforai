@@ -113,7 +113,12 @@ func (s *Server) handleCatalogModels(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusOK, map[string]any{"data": []any{}})
 		return
 	}
-	routes := s.catalog.Snapshot().Routes
+	snapshot := s.catalog.Snapshot()
+	routes := snapshot.Routes
+	modelNames := make(map[string]string, len(snapshot.Models))
+	for _, model := range snapshot.Models {
+		modelNames[model.ID] = model.Name
+	}
 	discounts := catalogDiscounts(routes)
 	data := make([]map[string]any, 0, len(routes))
 	seen := make(map[string]struct{}, len(routes))
@@ -125,6 +130,7 @@ func (s *Server) handleCatalogModels(w http.ResponseWriter, r *http.Request) {
 		seen[key] = struct{}{}
 		item := map[string]any{
 			"id": route.ID, "provider": route.Provider, "model": route.LogicalModel, "upstream_model": route.UpstreamModel,
+			"name": modelNames[route.LogicalModel], "billing_class": route.BillingClass,
 			"free": route.Free, "price_available": route.PriceAvailable, "health": route.Health,
 			"context_length": route.Capabilities.MaxContext, "max_output_tokens": route.Capabilities.MaxOutput,
 			"supported_parameters": route.Capabilities.Parameters,
@@ -134,6 +140,9 @@ func (s *Server) handleCatalogModels(w http.ResponseWriter, r *http.Request) {
 				"cached_read": route.Price.CachedReadPicoUSDPerToken, "cache_write": route.Price.CacheWritePicoUSDPerToken,
 				"reasoning": route.Price.ReasoningPicoUSDPerToken, "fixed": route.Price.FixedPicoUSD,
 			},
+		}
+		if route.OfficialPriceAvailable {
+			item["official_pricing"] = map[string]any{"input": route.OfficialPrice.InputPicoUSDPerToken, "output": route.OfficialPrice.OutputPicoUSDPerToken}
 		}
 		if discount, ok := discounts[key]; ok && discount.Available {
 			item["discount_percent_bps"] = discount.MaxBPS

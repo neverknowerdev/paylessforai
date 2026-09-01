@@ -105,3 +105,22 @@ func TestQuotaExhaustionBlocksCredentialAndFailsOverImmediately(t *testing.T) {
 		t.Fatalf("unexpected quota decision: %#v", decision)
 	}
 }
+
+func TestPlanModeHonorsSameRouteRetryBudget(t *testing.T) {
+	input := baseInput(ErrorServer)
+	input.PlanMode = true
+	input.Policy.MaximumAttempts = 32
+	input.SameRouteRetriesRemaining = 3
+	input.PlanEntriesRemaining = 1
+	input.TotalAttemptsRemaining = 31
+	for expected := 3; expected >= 1; expected-- {
+		input.SameRouteRetriesRemaining = expected
+		if got := New().Decide(input); got.Action != RetrySameRoute {
+			t.Fatalf("remaining %d: got %#v", expected, got)
+		}
+	}
+	input.SameRouteRetriesRemaining = 0
+	if got := New().Decide(input); got.Action != FailOver {
+		t.Fatalf("expected failover after retries, got %#v", got)
+	}
+}

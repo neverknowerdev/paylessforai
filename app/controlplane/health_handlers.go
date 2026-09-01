@@ -19,7 +19,7 @@ func (s *Server) handleReady(w http.ResponseWriter, _ *http.Request) {
 		writeJSON(w, http.StatusServiceUnavailable, map[string]any{"ready": false})
 		return
 	}
-	if err := s.db.DB().Ping(); err != nil {
+	if err := s.db.Ping(); err != nil {
 		writeJSON(w, http.StatusServiceUnavailable, map[string]any{"ready": false, "error": "database unavailable"})
 		return
 	}
@@ -27,13 +27,16 @@ func (s *Server) handleReady(w http.ResponseWriter, _ *http.Request) {
 }
 
 func (s *Server) handleStatus(w http.ResponseWriter, _ *http.Request) {
-	ready := s.db != nil && s.db.DB().Ping() == nil
+	ready := s.db != nil && s.db.Ping() == nil
 	status := map[string]any{"ready": ready}
 	if s.catalog != nil {
 		snapshot := s.catalog.Snapshot()
 		status["catalog_updated_at"] = snapshot.UpdatedAt
 		status["model_count"] = len(snapshot.Models)
 		status["route_count"] = len(snapshot.Routes)
+	}
+	if s.groups != nil {
+		status["group_count"] = len(s.groups.Snapshot())
 	}
 	writeJSON(w, http.StatusOK, status)
 }

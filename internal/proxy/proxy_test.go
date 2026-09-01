@@ -13,6 +13,7 @@ import (
 
 	"github.com/neverknowerdev/paylessforai/internal/catalog"
 	"github.com/neverknowerdev/paylessforai/internal/db"
+	"github.com/neverknowerdev/paylessforai/internal/db/repositories"
 	"github.com/neverknowerdev/paylessforai/internal/matcher"
 	"github.com/neverknowerdev/paylessforai/internal/providers"
 	"github.com/neverknowerdev/paylessforai/internal/retry"
@@ -65,13 +66,13 @@ func successResponse(body string) *http.Response {
 	return &http.Response{StatusCode: http.StatusOK, Header: http.Header{"Content-Type": []string{"application/json"}}, Body: io.NopCloser(strings.NewReader(body))}
 }
 
-func testProxy(t *testing.T, clients ...providers.Client) (*Proxy, *db.Store, string) {
+func testProxy(t *testing.T, clients ...providers.Client) (*Proxy, *repositories.Repositories, string) {
 	t.Helper()
 	db, err := db.Open(context.Background(), filepath.Join(t.TempDir(), "payless.db"))
 	if err != nil {
 		t.Fatal(err)
 	}
-	key, secret, err := db.CreateClientKey(context.Background(), "test")
+	key, secret, err := db.ClientAPIKeys.Create(context.Background(), "test")
 	if err != nil || key.ID == "" {
 		db.Close()
 		t.Fatal(err)
@@ -119,7 +120,7 @@ func TestProxySelectsCheapestRouteAndPersistsUsage(t *testing.T) {
 	if actualCost != 3 {
 		t.Fatalf("expected usage-derived actual cost 3, got %d", actualCost)
 	}
-	items, err := db.ListRequestStats(context.Background(), 10)
+	items, err := db.Stats.ListRequestStats(context.Background(), 10)
 	if err != nil || len(items) != 1 || items[0].OfficialCostPico == nil || *items[0].OfficialCostPico != 30 || items[0].DiscountPico == nil || *items[0].DiscountPico != 27 {
 		t.Fatalf("expected official cost and discount, got %#v, %v", items, err)
 	}
@@ -221,7 +222,7 @@ func TestProxyFailsOverImmediatelyFromFreeRoute(t *testing.T) {
 	if freeCalls != 1 || paidCalls != 1 {
 		t.Fatalf("free route should fail over without retry: free=%d paid=%d", freeCalls, paidCalls)
 	}
-	items, err := db.ListRequestStats(context.Background(), 10)
+	items, err := db.Stats.ListRequestStats(context.Background(), 10)
 	if err != nil || len(items) != 1 || items[0].Provider != "surplus" || items[0].Attempts != 2 || len(items[0].AttemptDetails) != 2 || items[0].AttemptDetails[0].State != "failed" || items[0].AttemptDetails[1].Provider != "surplus" {
 		t.Fatalf("expected durable failover metadata, got %#v, %v", items, err)
 	}

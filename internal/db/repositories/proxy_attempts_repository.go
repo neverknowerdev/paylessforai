@@ -15,6 +15,20 @@ import (
 
 type ProxyAttemptsRepository struct{ bobRepository }
 
+func (r *ProxyAttemptsRepository) UpdateRoute(ctx context.Context, requestID string, attempt int, routeID, credentialID, stageID, stagePath string) error {
+	id := fmt.Sprintf("%s:%d", requestID, attempt)
+	row, err := bobmodels.FindProxyAttempt(ctx, r.exec, id)
+	if err != nil {
+		return err
+	}
+	return row.Update(ctx, r.exec, &bobmodels.ProxyAttemptSetter{
+		RouteID:        nullableStringPointer(pointerIfNonEmpty(routeID)),
+		CredentialID:   nullableStringPointer(pointerIfNonEmpty(credentialID)),
+		GroupStageID:   nullableStringPointer(pointerIfNonEmpty(stageID)),
+		GroupStagePath: nullableStringPointer(pointerIfNonEmpty(stagePath)),
+	})
+}
+
 func (r *ProxyAttemptsRepository) Record(ctx context.Context, requestID string, attempt int, provider, upstream, state, errorClass, errorMessage string, rawError ...string) error {
 	if attempt < 1 {
 		return fmt.Errorf("attempt number must be positive")

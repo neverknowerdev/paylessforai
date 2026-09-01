@@ -8,7 +8,6 @@ import (
 
 func TestRequestUsageRepositoryIntegration(t *testing.T) {
 	i := newIntegrationDB(t)
-	i.reset(t)
 	if err := i.repos.ProxyRequests.Create(i.ctx, "request-1", "", "chat.completions", "model"); err != nil {
 		t.Fatal(err)
 	}
@@ -16,11 +15,11 @@ func TestRequestUsageRepositoryIntegration(t *testing.T) {
 	if err := i.repos.RequestUsage.Upsert(i.ctx, usage); err != nil {
 		t.Fatal(err)
 	}
-	var total int64
-	if err := i.db.QueryRowContext(i.ctx, `SELECT total_tokens FROM request_usage WHERE request_id = $1`, usage.RequestID).Scan(&total); err != nil {
+	stats, err := i.repos.Stats.ListRequestStats(i.ctx, 10)
+	if err != nil {
 		t.Fatal(err)
 	}
-	if total != 15 {
-		t.Fatalf("usage total: %d", total)
+	if len(stats) != 1 || stats[0].ID != usage.RequestID || stats[0].TotalTokens != 15 {
+		t.Fatalf("usage stats: %#v", stats)
 	}
 }

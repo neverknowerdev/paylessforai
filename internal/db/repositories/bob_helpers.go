@@ -7,8 +7,9 @@ import (
 )
 
 // bobRepository is the small common dependency shared by table repositories.
-// All SQL is built by Bob's generated tables; repository methods only map
-// application records to generated persistence models.
+// Table-level mutations are built by Bob's generated models; aggregate
+// repositories may additionally use their owned SQL connection for a single
+// transaction spanning several tables.
 type bobRepository struct {
 	exec bob.Executor
 }

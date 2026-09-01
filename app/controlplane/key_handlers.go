@@ -19,7 +19,7 @@ func (s *Server) handleClientKeys(w http.ResponseWriter, r *http.Request) {
 	}
 	switch r.Method {
 	case http.MethodGet:
-		keys, err := s.db.ListClientKeys(r.Context())
+		keys, err := s.db.ClientAPIKeys.List(r.Context())
 		if err != nil {
 			writeError(w, http.StatusInternalServerError, "key_list_failed", "could not list client keys")
 			return
@@ -33,7 +33,7 @@ func (s *Server) handleClientKeys(w http.ResponseWriter, r *http.Request) {
 			writeError(w, http.StatusBadRequest, "invalid_request", "invalid key request")
 			return
 		}
-		key, secret, err := s.db.CreateClientKey(r.Context(), input.Label)
+		key, secret, err := s.db.ClientAPIKeys.Create(r.Context(), input.Label)
 		if err != nil {
 			writeError(w, http.StatusInternalServerError, "key_create_failed", "could not create client key")
 			return
@@ -54,7 +54,7 @@ func (s *Server) handleClientKey(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, "invalid_request", "client key ID is required")
 		return
 	}
-	if err := s.db.RevokeClientKey(r.Context(), id); err != nil {
+	if err := s.db.ClientAPIKeys.Revoke(r.Context(), id); err != nil {
 		writeError(w, http.StatusInternalServerError, "key_revoke_failed", "could not revoke client key")
 		return
 	}

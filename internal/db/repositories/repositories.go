@@ -1,7 +1,6 @@
 package repositories
 
 import (
-	"context"
 	"database/sql"
 	"errors"
 	"github.com/neverknowerdev/paylessforai/internal/db/models"
@@ -84,22 +83,6 @@ func (r *Repositories) Close() error {
 		return nil
 	}
 	return r.database.Close()
-}
-
-// GetSetting and SetSetting keep the small settings-store contract used by
-// subsystems such as the updater while persistence remains repository-owned.
-func (r *Repositories) GetSetting(ctx context.Context, key string) (string, bool, error) {
-	if r == nil || r.Settings == nil {
-		return "", false, errors.New("settings repository unavailable")
-	}
-	return r.Settings.Get(ctx, key)
-}
-
-func (r *Repositories) SetSetting(ctx context.Context, key, value string) error {
-	if r == nil || r.Settings == nil {
-		return errors.New("settings repository unavailable")
-	}
-	return r.Settings.Set(ctx, key, value)
 }
 
 // Model aliases keep repository signatures readable while model ownership

@@ -19,7 +19,7 @@ func TestUpdateSettingsAPI(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer db.Close()
-	service, err := updater.NewService(t.TempDir(), db, nil)
+	service, err := updater.NewService(t.TempDir(), db.Settings, nil)
 	if err != nil {
 		t.Fatal(err)
 	}

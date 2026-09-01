@@ -19,11 +19,11 @@ import (
 
 type memorySettings struct{ values map[string]string }
 
-func (m *memorySettings) GetSetting(_ context.Context, key string) (string, bool, error) {
+func (m *memorySettings) Get(_ context.Context, key string) (string, bool, error) {
 	value, ok := m.values[key]
 	return value, ok, nil
 }
-func (m *memorySettings) SetSetting(_ context.Context, key, value string) error {
+func (m *memorySettings) Set(_ context.Context, key, value string) error {
 	m.values[key] = value
 	return nil
 }

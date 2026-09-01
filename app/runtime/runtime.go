@@ -80,7 +80,7 @@ func Run(parent context.Context, args []string) error {
 	}
 	appContext, cancel := context.WithCancel(parent)
 	defer cancel()
-	updates, err := updater.NewService(c.DataDir, db, cancel)
+	updates, err := updater.NewService(c.DataDir, db.Settings, cancel)
 	if err != nil {
 		return err
 	}

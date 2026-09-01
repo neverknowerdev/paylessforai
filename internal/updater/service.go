@@ -22,8 +22,8 @@ import (
 )
 
 type SettingsStore interface {
-	GetSetting(context.Context, string) (string, bool, error)
-	SetSetting(context.Context, string, string) error
+	Get(context.Context, string) (string, bool, error)
+	Set(context.Context, string, string) error
 }
 
 type Settings struct {
@@ -78,17 +78,17 @@ func (s *Service) SetAllowUnsigned(value bool) { s.mu.Lock(); s.allowUnsigned = 
 
 func (s *Service) LoadSettings(ctx context.Context) (Settings, error) {
 	result := Settings{Enabled: true, Channel: "releases", IntervalSeconds: 3600}
-	if value, ok, err := s.store.GetSetting(ctx, "updates.enabled"); err != nil {
+	if value, ok, err := s.store.Get(ctx, "updates.enabled"); err != nil {
 		return result, err
 	} else if ok {
 		result.Enabled = strings.EqualFold(value, "true")
 	}
-	if value, ok, err := s.store.GetSetting(ctx, "updates.channel"); err != nil {
+	if value, ok, err := s.store.Get(ctx, "updates.channel"); err != nil {
 		return result, err
 	} else if ok && (value == "main" || value == "releases") {
 		result.Channel = value
 	}
-	if value, ok, err := s.store.GetSetting(ctx, "updates.check_interval_seconds"); err != nil {
+	if value, ok, err := s.store.Get(ctx, "updates.check_interval_seconds"); err != nil {
 		return result, err
 	} else if ok {
 		var parsed int
@@ -107,13 +107,13 @@ func (s *Service) SaveSettings(ctx context.Context, settings Settings) error {
 	if settings.IntervalSeconds < 900 || settings.IntervalSeconds > 604800 {
 		return errors.New("check interval must be between 15 minutes and 7 days")
 	}
-	if err := s.store.SetSetting(ctx, "updates.enabled", fmt.Sprintf("%t", settings.Enabled)); err != nil {
+	if err := s.store.Set(ctx, "updates.enabled", fmt.Sprintf("%t", settings.Enabled)); err != nil {
 		return err
 	}
-	if err := s.store.SetSetting(ctx, "updates.channel", settings.Channel); err != nil {
+	if err := s.store.Set(ctx, "updates.channel", settings.Channel); err != nil {
 		return err
 	}
-	return s.store.SetSetting(ctx, "updates.check_interval_seconds", fmt.Sprintf("%d", settings.IntervalSeconds))
+	return s.store.Set(ctx, "updates.check_interval_seconds", fmt.Sprintf("%d", settings.IntervalSeconds))
 }
 
 func (s *Service) Snapshot(ctx context.Context) (Snapshot, error) {

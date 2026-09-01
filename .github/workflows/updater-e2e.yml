@@ -1,0 +1,27 @@
+name: Updater Binary E2E
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened]
+
+permissions:
+  contents: read
+
+jobs:
+  updater:
+    name: Self-updater binary E2E
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    steps:
+      - name: Check out source
+        uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      - name: Run updater E2E
+        run: GOCACHE="$RUNNER_TEMP/go-cache" go test -tags e2e ./test/updater_e2e -count=1 -v

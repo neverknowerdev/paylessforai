@@ -51,6 +51,13 @@ fallback). Stages can select explicit models or one nested group, restrict
 providers and billing classes, set separate input/output price caps, and retry
 a route before advancing.
 
+Official binaries include a durable self-updater. A supervisor stages signed
+GitHub release or main-branch artifacts, verifies checksums, snapshots SQLite,
+and promotes a candidate only after startup succeeds. Migration or startup
+failure restores the snapshot and previous binary; diagnostics remain visible
+in the Settings view. Development builds identify themselves as `dev` and do
+not auto-update.
+
 ## Quick start
 
 PayLessForAI currently requires Go 1.26 to build:
@@ -71,6 +78,41 @@ credentials, and create a local client key. The Settings page shows the active
 and configured ports; a changed port takes effect after restart. The default
 data directory is the operating-system user configuration directory under
 `paylessforai`; override it with `-data-dir`.
+
+## Run a downloaded official binary
+
+Release downloads already contain the supervisor, updater, and embedded UI;
+no separate service or runtime is required. Extract the platform archive and
+run the included executable directly:
+
+```sh
+# macOS or Linux
+mkdir -p "$HOME/paylessforai"
+tar -xzf paylessforai_<version>_<os>_<arch>.tar.gz -C "$HOME/paylessforai"
+chmod 700 "$HOME/paylessforai/paylessforai-app"
+"$HOME/paylessforai/paylessforai-app"
+```
+
+On Windows, extract the `.zip` archive and run `paylessforai-app.exe`. The
+first launch prefers `127.0.0.1:9472` and persists the selected available port;
+open the URL printed at startup after the `/readyz` endpoint responds
+successfully. The binary starts its application child and supervises updates
+automatically, so do not pass `--internal-serve`.
+
+Unless `--data-dir` is supplied, the database, encrypted credentials,
+`master.key`, updater journal, backups, and staged releases are stored under
+the operating-system user configuration directory in `paylessforai`. Keep
+that directory unchanged when replacing or upgrading the executable.
+
+To confirm the installed build before starting it:
+
+```sh
+./paylessforai-app --version
+```
+
+Development builds made with a plain `go build` identify themselves as `dev`
+and do not participate in automatic updates; use an official release artifact
+for self-updating installations.
 
 The UI is intentionally local-only by default. Provider credentials are stored
 encrypted in SQLite, and the generated `master.key` in the data directory is
@@ -95,11 +137,11 @@ After creating a client key in the UI, configure an OpenAI-compatible client
 with:
 
 ```text
-Base URL: http://127.0.0.1:9472/v1
+Base URL: the `/v1` URL printed at startup (also shown in Settings)
 API key:  <the PayLessForAI client key>
 ```
 
-Anthropic-compatible clients should use `http://127.0.0.1:9472` as their base
+Anthropic-compatible clients should use the printed listener URL as their base
 URL, send the local key in `x-api-key`, and call `/v1/messages` (the
 `/anthropic/v1/messages` alias is also available).
 

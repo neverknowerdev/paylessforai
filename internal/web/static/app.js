@@ -92,6 +92,22 @@
     }
   }
 
+  async function loadUpdates() {
+    try {
+      const payload = await fetchJSON('/api/updates');
+      const build = payload.build || {}; const settings = payload.settings || {}; const stateUpdate = payload.state || {};
+      const enabled = $('#updates-enabled'); if (enabled) enabled.checked = Boolean(settings.enabled);
+      const channel = $('#updates-channel'); if (channel) channel.value = settings.channel || 'releases';
+      const interval = $('#updates-interval'); if (interval) interval.value = String(settings.interval_seconds || 3600);
+      setText('#update-current-version', build.version || 'Current version');
+      const details = $('#update-build-details'); if (details) { details.replaceChildren(); [['Channel', build.channel], ['Commit', build.commit], ['Platform', `${build.os || ''}/${build.arch || ''}`], ['Built', build.built_at]].forEach(([label, value]) => { const row = document.createElement('div'); row.className = 'detail-row'; const key = document.createElement('span'); key.textContent = label; const val = document.createElement('strong'); val.textContent = value || '—'; row.append(key, val); details.append(row); }); }
+      setText('#update-phase', stateUpdate.phase || 'Idle');
+      const available = payload.available; const card = $('#update-available'); if (card) card.hidden = !available; if (available) setText('#update-available-version', `${available.version} · ${available.channel}`);
+      const warning = $('#update-warning'); const failed = stateUpdate.phase === 'rolled_back' || stateUpdate.phase === 'needs_manual_recovery'; if (warning) { warning.hidden = !failed || Boolean(stateUpdate.warning_acknowledged_at); warning.textContent = failed ? `Update warning: ${stateUpdate.error || 'The new version could not start.'}` : ''; if (failed && !stateUpdate.warning_acknowledged_at) { const button = document.createElement('button'); button.className = 'quiet-button'; button.textContent = 'Dismiss'; button.onclick = async () => { await fetchJSON('/api/updates/warning/acknowledge', { method: 'POST' }); loadUpdates(); }; warning.append(button); } }
+      const history = $('#update-history-body'); const empty = $('#update-history-empty'); if (history) { history.replaceChildren(); (payload.history || []).forEach((item) => { const row = document.createElement('tr'); appendTextCell(row, item.version || '—'); appendTextCell(row, item.channel || '—'); appendTextCell(row, item.outcome || '—'); appendTextCell(row, dateValue(item.at)); appendTextCell(row, item.error || '—'); history.append(row); }); if (empty) empty.hidden = (payload.history || []).length > 0; }
+    } catch (_) { setText('#updates-feedback', 'Update information is unavailable.'); }
+  }
+
   async function loadSummary() {
     try {
       state.summary = await fetchJSON('/api/stats/summary');
@@ -1469,6 +1485,7 @@
 
   function openModal(id) { const modal = $(`#${id}`); if (!modal) return; modal.hidden = false; document.body.classList.add('modal-open'); setTimeout(() => modal.querySelector('input, select')?.focus(), 0); }
   function closeModal(modal) { const element = typeof modal === 'string' ? $(`#${modal}`) : modal; if (element) element.hidden = true; if (!$$('.modal-backdrop:not([hidden])').length) document.body.classList.remove('modal-open'); }
+  function navigate(view) { const valid = ['overview', 'models', 'groups', 'stats', 'requests', 'access', 'settings']; state.view = valid.includes(view) ? view : 'overview'; $$('.view-panel').forEach((panel) => panel.classList.toggle('active', panel.dataset.viewPanel === state.view)); $$('.nav-item').forEach((item) => item.classList.toggle('active', item.dataset.view === state.view)); const meta = { overview: ['Overview', 'Your local routing desk at a glance.'], models: ['Models', 'Search provider routes and compare live pricing.'], groups: ['Groups', 'Callable aliases with ordered routing rules and fallbacks.'], stats: ['Statistics', 'Reliability, retries, response time, and cost by group, provider, and model.'], requests: ['Requests', 'Detailed usage, cost, and request outcomes.'], access: ['Access & keys', 'Manage the keys and providers behind your proxy.'], settings: ['Settings', 'Configure self-updating and inspect version history.'] }[state.view]; setText('#page-title', meta[0]); setText('#page-kicker', meta[0].toUpperCase()); setText('#page-description', meta[1]); $('#sidebar').classList.remove('open'); if (window.location.hash !== `#${state.view}`) history.replaceState(null, '', `#${state.view}`); }
   function showGroupInstructions(group) {
     const baseURL = `${window.location.origin}/v1`;
     setText('#group-instructions-name', group.name);
@@ -1492,7 +1509,15 @@
   document.addEventListener('keydown', (event) => { if (event.key === 'Escape') { closeModelFilter(); $$('.modal-backdrop:not([hidden])').forEach(closeModal); } }); window.addEventListener('hashchange', () => navigate(window.location.hash.slice(1))); navigate(window.location.hash.slice(1) || 'overview');
   updateProviderFormMode(); setText('#base-url', `${window.location.origin}/v1`); Promise.all([loadStatus(), loadSummary(), loadRequests(), loadModelStats(), loadProviderStats(), loadGroupStats(), loadModels(), loadKeys(), loadProviders(), loadGroups(), loadNetworkSettings()]);
   const statsPanel = document.querySelector('[data-view-panel="stats"]'); if (statsPanel && !$('#subscription-stats-body')) { const article = document.createElement('article'); article.className = 'panel-card table-card stats-table-card'; article.innerHTML = '<div class="panel-heading stats-heading"><h3>Subscription economics</h3><span class="card-note">Dynamic blended pricing; observed 5h min/max</span></div><div class="table-wrap"><table><thead><tr><th>Provider</th><th>Tokens</th><th>Input / output per 1M</th><th>5h min / max</th></tr></thead><tbody id="subscription-stats-body"></tbody></table></div><div class="empty-state" id="subscription-stats-empty" hidden>No subscription usage yet.</div>'; statsPanel.append(article); }
+  $('#update-settings-form')?.addEventListener('submit', async (event) => { event.preventDefault(); try { await fetchJSON('/api/updates/settings', { method: 'PUT', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ enabled: $('#updates-enabled').checked, channel: $('#updates-channel').value, interval_seconds: Number($('#updates-interval').value) }) }); setText('#updates-feedback', 'Settings saved.'); await loadUpdates(); } catch (error) { setText('#updates-feedback', error.message); } });
+  $('#updates-channel')?.addEventListener('change', () => { const note = $('#main-channel-note'); if (note) note.hidden = $('#updates-channel').value !== 'main'; });
+  $('#updates-check')?.addEventListener('click', async () => { setText('#updates-feedback', 'Checking for updates…'); try { await fetchJSON('/api/updates/check', { method: 'POST' }); setTimeout(loadUpdates, 500); } catch (error) { setText('#updates-feedback', error.message); } });
+  $('#updates-install')?.addEventListener('click', async () => { const payload = await fetchJSON('/api/updates'); if (!payload.available) return; setText('#updates-feedback', 'Downloading and restarting…'); await fetchJSON('/api/updates/install', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ version: payload.available.version }) }); });
+  $('#refresh-button')?.addEventListener('click', loadUpdates);
+  navigate = function(view) { const valid = ['overview', 'models', 'groups', 'stats', 'requests', 'access', 'settings']; state.view = valid.includes(view) ? view : 'overview'; $$('.view-panel').forEach((panel) => panel.classList.toggle('active', panel.dataset.viewPanel === state.view)); $$('.nav-item').forEach((item) => item.classList.toggle('active', item.dataset.view === state.view)); const meta = { overview: ['Overview', 'Your local routing desk at a glance.'], models: ['Models', 'Search provider routes and compare live pricing.'], groups: ['Groups', 'Callable aliases with ordered routing rules and fallbacks.'], stats: ['Statistics', 'Reliability, retries, response time, and cost by group, provider, and model.'], requests: ['Requests', 'Detailed usage, cost, and request outcomes.'], access: ['Access & keys', 'Manage the keys and providers behind your proxy.'], settings: ['Settings', 'Configure self-updating and inspect version history.'] }[state.view]; setText('#page-title', meta[0]); setText('#page-kicker', meta[0].toUpperCase()); setText('#page-description', meta[1]); $('#sidebar').classList.remove('open'); if (window.location.hash !== `#${state.view}`) history.replaceState(null, '', `#${state.view}`); };
+  navigate(window.location.hash.slice(1) || 'overview');
   loadSubscriptionStats();
+  loadUpdates();
   document.addEventListener('click', (event) => {
     const copyGroup = event.target.closest('[data-copy-group-slug]');
     if (!copyGroup) return;

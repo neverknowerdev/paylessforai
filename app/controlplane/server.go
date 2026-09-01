@@ -2,6 +2,7 @@ package controlplane
 
 import (
 	"context"
+	"net"
 	"net/http"
 	"time"
 
@@ -9,6 +10,7 @@ import (
 	"github.com/neverknowerdev/paylessforai/internal/catalog"
 	"github.com/neverknowerdev/paylessforai/internal/db/repositories"
 	"github.com/neverknowerdev/paylessforai/internal/groups"
+	"github.com/neverknowerdev/paylessforai/internal/network"
 	"github.com/neverknowerdev/paylessforai/internal/providers"
 	proxyservice "github.com/neverknowerdev/paylessforai/internal/proxy"
 	"github.com/neverknowerdev/paylessforai/internal/secrets"
@@ -22,6 +24,7 @@ type Server struct {
 	proxy       *proxyservice.Proxy
 	credentials CredentialDeps
 	groups      *groups.Manager
+	network     *network.Service
 }
 
 type CredentialDeps struct {
@@ -29,6 +32,7 @@ type CredentialDeps struct {
 	Registry *providers.Registry
 	Reload   func() error
 	Groups   *groups.Manager
+	Network  *network.Service
 }
 
 func New(addr string, readHeaderTimeout, idleTimeout time.Duration, db *repositories.Repositories) (*Server, error) {
@@ -49,7 +53,7 @@ func NewWithDeps(addr string, readHeaderTimeout, idleTimeout time.Duration, db *
 		groupManager = groups.NewManager(db.Groups)
 		_ = groupManager.Reload(context.Background())
 	}
-	server := &Server{db: db, catalog: catalogManager, proxy: proxyHandler, credentials: credentials, groups: groupManager}
+	server := &Server{db: db, catalog: catalogManager, proxy: proxyHandler, credentials: credentials, groups: groupManager, network: credentials.Network}
 	mux := http.NewServeMux()
 	server.registerHealthRoutes(mux)
 	server.registerStatsRoutes(mux)
@@ -57,6 +61,7 @@ func NewWithDeps(addr string, readHeaderTimeout, idleTimeout time.Duration, db *
 	server.registerProviderRoutes(mux)
 	server.registerModelRoutes(mux)
 	server.registerGroupRoutes(mux)
+	server.registerSettingsRoutes(mux)
 	mux.Handle("/", ui)
 	public := gateway.NewHandler(catalogManager, proxyHandler, server.groups)
 	mux.Handle("/v1/", public)
@@ -68,5 +73,7 @@ func NewWithDeps(addr string, readHeaderTimeout, idleTimeout time.Duration, db *
 func (s *Server) SetGroups(manager *groups.Manager) { s.groups = manager }
 
 func (s *Server) ListenAndServe() error { return s.httpServer.ListenAndServe() }
+
+func (s *Server) Serve(listener net.Listener) error { return s.httpServer.Serve(listener) }
 
 func (s *Server) Shutdown(ctx context.Context) error { return s.httpServer.Shutdown(ctx) }

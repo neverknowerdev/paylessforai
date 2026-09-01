@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"io"
+	"net"
 	"net/http"
 	"net/http/httptest"
 	"path/filepath"
@@ -17,11 +18,18 @@ import (
 	"github.com/neverknowerdev/paylessforai/internal/db/repositories"
 	"github.com/neverknowerdev/paylessforai/internal/groups"
 	"github.com/neverknowerdev/paylessforai/internal/matcher"
+	"github.com/neverknowerdev/paylessforai/internal/network"
 	"github.com/neverknowerdev/paylessforai/internal/providers"
 	"github.com/neverknowerdev/paylessforai/internal/secrets"
 )
 
 type credentialTestClient struct{ provider string }
+
+type settingsTestListener struct{ address net.Addr }
+
+func (l *settingsTestListener) Accept() (net.Conn, error) { return nil, errors.New("not implemented") }
+func (l *settingsTestListener) Close() error              { return nil }
+func (l *settingsTestListener) Addr() net.Addr            { return l.address }
 
 func (c credentialTestClient) Name() string { return c.provider }
 func (c credentialTestClient) Discover(context.Context) ([]providers.Model, error) {
@@ -80,6 +88,64 @@ func TestServerHealthModelsAndNotImplementedEndpoints(t *testing.T) {
 		if response.Header().Get("X-PayLess-Request-ID") == "" {
 			t.Fatalf("%s: missing request ID", test.path)
 		}
+	}
+}
+
+func TestNetworkSettingsAPIReportsAndUpdatesPersistedPort(t *testing.T) {
+	db, err := dbpkg.Open(context.Background(), filepath.Join(t.TempDir(), "payless.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	service := network.NewServiceWithListen(db.Settings, func(_, _ string) (net.Listener, error) {
+		return &settingsTestListener{address: &net.TCPAddr{IP: net.ParseIP("127.0.0.1"), Port: 42001}}, nil
+	})
+	listener, _, err := service.Bootstrap(context.Background(), "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer listener.Close()
+	server, err := NewWithDeps("127.0.0.1:0", time.Second, time.Second, db, nil, nil, CredentialDeps{Network: service})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	get := func() map[string]any {
+		response := httptest.NewRecorder()
+		server.httpServer.Handler.ServeHTTP(response, httptest.NewRequest(http.MethodGet, "/api/settings/network", nil))
+		if response.Code != http.StatusOK {
+			t.Fatalf("GET status: %d body=%s", response.Code, response.Body.String())
+		}
+		var body map[string]any
+		if err := json.Unmarshal(response.Body.Bytes(), &body); err != nil {
+			t.Fatal(err)
+		}
+		return body
+	}
+	body := get()
+	active := body["active"].(map[string]any)
+	if body["override_active"] != true || active["base_url"] == "" {
+		t.Fatalf("unexpected network response: %#v", body)
+	}
+
+	response := httptest.NewRecorder()
+	request := httptest.NewRequest(http.MethodPut, "/api/settings/network", strings.NewReader(`{"port":9480}`))
+	request.Header.Set("content-type", "application/json")
+	server.httpServer.Handler.ServeHTTP(response, request)
+	if response.Code != http.StatusOK {
+		t.Fatalf("PUT status: %d body=%s", response.Code, response.Body.String())
+	}
+	body = get()
+	configured := body["configured"].(map[string]any)
+	if configured["port"] != float64(9480) || body["restart_required"] != true {
+		t.Fatalf("unexpected updated network response: %#v", body)
+	}
+
+	response = httptest.NewRecorder()
+	request = httptest.NewRequest(http.MethodPut, "/api/settings/network", strings.NewReader(`{"port":1}`))
+	server.httpServer.Handler.ServeHTTP(response, request)
+	if response.Code != http.StatusBadRequest {
+		t.Fatalf("invalid PUT status: %d body=%s", response.Code, response.Body.String())
 	}
 }
 

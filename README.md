@@ -62,10 +62,15 @@ CGO_ENABLED=0 go build -o paylessforai-app ./cmd/paylessforai-app
 ./paylessforai-app
 ```
 
-The default listener is `127.0.0.1:9472`. Open
-<http://127.0.0.1:9472/> in a browser, add provider credentials, and create a
-local client key. The default data directory is the operating-system user
-configuration directory under `paylessforai`; override it with `-data-dir`.
+The first launch prefers `127.0.0.1:9472`, then selects the first available
+port in the local startup range (falling back to an OS-assigned port if that
+range is full) and persists the result in the data directory.
+Later launches reuse that port, so API clients keep the same endpoint across
+binary updates and restarts. Open the URL printed at startup, add provider
+credentials, and create a local client key. The Settings page shows the active
+and configured ports; a changed port takes effect after restart. The default
+data directory is the operating-system user configuration directory under
+`paylessforai`; override it with `-data-dir`.
 
 The UI is intentionally local-only by default. Provider credentials are stored
 encrypted in SQLite, and the generated `master.key` in the data directory is
@@ -163,7 +168,7 @@ Useful command-line flags include:
 
 ```text
 -data-dir                 Database and master-key directory
--listen                   HTTP address (default: 127.0.0.1:9472)
+-listen                   One-launch HTTP address override (default selection prefers 127.0.0.1:9472)
 -refresh-interval         Catalog refresh interval (default: 5m)
 -provider-base-url        Provider endpoint override (repeatable: name=url)
 -openrouter-base-url      OpenRouter endpoint override (compatibility alias)

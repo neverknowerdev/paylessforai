@@ -26,7 +26,7 @@ func (s *Server) handleReady(w http.ResponseWriter, _ *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]any{"ready": true})
 }
 
-func (s *Server) handleStatus(w http.ResponseWriter, _ *http.Request) {
+func (s *Server) handleStatus(w http.ResponseWriter, r *http.Request) {
 	ready := s.db != nil && s.db.Ping() == nil
 	status := map[string]any{"ready": ready}
 	if s.catalog != nil {
@@ -37,6 +37,12 @@ func (s *Server) handleStatus(w http.ResponseWriter, _ *http.Request) {
 	}
 	if s.groups != nil {
 		status["group_count"] = len(s.groups.Snapshot())
+	}
+	if s.network != nil {
+		if networkState, err := s.network.State(r.Context()); err == nil && networkState.ActivePort > 0 {
+			status["listen_address"] = networkState.ActiveAddress()
+			status["listen_port"] = networkState.ActivePort
+		}
 	}
 	writeJSON(w, http.StatusOK, status)
 }

@@ -12,6 +12,7 @@ import (
 	"github.com/neverknowerdev/paylessforai/internal/clientauth"
 	"github.com/neverknowerdev/paylessforai/internal/db/repositories"
 	"github.com/neverknowerdev/paylessforai/internal/groups"
+	"github.com/neverknowerdev/paylessforai/internal/network"
 	"github.com/neverknowerdev/paylessforai/internal/providers"
 	proxyservice "github.com/neverknowerdev/paylessforai/internal/proxy"
 	"github.com/neverknowerdev/paylessforai/internal/remoteaccess"
@@ -32,6 +33,7 @@ type Server struct {
 	gateway     http.Handler
 	remote      remoteaccess.Controller
 	remoteAdded bool
+	network     *network.Service
 }
 
 type CredentialDeps struct {
@@ -40,6 +42,7 @@ type CredentialDeps struct {
 	Reload   func() error
 	Updates  *updater.Service
 	Groups   *groups.Manager
+	Network  *network.Service
 }
 
 func New(addr string, readHeaderTimeout, idleTimeout time.Duration, db *repositories.Repositories) (*Server, error) {
@@ -60,7 +63,7 @@ func NewWithDeps(addr string, readHeaderTimeout, idleTimeout time.Duration, db *
 		groupManager = groups.NewManager(db.Groups)
 		_ = groupManager.Reload(context.Background())
 	}
-	server := &Server{db: db, catalog: catalogManager, proxy: proxyHandler, credentials: credentials, groups: groupManager}
+	server := &Server{db: db, catalog: catalogManager, proxy: proxyHandler, credentials: credentials, groups: groupManager, network: credentials.Network}
 	controlMux := http.NewServeMux()
 	server.registerHealthRoutes(controlMux)
 	server.registerStatsRoutes(controlMux)
@@ -69,6 +72,7 @@ func NewWithDeps(addr string, readHeaderTimeout, idleTimeout time.Duration, db *
 	server.registerModelRoutes(controlMux)
 	server.registerUpdateRoutes(controlMux)
 	server.registerGroupRoutes(controlMux)
+	server.registerSettingsRoutes(controlMux)
 	controlMux.Handle("/", ui)
 	server.control = withRequestID(controlMux)
 	server.controlMux = controlMux

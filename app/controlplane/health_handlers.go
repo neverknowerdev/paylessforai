@@ -38,6 +38,12 @@ func (s *Server) handleStatus(w http.ResponseWriter, r *http.Request) {
 	if s.groups != nil {
 		status["group_count"] = len(s.groups.Snapshot())
 	}
+	if s.network != nil {
+		if networkState, err := s.network.State(r.Context()); err == nil && networkState.ActivePort > 0 {
+			status["listen_address"] = networkState.ActiveAddress()
+			status["listen_port"] = networkState.ActivePort
+		}
+	}
 	if s.credentials.Updates != nil {
 		if updates, err := s.credentials.Updates.Snapshot(r.Context()); err == nil {
 			status["version"] = updates.Build.Version

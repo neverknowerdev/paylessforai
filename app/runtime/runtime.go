@@ -25,7 +25,9 @@ import (
 	"github.com/neverknowerdev/paylessforai/internal/db"
 	"github.com/neverknowerdev/paylessforai/internal/db/repositories"
 	"github.com/neverknowerdev/paylessforai/internal/groups"
+	"github.com/neverknowerdev/paylessforai/internal/instance"
 	"github.com/neverknowerdev/paylessforai/internal/matcher"
+	"github.com/neverknowerdev/paylessforai/internal/network"
 	"github.com/neverknowerdev/paylessforai/internal/providers"
 	"github.com/neverknowerdev/paylessforai/internal/proxy"
 	"github.com/neverknowerdev/paylessforai/internal/remoteaccess"
@@ -43,11 +45,36 @@ func Run(parent context.Context, args []string) error {
 		return err
 	}
 
+	if err := os.MkdirAll(c.DataDir, 0o700); err != nil {
+		return fmt.Errorf("create data directory: %w", err)
+	}
+	processLock, err := instance.Acquire(filepath.Join(c.DataDir, "paylessforai.lock"))
+	if err != nil {
+		return fmt.Errorf("acquire application lock: %w", err)
+	}
+	defer processLock.Close()
+
 	db, err := db.Open(parent, filepath.Join(c.DataDir, "paylessforai.db"))
 	if err != nil {
 		return err
 	}
 	defer db.Close()
+
+	networkService := network.NewService(db.Settings)
+	listenOverride := ""
+	if c.ListenExplicit {
+		listenOverride = c.ListenAddr
+	}
+	listener, networkState, err := networkService.Bootstrap(parent, listenOverride)
+	if err != nil {
+		return fmt.Errorf("resolve HTTP listen port: %w", err)
+	}
+	defer listener.Close()
+	source := "persisted_or_first_run"
+	if c.ListenExplicit {
+		source = "cli"
+	}
+	slog.Info("paylessforai HTTP server selected", "address", networkState.ActiveAddress(), "base_url", networkState.BaseURL(), "source", source)
 
 	secretBox, err := secrets.LoadOrCreate(filepath.Join(c.DataDir, "master.key"))
 	if err != nil {
@@ -100,13 +127,13 @@ func Run(parent context.Context, args []string) error {
 	proxyHandler := proxy.New(catalogManager, db)
 	proxyHandler.SetGroups(groupManager)
 	server, err := controlplane.NewWithDeps(
-		c.ListenAddr,
+		networkState.ActiveAddress(),
 		c.ReadHeaderTimeout,
 		c.IdleTimeout,
 		db,
 		catalogManager,
 		proxyHandler,
-		controlplane.CredentialDeps{Box: secretBox, Registry: registry, Reload: reloadProviders, Updates: updates, Groups: groupManager},
+		controlplane.CredentialDeps{Box: secretBox, Registry: registry, Reload: reloadProviders, Updates: updates, Groups: groupManager, Network: networkService},
 	)
 	if err != nil {
 		return fmt.Errorf("create app HTTP server: %w", err)
@@ -123,10 +150,6 @@ func Run(parent context.Context, args []string) error {
 		server.SetRemoteAccess(remoteManager)
 	}
 
-	listener, err := server.Start()
-	if err != nil {
-		return fmt.Errorf("listen: %w", err)
-	}
 	if readyPath, token := os.Getenv("PAYLESSFORAI_READY_PATH"), os.Getenv("PAYLESSFORAI_READY_TOKEN"); readyPath != "" && token != "" {
 		_ = updater.MarkReady(readyPath, token)
 	}

@@ -487,3 +487,17 @@ test('configures a subscription, records quota blocking, and shows dynamic prici
   await expect(page.locator('[data-view-panel="stats"]')).toContainText('Pro plan');
   await page.screenshot({ path: 'artifacts/subscription-statistics.png', fullPage: true });
 });
+
+test('shows listener settings and saves a port for the next restart', async ({ page, request }) => {
+  await page.goto('/#settings');
+  await expect(page.locator('#page-title')).toHaveText('Settings');
+  await expect(page.locator('#network-active')).toContainText('127.0.0.1:19477');
+  await expect(page.locator('#network-base-url')).toHaveText('http://127.0.0.1:19477/v1');
+  await page.locator('#network-port').fill('19490');
+  await page.getByRole('button', { name: 'Save port' }).click();
+  await expect(page.locator('#network-feedback')).toContainText('Restart PayLessForAI');
+  const settings = await (await request.get('/api/settings/network')).json();
+  expect(settings.configured.port).toBe(19490);
+  expect(settings.active.port).toBe(19477);
+  expect(settings.restart_required).toBeTruthy();
+});

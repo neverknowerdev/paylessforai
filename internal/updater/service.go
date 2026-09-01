@@ -1,7 +1,9 @@
 package updater
 
 import (
+	"bytes"
 	"context"
+	"crypto/ed25519"
 	"crypto/rand"
 	"encoding/base64"
 	"encoding/hex"
@@ -58,7 +60,11 @@ func NewService(dataDir string, store SettingsStore, onUpdateRequested func()) (
 	if err != nil {
 		return nil, err
 	}
-	return &Service{dataDir: dataDir, store: store, journal: journal, client: &http.Client{Timeout: 30 * time.Second}, baseURL: "https://api.github.com/repos/neverknowerdev/paylessforai/releases", onUpdateRequested: onUpdateRequested, allowUnsigned: !buildinfo.Current().Official, stop: make(chan struct{})}, nil
+	baseURL := "https://api.github.com/repos/neverknowerdev/paylessforai/releases"
+	if configured := strings.TrimSpace(os.Getenv("PAYLESSFORAI_UPDATE_BASE_URL")); configured != "" {
+		baseURL = strings.TrimRight(configured, "/")
+	}
+	return &Service{dataDir: dataDir, store: store, journal: journal, client: &http.Client{Timeout: 30 * time.Second}, baseURL: baseURL, onUpdateRequested: onUpdateRequested, allowUnsigned: !buildinfo.Current().Official, stop: make(chan struct{})}, nil
 }
 
 func (s *Service) SetBaseURL(url string) {
@@ -184,7 +190,8 @@ func (s *Service) Check(ctx context.Context, automatic bool) error {
 	if automatic && (!settings.Enabled || !buildinfo.Current().Official) {
 		return nil
 	}
-	baseState := s.journal.Snapshot()
+	previousState := s.journal.Snapshot()
+	baseState := previousState
 	baseState.Phase = PhaseChecking
 	baseState.Error = ""
 	baseState.FailedPhase = ""
@@ -201,6 +208,13 @@ func (s *Service) Check(ctx context.Context, automatic bool) error {
 		_ = s.journal.Transition(baseState)
 		return err
 	}
+	// A failed automatic candidate is quarantined until a newer build is
+	// published. Manual checks intentionally bypass this guard so the user can
+	// retry after fixing the underlying problem.
+	if automatic && previousState.QuarantinedVersion == manifest.Version {
+		_ = s.journal.Transition(previousState)
+		return nil
+	}
 	if !eligible(manifest, buildinfo.Current(), settings.Channel) {
 		baseState.Phase, baseState.Error, baseState.FailedPhase = PhaseIdle, "", ""
 		_ = s.journal.Transition(baseState)
@@ -213,6 +227,9 @@ func (s *Service) Check(ctx context.Context, automatic bool) error {
 	s.available = &manifest
 	s.mu.Unlock()
 	baseState.Phase, baseState.CandidateVersion, baseState.Error = PhaseAvailable, manifest.Version, ""
+	baseState.CandidateCommit = manifest.Commit
+	baseState.CandidateChannel = manifest.Channel
+	baseState.QuarantinedVersion = ""
 	_ = s.journal.Transition(baseState)
 	if automatic {
 		return s.Install(ctx, manifest.Version)
@@ -298,6 +315,8 @@ func (s *Service) Install(ctx context.Context, version string) error {
 	}
 	state := s.journal.Snapshot()
 	state.OperationID, state.Phase, state.CandidateVersion, state.CandidatePath = id, PhaseDownloading, manifest.Version, root
+	state.CandidateCommit, state.CandidateChannel = manifest.Commit, manifest.Channel
+	state.QuarantinedVersion = ""
 	state.Error, state.FailedPhase = "", ""
 	_ = s.journal.Transition(state)
 	executable, err := ExtractArtifact(data, root)
@@ -397,22 +416,30 @@ func (s *Service) fetchManifest(ctx context.Context, baseURL, channel string) (M
 			if readErr != nil {
 				return Manifest{}, nil, readErr
 			}
-			signature = decodeSignature(bytesTrimSpace(sigBody))
+			signature = decodeSignature(sigBody)
 		}
 		return manifest, signature, nil
 	}
 	return Manifest{}, nil, errors.New("no eligible update release found")
 }
 
-func bytesTrimSpace(value []byte) []byte { return []byte(strings.TrimSpace(string(value))) }
 func decodeSignature(value []byte) []byte {
-	if decoded, err := base64.StdEncoding.DecodeString(string(value)); err == nil {
+	// GitHub serves the signature as an opaque binary asset. Do not trim raw
+	// bytes: a valid Ed25519 signature may begin or end with whitespace bytes.
+	if len(value) == ed25519.SignatureSize {
+		return value
+	}
+	trimmed := bytes.TrimSpace(value)
+	if len(trimmed) == ed25519.SignatureSize {
+		return trimmed
+	}
+	if decoded, err := base64.StdEncoding.DecodeString(string(trimmed)); err == nil {
 		return decoded
 	}
-	if decoded, err := hex.DecodeString(string(value)); err == nil {
+	if decoded, err := hex.DecodeString(string(trimmed)); err == nil {
 		return decoded
 	}
-	return value
+	return trimmed
 }
 func randomID() string {
 	var data [12]byte

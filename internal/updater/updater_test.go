@@ -7,9 +7,12 @@ import (
 	"crypto/rand"
 	"crypto/sha256"
 	"encoding/hex"
+	"errors"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
+	"time"
 
 	"github.com/neverknowerdev/paylessforai/internal/buildinfo"
 )
@@ -50,6 +53,44 @@ func TestJournalSurvivesRestartAndReturnsNewestHistoryFirst(t *testing.T) {
 	}
 	if len(history) != 1 || history[0].Version != "v1" {
 		t.Fatalf("history = %#v", history)
+	}
+}
+
+func TestJournalSnapshotRefreshesStateWrittenByAnotherProcess(t *testing.T) {
+	root := t.TempDir()
+	writer, err := OpenJournal(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	reader, err := OpenJournal(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := writer.Transition(State{OperationID: "shared", Phase: PhasePromoted, CurrentVersion: "v2"}); err != nil {
+		t.Fatal(err)
+	}
+	state := reader.Snapshot()
+	if state.Phase != PhasePromoted || state.CurrentVersion != "v2" {
+		t.Fatalf("state = %#v", state)
+	}
+}
+
+func TestDecodeSignaturePreservesRawWhitespaceBytes(t *testing.T) {
+	raw := make([]byte, ed25519.SignatureSize)
+	raw[0] = ' '
+	raw[len(raw)-1] = '\t'
+	decoded := decodeSignature(raw)
+	if !bytes.Equal(decoded, raw) {
+		t.Fatalf("raw signature changed: got %x want %x", decoded, raw)
+	}
+}
+
+func TestWaitReadyReportsExitedCandidateWithoutReapingTwice(t *testing.T) {
+	done := make(chan error, 1)
+	done <- errors.New("exit status 43")
+	err, exited := waitReady(context.Background(), filepath.Join(t.TempDir(), "ready"), "token", done, time.Second)
+	if !exited || err == nil || !strings.Contains(err.Error(), "exit status 43") {
+		t.Fatalf("waitReady = %v, exited=%v", err, exited)
 	}
 }
 

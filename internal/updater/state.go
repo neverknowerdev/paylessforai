@@ -40,6 +40,8 @@ type State struct {
 	PreviousVersion       string `json:"previous_version,omitempty"`
 	CandidatePath         string `json:"candidate_path,omitempty"`
 	CandidateVersion      string `json:"candidate_version,omitempty"`
+	CandidateCommit       string `json:"candidate_commit,omitempty"`
+	CandidateChannel      string `json:"candidate_channel,omitempty"`
 	BackupPath            string `json:"backup_path,omitempty"`
 	Error                 string `json:"error,omitempty"`
 	FailedPhase           Phase  `json:"failed_phase,omitempty"`
@@ -91,7 +93,21 @@ func OpenJournal(root string) (*Journal, error) {
 	return j, nil
 }
 
-func (j *Journal) Snapshot() State { j.mu.Lock(); defer j.mu.Unlock(); return j.state }
+func (j *Journal) Snapshot() State {
+	j.mu.Lock()
+	defer j.mu.Unlock()
+	// The supervisor and application child share this journal. Refresh from the
+	// atomically replaced state file so a long-lived child observes promotions
+	// and rollbacks written by the supervisor after the child started.
+	data, err := os.ReadFile(filepath.Join(j.root, "state.json"))
+	if err == nil {
+		var persisted State
+		if json.Unmarshal(data, &persisted) == nil && persisted.Phase != "" {
+			j.state = persisted
+		}
+	}
+	return j.state
+}
 
 func (j *Journal) Transition(next State) error {
 	j.mu.Lock()

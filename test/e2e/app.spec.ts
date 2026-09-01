@@ -506,8 +506,8 @@ test('shows listener settings and saves a port for the next restart', async ({ p
   await expect(page.getByRole('button', { name: /^Private devices/ })).toBeVisible();
   await expect(page.getByRole('button', { name: /^Public API link/ })).toBeVisible();
   await expect(page.locator('#network-settings-form')).toBeVisible();
-  await expect(page.locator('.remote-access-card')).toBeHidden();
-  await expect(page.locator('#remote-access-mode')).toBeHidden();
+  await expect(page.locator('#remote-access-details')).toBeHidden();
+  await expect(page.locator('#remote-access-mode')).toHaveCount(0);
   const modeStyle = await page.locator('.access-mode-option[data-access-mode="private"]').evaluate((element) => {
     const style = getComputedStyle(element);
     return { backgroundColor: style.backgroundColor, borderRadius: style.borderRadius };
@@ -543,14 +543,22 @@ test('switches remote access modes and opens the Tailscale auth modal', async ({
   await page.goto('/#settings');
   await expect(page.locator('.access-mode-option[data-access-mode="disabled"]')).toHaveAttribute('aria-pressed', 'true');
   await page.getByRole('button', { name: /^Private devices/ }).click();
+  await expect(page.locator('#network-settings-form')).toBeHidden();
+  await expect(page.locator('#remote-access-details')).toBeVisible();
+  await expect(page.locator('#remote-access-action')).toBeVisible();
+  await expect(page.locator('#remote-access-action-link')).toHaveText('Auth Tailscale');
+  await expect(page.locator('#remote-access-links')).toBeHidden();
+  await page.locator('#remote-access-action-link').click();
   await expect(page.locator('#remote-auth-modal')).toBeVisible();
   await expect(page.locator('#remote-auth-modal-title')).toHaveText('Connect Private devices');
   await expect(page.locator('#remote-auth-modal-link')).toHaveAttribute('href', 'https://login.tailscale.com/a/test-auth');
-  await expect(page.locator('#network-settings-form')).toBeHidden();
-  await expect(page.locator('.remote-access-card')).toBeVisible();
   await page.locator('#remote-auth-modal').getByRole('button', { name: 'Close', exact: true }).click();
+  page.once('dialog', (dialog) => dialog.dismiss());
+  await page.getByRole('button', { name: /^Off/ }).click();
+  await expect(page.locator('.access-mode-option[data-access-mode="private"]')).toHaveAttribute('aria-pressed', 'true');
+  page.once('dialog', (dialog) => dialog.accept());
   await page.getByRole('button', { name: /^Off/ }).click();
   await expect(page.locator('#remote-auth-modal')).toBeHidden();
   await expect(page.locator('#network-settings-form')).toBeVisible();
-  await expect(page.locator('.remote-access-card')).toBeHidden();
+  await expect(page.locator('#remote-access-details')).toBeHidden();
 });

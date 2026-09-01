@@ -499,12 +499,20 @@ test('configures a subscription, records quota blocking, and shows dynamic prici
 test('shows listener settings and saves a port for the next restart', async ({ page, request }) => {
   await page.goto('/#settings');
   await expect(page.locator('#page-title')).toHaveText('Settings');
-  await expect(page.getByRole('heading', { name: 'Tailscale access' })).toBeVisible();
-  const remoteModeStyle = await page.locator('#remote-access-mode').evaluate((element) => {
+  await expect(page.locator('[data-view-panel="settings"]')).toHaveCount(1);
+  await expect(page.locator('#access-mode-selector')).toBeVisible();
+  await expect(page.locator('.access-mode-option')).toHaveCount(3);
+  await expect(page.locator('.access-mode-option[data-access-mode="disabled"]')).toHaveAttribute('aria-pressed', 'true');
+  await expect(page.getByRole('button', { name: /^Private devices/ })).toBeVisible();
+  await expect(page.getByRole('button', { name: /^Public API link/ })).toBeVisible();
+  await expect(page.locator('#network-settings-form')).toBeVisible();
+  await expect(page.locator('.remote-access-card')).toBeHidden();
+  await expect(page.locator('#remote-access-mode')).toBeHidden();
+  const modeStyle = await page.locator('.access-mode-option[data-access-mode="private"]').evaluate((element) => {
     const style = getComputedStyle(element);
-    return { appearance: style.appearance, backgroundColor: style.backgroundColor, color: style.color };
+    return { backgroundColor: style.backgroundColor, borderRadius: style.borderRadius };
   });
-  expect(remoteModeStyle).toEqual({ appearance: 'none', backgroundColor: 'rgb(16, 24, 43)', color: 'rgb(244, 247, 251)' });
+  expect(modeStyle).toEqual({ backgroundColor: 'rgb(16, 24, 43)', borderRadius: '12px' });
   await expect(page.locator('#network-active')).toContainText('127.0.0.1:19477');
   await expect(page.locator('#network-base-url')).toHaveText('http://127.0.0.1:19477/v1');
   await page.locator('#network-port').fill('19490');
@@ -514,4 +522,35 @@ test('shows listener settings and saves a port for the next restart', async ({ p
   expect(settings.configured.port).toBe(19490);
   expect(settings.active.port).toBe(19477);
   expect(settings.restart_required).toBeTruthy();
+});
+
+test('switches remote access modes and opens the Tailscale auth modal', async ({ page }) => {
+  let mode = 'disabled';
+  await page.route('**/api/remote-access', async (route) => {
+    if (route.request().method() === 'PUT') mode = route.request().postDataJSON().mode;
+    const remote = mode !== 'disabled';
+    await route.fulfill({
+      contentType: 'application/json',
+      body: JSON.stringify(remote ? {
+        desired_mode: mode,
+        effective_mode: 'disabled',
+        phase: 'auth_required',
+        hostname: 'paylessforai',
+        action: { kind: 'authorize_node', label: 'Authorize with Tailscale', url: 'https://login.tailscale.com/a/test-auth' },
+      } : { desired_mode: 'disabled', effective_mode: 'disabled', phase: 'disabled', hostname: 'paylessforai' }),
+    });
+  });
+  await page.goto('/#settings');
+  await expect(page.locator('.access-mode-option[data-access-mode="disabled"]')).toHaveAttribute('aria-pressed', 'true');
+  await page.getByRole('button', { name: /^Private devices/ }).click();
+  await expect(page.locator('#remote-auth-modal')).toBeVisible();
+  await expect(page.locator('#remote-auth-modal-title')).toHaveText('Connect Private devices');
+  await expect(page.locator('#remote-auth-modal-link')).toHaveAttribute('href', 'https://login.tailscale.com/a/test-auth');
+  await expect(page.locator('#network-settings-form')).toBeHidden();
+  await expect(page.locator('.remote-access-card')).toBeVisible();
+  await page.locator('#remote-auth-modal').getByRole('button', { name: 'Close', exact: true }).click();
+  await page.getByRole('button', { name: /^Off/ }).click();
+  await expect(page.locator('#remote-auth-modal')).toBeHidden();
+  await expect(page.locator('#network-settings-form')).toBeVisible();
+  await expect(page.locator('.remote-access-card')).toBeHidden();
 });

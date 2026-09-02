@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/neverknowerdev/paylessforai/internal/catalog"
+	"github.com/neverknowerdev/paylessforai/internal/clientauth"
 	"github.com/neverknowerdev/paylessforai/internal/db/models"
 	"github.com/neverknowerdev/paylessforai/internal/db/repositories"
 	"github.com/neverknowerdev/paylessforai/internal/groups"
@@ -71,24 +72,28 @@ func (p *Proxy) ServeHTTP(w http.ResponseWriter, r *http.Request, protocol match
 	}
 	clientKeyID := ""
 	if p.RequireClientKey {
-		secret := bearerToken(r.Header.Get("Authorization"))
-		if secret == "" {
-			secret = strings.TrimSpace(r.Header.Get("x-api-key"))
+		if id, ok := clientauth.KeyID(r.Context()); ok {
+			clientKeyID = id
+		} else {
+			secret := bearerToken(r.Header.Get("Authorization"))
+			if secret == "" {
+				secret = strings.TrimSpace(r.Header.Get("x-api-key"))
+			}
+			if secret == "" || p.Repositories == nil {
+				writeError(w, http.StatusUnauthorized, "invalid_api_key", "a PayLessForAI client API key is required")
+				return
+			}
+			key, ok, err := p.Repositories.ClientAPIKeys.Authenticate(r.Context(), secret)
+			if err != nil {
+				writeError(w, http.StatusInternalServerError, "key_lookup_failed", "client key lookup failed")
+				return
+			}
+			if !ok {
+				writeError(w, http.StatusUnauthorized, "invalid_api_key", "the client API key is invalid or revoked")
+				return
+			}
+			clientKeyID = key.ID
 		}
-		if secret == "" || p.Repositories == nil {
-			writeError(w, http.StatusUnauthorized, "invalid_api_key", "a PayLessForAI client API key is required")
-			return
-		}
-		key, ok, err := p.Repositories.ClientAPIKeys.Authenticate(r.Context(), secret)
-		if err != nil {
-			writeError(w, http.StatusInternalServerError, "key_lookup_failed", "client key lookup failed")
-			return
-		}
-		if !ok {
-			writeError(w, http.StatusUnauthorized, "invalid_api_key", "the client API key is invalid or revoked")
-			return
-		}
-		clientKeyID = key.ID
 	}
 	body, err := readBody(r, p.MaximumBody)
 	if err != nil {

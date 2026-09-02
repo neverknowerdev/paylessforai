@@ -357,7 +357,15 @@ test('creates and exposes a callable group alias', async ({ page, request }) => 
   });
   expect(groupInputSurface).toEqual({ color: 'rgb(244, 247, 251)', backgroundColor: 'rgb(10, 17, 34)' });
   await page.locator('#close-group-editor').click();
-  const models = await (await request.get('/v1/models')).json();
+  await page.getByRole('link', { name: 'Access & keys' }).click();
+  await page.getByRole('button', { name: 'Create API key' }).click();
+  await page.locator('#key-label').fill('group-models');
+  await page.locator('#key-modal').getByRole('button', { name: 'Create key' }).click();
+  await expect(page.locator('#new-key')).toContainText('plai_');
+  const keyText = await page.locator('#new-key').textContent();
+  const clientKey = keyText?.match(/plai_[0-9a-f]+/)?.[0];
+  expect(clientKey).toBeTruthy();
+  const models = await (await request.get('/v1/models', { headers: { Authorization: `Bearer ${clientKey}` } })).json();
   expect(models.data.some((item: { id: string; paylessforai_type?: string }) => item.id === 'coding-pool' && item.paylessforai_type === 'group')).toBeTruthy();
 });
 
@@ -491,6 +499,22 @@ test('configures a subscription, records quota blocking, and shows dynamic prici
 test('shows listener settings and saves a port for the next restart', async ({ page, request }) => {
   await page.goto('/#settings');
   await expect(page.locator('#page-title')).toHaveText('Settings');
+  await expect(page.locator('[data-view-panel="settings"]')).toHaveCount(1);
+  await expect(page.locator('#access-mode-selector')).toBeVisible();
+  await expect(page.locator('.access-mode-option')).toHaveCount(3);
+  await expect(page.locator('.access-mode-option[data-access-mode="disabled"]')).toHaveAttribute('aria-pressed', 'true');
+  await expect(page.getByRole('button', { name: /^Private devices/ })).toBeVisible();
+  await expect(page.getByRole('button', { name: /^Public API link/ })).toBeVisible();
+  await expect(page.locator('#network-settings-form')).toBeVisible();
+  await expect(page.locator('#remote-access-details')).toBeHidden();
+  await expect(page.locator('#remote-access-mode')).toHaveCount(0);
+  await expect(page.locator('#network-active')).toContainText('127.0.0.1:19477');
+  await expect(page.locator('#network-settings-form').locator('..').locator('.credential-main strong').first()).toHaveText('Local server address');
+  const modeStyle = await page.locator('.access-mode-option[data-access-mode="private"]').evaluate((element) => {
+    const style = getComputedStyle(element);
+    return { backgroundColor: style.backgroundColor, borderRadius: style.borderRadius };
+  });
+  expect(modeStyle).toEqual({ backgroundColor: 'rgb(16, 24, 43)', borderRadius: '12px' });
   await expect(page.locator('#network-active')).toContainText('127.0.0.1:19477');
   await expect(page.locator('#network-base-url')).toHaveText('http://127.0.0.1:19477/v1');
   await page.locator('#network-port').fill('19490');
@@ -500,4 +524,93 @@ test('shows listener settings and saves a port for the next restart', async ({ p
   expect(settings.configured.port).toBe(19490);
   expect(settings.active.port).toBe(19477);
   expect(settings.restart_required).toBeTruthy();
+});
+
+test('switches remote access modes with direct Tailscale auth and a running-server stop confirmation', async ({ page }) => {
+  let mode = 'disabled';
+  let phase = 'disabled';
+  const putModes: string[] = [];
+  await page.route('**/api/remote-access', async (route) => {
+    if (route.request().method() === 'PUT') {
+      mode = route.request().postDataJSON().mode;
+      putModes.push(mode);
+      phase = mode === 'disabled' ? 'disabled' : putModes.length === 1 ? 'auth_required' : 'online';
+    }
+    await route.fulfill({
+      contentType: 'application/json',
+      body: JSON.stringify(mode !== 'disabled' ? {
+        desired_mode: mode,
+        effective_mode: phase === 'online' ? mode : 'disabled',
+        phase,
+        hostname: 'paylessforai',
+        ...(phase === 'auth_required' ? { action: { kind: 'authorize_node', label: 'Authorize with Tailscale', url: 'https://login.tailscale.com/a/test-auth' } } : {}),
+      } : { desired_mode: 'disabled', effective_mode: 'disabled', phase: 'disabled', hostname: 'paylessforai' }),
+    });
+  });
+  let dialogSeen = false;
+  let dialogAction: 'dismiss' | 'accept' = 'dismiss';
+  page.on('dialog', async (dialog) => {
+    dialogSeen = true;
+    if (dialogAction === 'accept') await dialog.accept(); else await dialog.dismiss();
+  });
+  await page.goto('/#settings');
+  await expect(page.locator('.access-mode-option[data-access-mode="disabled"]')).toHaveAttribute('aria-pressed', 'true');
+  await page.getByRole('button', { name: /^Private devices/ }).click();
+  await expect(page.locator('#network-settings-form')).toBeHidden();
+  await expect(page.locator('#remote-access-details')).toBeVisible();
+  await expect(page.locator('#remote-access-action')).toBeVisible();
+  await expect(page.locator('#remote-access-action-link')).toHaveText('Auth Tailscale');
+  await expect(page.locator('#remote-access-action-link')).toHaveAttribute('href', 'https://login.tailscale.com/a/test-auth');
+  await expect(page.locator('#remote-auth-modal')).toHaveCount(0);
+  await expect(page.locator('#remote-access-links')).toBeHidden();
+  await page.getByRole('button', { name: /^Off/ }).click();
+  await expect(page.locator('.access-mode-option[data-access-mode="disabled"]')).toHaveAttribute('aria-pressed', 'true');
+  expect(dialogSeen).toBeFalsy();
+  await page.getByRole('button', { name: /^Private devices/ }).click();
+  await expect(page.locator('#remote-access-phase')).toHaveText('Online');
+  dialogAction = 'dismiss';
+  await page.getByRole('button', { name: /^Off/ }).click();
+  await expect(page.locator('.access-mode-option[data-access-mode="private"]')).toHaveAttribute('aria-pressed', 'true');
+  expect(dialogSeen).toBeTruthy();
+  dialogAction = 'accept';
+  await page.getByRole('button', { name: /^Off/ }).click();
+  await expect(page.locator('#network-settings-form')).toBeVisible();
+  await expect(page.locator('#remote-access-details')).toBeHidden();
+  expect(putModes).toEqual(['private', 'disabled', 'private', 'disabled']);
+});
+
+test('waits for public Funnel DNS before showing the public API URL', async ({ page }) => {
+  let mode = 'disabled';
+  let phase = 'disabled';
+  let dnsReady = false;
+  await page.route('**/api/remote-access', async (route) => {
+    if (route.request().method() === 'PUT') {
+      mode = route.request().postDataJSON().mode;
+      phase = mode === 'funnel' ? 'publishing' : 'disabled';
+    } else if (phase === 'publishing' && dnsReady) {
+      phase = 'online';
+    }
+    const remote = mode === 'funnel';
+    await route.fulfill({
+      contentType: 'application/json',
+      body: JSON.stringify(remote ? {
+        desired_mode: mode,
+        effective_mode: phase === 'online' ? mode : 'disabled',
+        phase,
+        hostname: 'paylessforai',
+        dns_name: 'paylessforai.example.ts.net',
+        dashboard_url: 'https://paylessforai.example.ts.net/',
+        base_url: 'https://paylessforai.example.ts.net/v1',
+      } : { desired_mode: 'disabled', effective_mode: 'disabled', phase: 'disabled', hostname: 'paylessforai' }),
+    });
+  });
+  await page.goto('/#settings');
+  await page.getByRole('button', { name: /^Public API link/ }).click();
+  await expect(page.locator('#remote-access-phase')).toHaveText('Preparing public link');
+  await expect(page.locator('#remote-access-description')).toContainText('Public DNS can take a few minutes');
+  await expect(page.locator('#remote-access-links')).toBeHidden();
+  dnsReady = true;
+  await expect(page.locator('#remote-access-links')).toBeVisible({ timeout: 3000 });
+  await expect(page.locator('#remote-access-base')).toHaveText('https://paylessforai.example.ts.net/v1');
+  await expect(page.locator('#remote-access-dashboard').locator('..')).toBeHidden();
 });

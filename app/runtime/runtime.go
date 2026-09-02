@@ -30,6 +30,7 @@ import (
 	"github.com/neverknowerdev/paylessforai/internal/network"
 	"github.com/neverknowerdev/paylessforai/internal/providers"
 	"github.com/neverknowerdev/paylessforai/internal/proxy"
+	"github.com/neverknowerdev/paylessforai/internal/remoteaccess"
 	"github.com/neverknowerdev/paylessforai/internal/secrets"
 	"github.com/neverknowerdev/paylessforai/internal/updater"
 )
@@ -137,12 +138,31 @@ func Run(parent context.Context, args []string) error {
 	if err != nil {
 		return fmt.Errorf("create app HTTP server: %w", err)
 	}
+	remoteManager, remoteErr := remoteaccess.New(
+		db.Settings,
+		c.DataDir,
+		func(authorize remoteaccess.Authorizer) http.Handler { return server.PrivateHandler(authorize) },
+		server.GatewayHandler(),
+	)
+	if remoteErr != nil {
+		slog.Warn("remote access unavailable", "error", remoteErr)
+	} else {
+		server.SetRemoteAccess(remoteManager)
+	}
 
 	if readyPath, token := os.Getenv("PAYLESSFORAI_READY_PATH"), os.Getenv("PAYLESSFORAI_READY_TOKEN"); readyPath != "" && token != "" {
 		_ = updater.MarkReady(readyPath, token)
 	}
 	serverErr := make(chan error, 1)
 	go func() { serverErr <- server.Serve(listener) }()
+	if remoteManager != nil {
+		remoteManager.Start(appContext)
+		defer func() {
+			shutdownCtx, cancel := context.WithTimeout(context.Background(), c.ShutdownTimeout)
+			_ = remoteManager.Shutdown(shutdownCtx)
+			cancel()
+		}()
+	}
 	signals := make(chan os.Signal, 1)
 	signal.Notify(signals, syscall.SIGINT, syscall.SIGTERM)
 	defer signal.Stop(signals)
@@ -155,14 +175,23 @@ func Run(parent context.Context, args []string) error {
 	case <-signals:
 		shutdownCtx, cancel := context.WithTimeout(context.Background(), c.ShutdownTimeout)
 		defer cancel()
+		if remoteManager != nil {
+			_ = remoteManager.Shutdown(shutdownCtx)
+		}
 		return server.Shutdown(shutdownCtx)
 	case <-parent.Done():
 		shutdownCtx, cancel := context.WithTimeout(context.Background(), c.ShutdownTimeout)
 		defer cancel()
+		if remoteManager != nil {
+			_ = remoteManager.Shutdown(shutdownCtx)
+		}
 		return server.Shutdown(shutdownCtx)
 	case <-appContext.Done():
 		shutdownCtx, cancel := context.WithTimeout(context.Background(), c.ShutdownTimeout)
 		defer cancel()
+		if remoteManager != nil {
+			_ = remoteManager.Shutdown(shutdownCtx)
+		}
 		_ = server.Shutdown(shutdownCtx)
 		if updates.IsUpdateRequested() {
 			return ErrUpdateRequested

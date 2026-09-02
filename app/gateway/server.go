@@ -8,17 +8,20 @@ import (
 	"net/http"
 
 	"github.com/neverknowerdev/paylessforai/internal/catalog"
+	"github.com/neverknowerdev/paylessforai/internal/clientauth"
 	"github.com/neverknowerdev/paylessforai/internal/groups"
 	"github.com/neverknowerdev/paylessforai/internal/matcher"
 	proxyservice "github.com/neverknowerdev/paylessforai/internal/proxy"
 )
 
-// NewHandler builds the public models and inference handler. Authentication,
-// routing, retries, usage recording, and provider failover remain in the
-// shared proxy service used by the local app.
-func NewHandler(catalogManager *catalog.Manager, proxyHandler *proxyservice.Proxy, groupManagers ...*groups.Manager) http.Handler {
-	mux := http.NewServeMux()
-	mux.HandleFunc("/v1/models", func(w http.ResponseWriter, r *http.Request) {
+// NewHandler builds the exact inference allow-list. Authentication is an
+// explicit dependency and is applied only after the path has been allow-listed
+// so public non-gateway paths remain an uninformative 404.
+func NewHandler(catalogManager *catalog.Manager, proxyHandler *proxyservice.Proxy, authenticate func(http.Handler) http.Handler, groupManagers ...*groups.Manager) http.Handler {
+	if authenticate == nil {
+		authenticate = func(next http.Handler) http.Handler { return clientauth.Middleware(nil)(next) }
+	}
+	modelsHandler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodGet {
 			writeError(w, http.StatusMethodNotAllowed, "method_not_allowed", "models endpoint only accepts GET")
 			return
@@ -47,27 +50,37 @@ func NewHandler(catalogManager *catalog.Manager, proxyHandler *proxyservice.Prox
 		}
 		writeJSON(w, http.StatusOK, map[string]any{"object": "list", "data": data})
 	})
-	for _, path := range []string{"/v1/chat/completions", "/v1/responses", "/v1/messages", "/anthropic/v1/messages"} {
-		mux.HandleFunc(path, func(w http.ResponseWriter, r *http.Request) {
-			if proxyHandler == nil {
-				if r.Method != http.MethodPost {
-					writeError(w, http.StatusMethodNotAllowed, "method_not_allowed", "inference endpoint only accepts POST")
-					return
-				}
-				writeError(w, http.StatusNotImplemented, "not_implemented", "provider proxy is not configured yet")
+	inferenceHandler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if proxyHandler == nil {
+			if r.Method != http.MethodPost {
+				writeError(w, http.StatusMethodNotAllowed, "method_not_allowed", "inference endpoint only accepts POST")
 				return
 			}
-			protocol := matcher.ProtocolChatCompletions
-			switch r.URL.Path {
-			case "/v1/responses":
-				protocol = matcher.ProtocolResponses
-			case "/v1/messages", "/anthropic/v1/messages":
-				protocol = matcher.ProtocolAnthropic
-			}
-			proxyHandler.ServeHTTP(w, r, protocol)
-		})
-	}
-	return mux
+			writeError(w, http.StatusNotImplemented, "not_implemented", "provider proxy is not configured yet")
+			return
+		}
+		protocol := matcher.ProtocolChatCompletions
+		switch r.URL.Path {
+		case "/v1/responses":
+			protocol = matcher.ProtocolResponses
+		case "/v1/messages", "/anthropic/v1/messages":
+			protocol = matcher.ProtocolAnthropic
+		}
+		proxyHandler.ServeHTTP(w, r, protocol)
+	})
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var endpoint http.Handler
+		switch r.URL.Path {
+		case "/v1/models":
+			endpoint = modelsHandler
+		case "/v1/chat/completions", "/v1/responses", "/v1/messages", "/anthropic/v1/messages":
+			endpoint = inferenceHandler
+		default:
+			http.NotFound(w, r)
+			return
+		}
+		authenticate(endpoint).ServeHTTP(w, r)
+	})
 }
 
 func writeJSON(w http.ResponseWriter, status int, value any) {

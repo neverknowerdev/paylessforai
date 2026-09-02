@@ -100,9 +100,9 @@
       const enabled = $('#updates-enabled'); if (enabled) enabled.checked = Boolean(settings.enabled);
       const channel = $('#updates-channel'); if (channel) channel.value = settings.channel || 'releases';
       const interval = $('#updates-interval'); if (interval) interval.value = String(settings.interval_seconds || 3600);
-      setText('#update-current-version', build.version || 'Current version');
+      setText('#update-current-version', build.version || '—');
+      setText('#sidebar-build-version', build.version || '—');
       const details = $('#update-build-details'); if (details) { details.replaceChildren(); [['Channel', build.channel], ['Commit', build.commit], ['Platform', `${build.os || ''}/${build.arch || ''}`], ['Built', build.built_at]].forEach(([label, value]) => { const row = document.createElement('div'); row.className = 'detail-row'; const key = document.createElement('span'); key.textContent = label; const val = document.createElement('strong'); val.textContent = value || '—'; row.append(key, val); details.append(row); }); }
-      setText('#update-phase', stateUpdate.phase || 'Idle');
       const available = payload.available; const card = $('#update-available'); if (card) card.hidden = !available; if (available) setText('#update-available-version', `${available.version} · ${available.channel}`);
       const warning = $('#update-warning'); const failed = stateUpdate.phase === 'rolled_back' || stateUpdate.phase === 'needs_manual_recovery'; if (warning) { warning.hidden = !failed || Boolean(stateUpdate.warning_acknowledged_at); warning.textContent = failed ? `Update warning: ${stateUpdate.error || 'The new version could not start.'}` : ''; if (failed && !stateUpdate.warning_acknowledged_at) { const button = document.createElement('button'); button.className = 'quiet-button'; button.textContent = 'Dismiss'; button.onclick = async () => { await fetchJSON('/api/updates/warning/acknowledge', { method: 'POST' }); loadUpdates(); }; warning.append(button); } }
       const history = $('#update-history-body'); const empty = $('#update-history-empty'); if (history) { history.replaceChildren(); (payload.history || []).forEach((item) => { const row = document.createElement('tr'); appendTextCell(row, item.version || '—'); appendTextCell(row, item.channel || '—'); appendTextCell(row, item.outcome || '—'); appendTextCell(row, dateValue(item.at)); appendTextCell(row, item.error || '—'); history.append(row); }); if (empty) empty.hidden = (payload.history || []).length > 0; }
@@ -363,10 +363,10 @@
   let remoteAccessStatus;
   function remoteActionURL(value) { try { const parsed = new URL(value); return parsed.protocol === 'https:' && (parsed.hostname === 'tailscale.com' || parsed.hostname.endsWith('.tailscale.com')) ? parsed.href : ''; } catch (_) { return ''; } }
   function renderRemoteAccess(status) { remoteAccessStatus = status; const phase = status.phase || 'disabled'; const mode = status.desired_mode || 'disabled'; const transitional = ['starting', 'connecting', 'auth_required', 'publishing', 'stopping'].includes(phase); const phaseLabel = { disabled: 'Off', starting: 'Starting', connecting: 'Connecting', auth_required: 'Action required', publishing: 'Preparing public link', online: 'Online', stopping: 'Stopping', error: 'Error' }[phase] || phase; setText('#remote-access-phase', phaseLabel); const modeControl = $('#remote-access-mode'); const host = $('#remote-access-hostname'); if (modeControl) modeControl.value = mode; if (host) { host.value = status.hostname || 'paylessforai'; host.disabled = true; } setText('#remote-access-description', phase === 'publishing' ? 'Tailscale is preparing the public URL. Public DNS can take a few minutes to propagate; keep this computer connected.' : mode === 'funnel' ? 'Your dashboard stays private. The public URL exposes only the inference API, and every request still needs a PayLessForAI client key.' : mode === 'private' ? 'Your dashboard and inference API are available only to devices on your Tailscale network. Inference still needs a PayLessForAI client key.' : 'The local loopback server remains available on this computer.'); const action = $('#remote-access-action'); const actionURL = remoteActionURL(status.action?.url); if (action) action.hidden = phase !== 'auth_required' || !actionURL; const link = $('#remote-access-action-link'); if (link) { link.href = actionURL || '#'; link.hidden = !actionURL; link.textContent = 'Auth Tailscale'; } const links = $('#remote-access-links'); if (links) links.hidden = phase !== 'online'; const dashboardRow = $('#remote-access-dashboard')?.closest('div'); if (dashboardRow) dashboardRow.hidden = mode !== 'private'; const baseLabel = $('#remote-access-base')?.closest('div')?.querySelector('span'); if (baseLabel) baseLabel.textContent = mode === 'funnel' ? 'Public API URL' : 'Inference base URL'; setText('#remote-access-dashboard', status.dashboard_url || ''); setText('#remote-access-base', status.base_url || ''); const error = $('#remote-access-error'); if (error) { error.hidden = !status.last_error; error.textContent = status.last_error?.message || ''; } const retry = $('#remote-access-retry'); if (retry) retry.hidden = phase !== 'error'; const stop = $('#remote-access-stop'); if (stop) stop.hidden = true; const forget = $('#remote-access-forget'); if (forget) forget.hidden = true; const save = $('#remote-access-save'); if (save) { save.hidden = true; save.disabled = transitional; } const actions = $('#remote-access-actions'); if (actions) actions.hidden = phase !== 'error'; syncRemoteAccessPanels(mode); if (transitional) { clearTimeout(remotePollTimer); remotePollTimer = setTimeout(loadRemoteAccess, 500); } }
-  function syncRemoteAccessPanels(mode) { const details = $('#remote-access-details'); const listener = $('#network-settings-form')?.closest('.settings-card'); if (details) details.hidden = mode === 'disabled'; if (listener) listener.hidden = mode !== 'disabled'; $$('.access-mode-option').forEach((option) => { option.setAttribute('aria-pressed', option.dataset.accessMode === mode ? 'true' : 'false'); }); }
+  function syncRemoteAccessPanels(mode) { const details = $('#remote-access-details'); const listener = $('#network-settings-form')?.closest('.settings-card'); const localURL = $('#local-api-url'); if (details) details.hidden = mode === 'disabled'; if (listener) listener.hidden = mode !== 'disabled'; if (localURL) localURL.hidden = mode !== 'disabled'; $$('.access-mode-option').forEach((option) => { option.setAttribute('aria-pressed', option.dataset.accessMode === mode ? 'true' : 'false'); }); }
   async function loadRemoteAccess() { try { const status = await fetchJSON('/api/remote-access'); renderRemoteAccess(status); } catch (_) { setText('#remote-access-error', 'Remote-access status is unavailable'); $('#remote-access-error').hidden = false; } }
   function setNetworkFeedback(message, kind = 'warning') { const feedback = $('#network-feedback'); if (!feedback) return; feedback.hidden = !message; feedback.className = `provider-feedback ${kind}`; feedback.textContent = message || ''; }
-  async function loadNetworkSettings() { try { const data = await fetchJSON('/api/settings/network'); state.network = data; const active = data.active; const configured = data.configured?.port || active?.port || 9472; $('#network-port').value = configured; setText('#network-active', active ? `${active.host}:${active.port}${data.override_active ? ' · command-line override' : ''}` : 'Not active'); setText('#network-base-url', active?.base_url || 'Available after startup'); const status = data.restart_required ? `Saved for the next restart${data.override_active ? ' (remove -listen to use it)' : ''}.` : 'Active and saved setting match.'; setText('#network-status', status); setNetworkFeedback(''); } catch (error) { setNetworkFeedback(error.message, 'error'); } }
+  async function loadNetworkSettings() { try { const data = await fetchJSON('/api/settings/network'); state.network = data; const active = data.active; const configured = data.configured?.port || active?.port || 9472; $('#network-port').value = configured; setText('#local-api-base-url', active?.base_url || 'Available after startup'); const status = data.restart_required ? `Saved for the next restart${data.override_active ? ' (remove -listen to use it)' : ''}.` : 'Active and saved setting match.'; setText('#network-status', status); setNetworkFeedback(''); } catch (error) { setNetworkFeedback(error.message, 'error'); } }
   function updateProviderFormMode() { ensureSubscriptionFields(); const custom = $('#provider-type')?.value === 'custom'; const fields = $('#custom-provider-fields'); const name = $('#provider-name'); const baseURL = $('#provider-base-url'); if (fields) fields.hidden = !custom; if (name) { name.required = custom; if (!custom) name.value = ''; } if (baseURL) { baseURL.required = custom; if (!custom) baseURL.value = ''; } const mode = $('#provider-access-mode')?.value || 'api'; const subscription = $('#subscription-fields'); if (subscription) subscription.hidden = mode !== 'subscription'; const fee = $('#subscription-fee'); if (fee) fee.required = mode === 'subscription'; }
   function setProviderFeedback(message, kind = 'warning') { const feedback = $('#provider-feedback'); if (!feedback) return; feedback.hidden = !message; feedback.className = `provider-feedback ${kind}`; feedback.textContent = message || ''; }
   function parseManualModels() { const raw = ($('#manual-models')?.value || '').split('\n').map((line) => line.trim()).filter(Boolean); const result = []; for (const line of raw) { const parts = line.split('|').map((part) => part.trim()); if (!parts[0]) throw new Error('Each manual model needs a model ID.'); const input = Number(parts[1] || 0); const output = Number(parts[2] || 0); if (!Number.isFinite(input) || !Number.isFinite(output) || input <= 0 || output <= 0) throw new Error(`Enter positive input and output prices for ${parts[0]}.`); result.push({ id: parts[0], input_price_pico_usd_per_token: Math.round(input * 1e6), output_price_pico_usd_per_token: Math.round(output * 1e6) }); } return result; }
@@ -1520,6 +1520,7 @@
   $('#updates-channel')?.addEventListener('change', () => { const note = $('#main-channel-note'); if (note) note.hidden = $('#updates-channel').value !== 'main'; });
   $('#updates-check')?.addEventListener('click', async () => { setText('#updates-feedback', 'Checking for updates…'); try { await fetchJSON('/api/updates/check', { method: 'POST' }); setTimeout(loadUpdates, 500); } catch (error) { setText('#updates-feedback', error.message); } });
   $('#updates-install')?.addEventListener('click', async () => { const payload = await fetchJSON('/api/updates'); if (!payload.available) return; setText('#updates-feedback', 'Downloading and restarting…'); await fetchJSON('/api/updates/install', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ version: payload.available.version }) }); });
+  $('#open-version-history')?.addEventListener('click', () => openModal('version-history-modal'));
   $('#refresh-button')?.addEventListener('click', loadUpdates);
   navigate = function(view) { const valid = ['overview', 'models', 'groups', 'stats', 'requests', 'access', 'settings']; state.view = valid.includes(view) ? view : 'overview'; $$('.view-panel').forEach((panel) => panel.classList.toggle('active', panel.dataset.viewPanel === state.view)); $$('.nav-item').forEach((item) => item.classList.toggle('active', item.dataset.view === state.view)); const meta = { overview: ['Overview', 'Your local routing desk at a glance.'], models: ['Models', 'Search provider routes and compare live pricing.'], groups: ['Groups', 'Callable aliases with ordered routing rules and fallbacks.'], stats: ['Statistics', 'Reliability, retries, response time, and cost by group, provider, and model.'], requests: ['Requests', 'Detailed usage, cost, and request outcomes.'], access: ['Access & keys', 'Manage the keys and providers behind your proxy.'], settings: ['Settings', 'Configure self-updating and inspect version history.'] }[state.view]; setText('#page-title', meta[0]); setText('#page-kicker', meta[0].toUpperCase()); setText('#page-description', meta[1]); $('#sidebar').classList.remove('open'); if (window.location.hash !== `#${state.view}`) history.replaceState(null, '', `#${state.view}`); };
   const navigateWithSettingsDescription = navigate;
@@ -1535,62 +1536,9 @@
   });
   $('#refresh-button').addEventListener('click', loadSubscriptionStats);
   async function setRemoteAccessMode(mode) { const currentMode = remoteAccessStatus?.desired_mode || 'disabled'; if (mode === currentMode) return; const remoteServerRunning = remoteAccessStatus?.phase === 'online' && remoteAccessStatus?.effective_mode !== 'disabled'; if (mode === 'disabled' && remoteServerRunning && !window.confirm('Stop the Tailscale server and turn remote access off?')) return; const hostname = $('#remote-access-hostname')?.value.trim().toLowerCase() || 'paylessforai'; $$('.access-mode-option').forEach((option) => { option.disabled = true; }); try { await fetchJSON('/api/remote-access', { method: 'PUT', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ mode, hostname }) }); await loadRemoteAccess(); } catch (error) { setText('#remote-access-error', error.message); $('#remote-access-error').hidden = false; } finally { $$('.access-mode-option').forEach((option) => { option.disabled = false; }); } }
-  $('#remote-access-save')?.addEventListener('click', async () => { const mode = $('#remote-access-mode').value; await setRemoteAccessMode(mode); });
+  $$('.access-mode-option').forEach((option) => option.addEventListener('click', () => setRemoteAccessMode(option.dataset.accessMode)));
   $('#remote-access-retry')?.addEventListener('click', async () => { try { await fetchJSON('/api/remote-access/retry', { method: 'POST' }); await loadRemoteAccess(); } catch (error) { setText('#remote-access-error', error.message); $('#remote-access-error').hidden = false; } });
   $('#remote-access-stop')?.addEventListener('click', async () => { if (!window.confirm('Stop sharing PayLessForAI remotely?')) return; try { await fetchJSON('/api/remote-access', { method: 'PUT', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ mode: 'disabled', hostname: $('#remote-access-hostname').value }) }); await loadRemoteAccess(); } catch (error) { setText('#remote-access-error', error.message); $('#remote-access-error').hidden = false; } });
   $('#remote-access-forget')?.addEventListener('click', async () => { if (!window.confirm('Forget the saved Tailscale identity? You may need to remove the device from Tailscale separately.')) return; try { await fetchJSON('/api/remote-access/identity', { method: 'DELETE' }); await loadRemoteAccess(); } catch (error) { setText('#remote-access-error', error.message); $('#remote-access-error').hidden = false; } });
-  function setupRemoteAccessUX() {
-    const settingsPanel = document.querySelector('[data-view-panel="settings"]');
-    const settingsGrid = settingsPanel?.querySelector('.settings-grid');
-    const remoteAccessCard = document.querySelector('.remote-access-card');
-    const listener = $('#network-settings-form')?.closest('.settings-card');
-    const listenerPanel = listener?.closest('[data-view-panel="settings"]');
-    if (!settingsGrid) return;
-    if (listener) {
-      const localAddressLabel = listener.querySelector('.credential-main strong');
-      if (localAddressLabel) localAddressLabel.textContent = 'Local server address';
-      settingsGrid.append(listener);
-      if (listenerPanel && listenerPanel !== settingsPanel) listenerPanel.remove();
-    }
-    if (!$('#access-mode-card')) {
-      const card = document.createElement('article');
-      card.className = 'panel-card settings-card access-mode-card';
-      card.id = 'access-mode-card';
-      card.innerHTML = '<div class="panel-heading"><div><span class="section-label">REMOTE ACCESS</span><h3>How should PayLessForAI be reachable?</h3></div></div><p class="card-note">Choose where the server is available. We only show the settings needed for that choice.</p><div id="access-mode-selector" class="access-mode-selector" role="group" aria-label="Tailscale access mode"></div><div id="remote-access-details" class="remote-access-details" hidden></div>';
-      settingsGrid.prepend(card);
-      const modes = [
-        ['disabled', 'Off', 'Use the local server on this computer.'],
-        ['private', 'Private devices', 'Available only to your Tailscale network.'],
-        ['funnel', 'Public API link', 'Share the key-protected inference API publicly.'],
-      ];
-      const selector = $('#access-mode-selector');
-      modes.forEach(([mode, title, note]) => {
-        const button = document.createElement('button'); button.type = 'button'; button.className = 'access-mode-option'; button.dataset.accessMode = mode; button.setAttribute('aria-pressed', 'false');
-        const optionTitle = document.createElement('span'); optionTitle.className = 'access-mode-option-title'; optionTitle.textContent = title;
-        const optionNote = document.createElement('span'); optionNote.className = 'access-mode-option-note'; optionNote.textContent = note;
-        button.append(optionTitle, optionNote); button.addEventListener('click', () => setRemoteAccessMode(mode)); selector.append(button);
-      });
-      if (remoteAccessCard) {
-        const details = $('#remote-access-details');
-        const status = remoteAccessCard.querySelector('#remote-access-phase');
-        const description = remoteAccessCard.querySelector('#remote-access-description');
-        const action = remoteAccessCard.querySelector('#remote-access-action');
-        const links = remoteAccessCard.querySelector('#remote-access-links');
-        const error = remoteAccessCard.querySelector('#remote-access-error');
-        const actions = remoteAccessCard.querySelector('.modal-actions');
-        const statusRow = document.createElement('div'); statusRow.className = 'remote-access-status-row'; statusRow.append('Current status', status); details.append(statusRow, description, action, links, error);
-        if (actions) { actions.id = 'remote-access-actions'; actions.classList.add('remote-access-actions'); details.append(actions); }
-        remoteAccessCard.remove();
-      }
-    }
-    if (listener) {
-      const modeCard = $('#access-mode-card');
-      const anchor = modeCard?.nextElementSibling;
-      if (modeCard && anchor) settingsGrid.insertBefore(listener, anchor.nextElementSibling);
-    }
-    const settingsIntro = settingsPanel.querySelector('.page-intro');
-    if (settingsIntro) { settingsIntro.querySelector('h3').textContent = 'Remote access & updates'; settingsIntro.querySelector('p').textContent = 'Choose how to reach PayLessForAI, then configure updates for this binary.'; }
-  }
-  setupRemoteAccessUX();
   loadRemoteAccess();
 })();

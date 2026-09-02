@@ -61,6 +61,23 @@
     if (!response.ok) { const error = new Error(payload?.error?.message || `Request failed (${response.status})`); error.payload = payload; error.status = response.status; throw error; }
     return payload;
   }
+  async function fetchJSONWithTimeout(url, options, timeoutMs) {
+    const controller = new AbortController();
+    let timeout;
+    const timeoutError = new Error(`Request timed out after ${Math.ceil(timeoutMs / 1000)} seconds.`);
+    const timeoutPromise = new Promise((_, reject) => {
+      timeout = window.setTimeout(() => { controller.abort(); reject(timeoutError); }, timeoutMs);
+    });
+    try {
+      return await Promise.race([fetchJSON(url, { ...(options || {}), signal: controller.signal }), timeoutPromise]);
+    } catch (error) {
+      if (error?.name === 'AbortError') throw timeoutError;
+      throw error;
+    } finally {
+      window.clearTimeout(timeout);
+    }
+  }
+  const wait = (duration) => new Promise((resolve) => window.setTimeout(resolve, duration));
 
   function setText(selector, value) { const element = $(selector); if (element) element.textContent = value; }
   function appendTextCell(row, value, className) { const cell = document.createElement('td'); if (className) cell.className = className; cell.textContent = value; row.append(cell); return cell; }
@@ -96,6 +113,7 @@
   async function loadUpdates() {
     try {
       const payload = await fetchJSON('/api/updates');
+      state.updateSnapshot = payload;
       const build = payload.build || {}; const settings = payload.settings || {}; const stateUpdate = payload.state || {};
       const enabled = $('#updates-enabled'); if (enabled) enabled.checked = Boolean(settings.enabled);
       const channel = $('#updates-channel'); if (channel) channel.value = settings.channel || 'releases';
@@ -106,7 +124,22 @@
       const available = payload.available; const card = $('#update-available'); if (card) card.hidden = !available; if (available) setText('#update-available-version', `${available.version} · ${available.channel}`);
       const warning = $('#update-warning'); const failed = stateUpdate.phase === 'rolled_back' || stateUpdate.phase === 'needs_manual_recovery'; if (warning) { warning.hidden = !failed || Boolean(stateUpdate.warning_acknowledged_at); warning.textContent = failed ? `Update warning: ${stateUpdate.error || 'The new version could not start.'}` : ''; if (failed && !stateUpdate.warning_acknowledged_at) { const button = document.createElement('button'); button.className = 'quiet-button'; button.textContent = 'Dismiss'; button.onclick = async () => { await fetchJSON('/api/updates/warning/acknowledge', { method: 'POST' }); loadUpdates(); }; warning.append(button); } }
       const history = $('#update-history-body'); const empty = $('#update-history-empty'); if (history) { history.replaceChildren(); (payload.history || []).forEach((item) => { const row = document.createElement('tr'); appendTextCell(row, item.version || '—'); appendTextCell(row, item.channel || '—'); appendTextCell(row, item.outcome || '—'); appendTextCell(row, dateValue(item.at)); appendTextCell(row, item.error || '—'); history.append(row); }); if (empty) empty.hidden = (payload.history || []).length > 0; }
-    } catch (_) { setText('#updates-feedback', 'Update information is unavailable.'); }
+    } catch (_) { setUpdatesFeedback('Update information is unavailable.', 'error'); }
+  }
+
+  function setUpdatesFeedback(message, kind = 'info') { const feedback = $('#updates-feedback'); if (!feedback) return; feedback.className = kind === 'error' ? 'provider-feedback error' : 'card-note'; feedback.textContent = message || ''; }
+  async function waitForUpdateCheck(previousCheckAt, timeoutMs = 30_000) {
+    const deadline = Date.now() + timeoutMs;
+    let observedCheck = false;
+    while (Date.now() < deadline) {
+      const payload = await fetchJSONWithTimeout('/api/updates', undefined, 5_000);
+      const updateState = payload.state || {};
+      const checkStarted = Boolean(updateState.last_check_at && updateState.last_check_at !== previousCheckAt);
+      observedCheck = observedCheck || updateState.phase === 'checking' || checkStarted;
+      if (observedCheck && updateState.phase !== 'checking') return payload;
+      await wait(400);
+    }
+    throw new Error(`Update check timed out after ${Math.ceil(timeoutMs / 1000)} seconds.`);
   }
 
   async function loadSummary() {
@@ -1520,9 +1553,9 @@
   document.addEventListener('keydown', (event) => { if (event.key === 'Escape') { closeModelFilter(); $$('.modal-backdrop:not([hidden])').forEach(closeModal); } }); window.addEventListener('hashchange', () => navigate(window.location.hash.slice(1))); navigate(window.location.hash.slice(1) || 'overview');
   updateProviderFormMode(); setText('#base-url', `${window.location.origin}/v1`); Promise.all([loadStatus(), loadSummary(), loadRequests(), loadModelStats(), loadProviderStats(), loadGroupStats(), loadModels(), loadKeys(), loadProviders(), loadGroups(), loadNetworkSettings()]);
   const statsPanel = document.querySelector('[data-view-panel="stats"]'); if (statsPanel && !$('#subscription-stats-body')) { const article = document.createElement('article'); article.className = 'panel-card table-card stats-table-card'; article.innerHTML = '<div class="panel-heading stats-heading"><h3>Subscription economics</h3><span class="card-note">Dynamic blended pricing; observed 5h min/max</span></div><div class="table-wrap"><table><thead><tr><th>Provider</th><th>Tokens</th><th>Input / output per 1M</th><th>5h min / max</th></tr></thead><tbody id="subscription-stats-body"></tbody></table></div><div class="empty-state" id="subscription-stats-empty" hidden>No subscription usage yet.</div>'; statsPanel.append(article); }
-  $('#update-settings-form')?.addEventListener('submit', async (event) => { event.preventDefault(); try { await fetchJSON('/api/updates/settings', { method: 'PUT', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ enabled: $('#updates-enabled').checked, channel: $('#updates-channel').value, interval_seconds: Number($('#updates-interval').value) }) }); setText('#updates-feedback', 'Settings saved.'); await loadUpdates(); } catch (error) { setText('#updates-feedback', error.message); } });
+  $('#update-settings-form')?.addEventListener('submit', async (event) => { event.preventDefault(); try { await fetchJSON('/api/updates/settings', { method: 'PUT', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ enabled: $('#updates-enabled').checked, channel: $('#updates-channel').value, interval_seconds: Number($('#updates-interval').value) }) }); setUpdatesFeedback('Settings saved.'); await loadUpdates(); } catch (error) { setUpdatesFeedback(error.message, 'error'); } });
   $('#updates-channel')?.addEventListener('change', () => { const note = $('#main-channel-note'); if (note) note.hidden = $('#updates-channel').value !== 'main'; });
-  $('#updates-check')?.addEventListener('click', async () => { setText('#updates-feedback', 'Checking for updates…'); try { await fetchJSON('/api/updates/check', { method: 'POST' }); setTimeout(loadUpdates, 500); } catch (error) { setText('#updates-feedback', error.message); } });
+  $('#updates-check')?.addEventListener('click', async () => { const button = $('#updates-check'); if (!button || button.disabled) return; const previousCheckAt = state.updateSnapshot?.state?.last_check_at || ''; button.disabled = true; button.textContent = 'Checking for updates…'; setUpdatesFeedback('Checking for updates…'); try { await fetchJSONWithTimeout('/api/updates/check', { method: 'POST' }, 10_000); const payload = await waitForUpdateCheck(previousCheckAt); await loadUpdates(); if (payload.state?.error) throw new Error(`Update check failed: ${payload.state.error}`); setUpdatesFeedback(payload.available ? `Update ${payload.available.version} is available.` : 'No updates available.'); } catch (error) { setUpdatesFeedback(error.message || 'Update check failed.', 'error'); } finally { button.disabled = false; button.textContent = 'Check for updates'; } });
   $('#updates-install')?.addEventListener('click', async () => { const payload = await fetchJSON('/api/updates'); if (!payload.available) return; setText('#updates-feedback', 'Downloading and restarting…'); await fetchJSON('/api/updates/install', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ version: payload.available.version }) }); });
   $('#open-version-history')?.addEventListener('click', () => openModal('version-history-modal'));
   $('#refresh-button')?.addEventListener('click', loadUpdates);

@@ -539,6 +539,18 @@ test('shows listener settings and saves a port for the next restart', async ({ p
   expect(settings.restart_required).toBeTruthy();
 });
 
+test('shows an error and restores the update button when the check request times out', async ({ page }) => {
+  await page.route('**/api/updates/check', async () => {
+    await new Promise((resolve) => setTimeout(resolve, 20_000));
+  });
+  await page.goto('/#settings');
+  const checkButton = page.locator('#updates-check');
+  await checkButton.click();
+  await expect(page.locator('#updates-feedback')).toHaveText('Request timed out after 10 seconds.', { timeout: 15_000 });
+  await expect(checkButton).toBeEnabled();
+  await expect(checkButton).toHaveText('Check for updates');
+});
+
 test('switches remote access modes with direct Tailscale auth and a running-server stop confirmation', async ({ page }) => {
   let mode = 'disabled';
   let phase = 'disabled';

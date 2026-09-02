@@ -5,7 +5,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <meta name="theme-color" content="#0b1020">
     <title>PayLessForAI · Local LLM control plane</title>
-    <link rel="stylesheet" href="/static/style.css?v=groups-v40-tailscale">
+    <link rel="stylesheet" href="/static/style.css?v=groups-v41-mode-labels">
   </head>
   <body>
     <div class="app-shell">
@@ -23,7 +23,7 @@
           <a class="nav-item" href="#access" data-view="access"><span class="nav-icon">▣</span>Access &amp; keys</a>
           <a class="nav-item" href="#settings" data-view="settings"><span class="nav-icon">⚙</span>Settings</a>
         </nav>
-        <div class="sidebar-footer"><div class="sidebar-note"><span class="pulse-dot"></span><div><strong>Runs locally</strong><small>Your data stays on this machine.</small></div></div><div class="sidebar-build-version"><span>Version</span><strong id="sidebar-build-version">—</strong></div></div>
+        <div class="sidebar-footer"><div class="sidebar-note"><span class="pulse-dot"></span><div><strong id="sidebar-access-title">Local only</strong><small id="sidebar-access-note">Your data stays on this machine.</small></div></div><div class="sidebar-build-version"><span>Version</span><strong id="sidebar-build-version">—</strong></div></div>
       </aside>
 
       <div class="content-shell">
@@ -62,9 +62,9 @@
                     <div class="panel-heading"><div><span class="section-label">ACCESS MODE</span><h3>How should PayLessForAI be reachable?</h3></div></div>
                     <p class="card-note">Local mode stays on this computer. Tailscale modes add private or public access without changing the local API.</p>
                     <div id="access-mode-selector" class="access-mode-selector" role="group" aria-label="Tailscale access mode">
-                      <button class="access-mode-option" data-access-mode="disabled" type="button" aria-pressed="false"><span class="access-mode-option-title">Off</span><span class="access-mode-option-note">Use the local server on this computer.</span></button>
+                      <button class="access-mode-option" data-access-mode="disabled" type="button" aria-pressed="false"><span class="access-mode-option-title">Local only</span><span class="access-mode-option-note">Use the local server on this computer.</span></button>
                       <button class="access-mode-option" data-access-mode="private" type="button" aria-pressed="false"><span class="access-mode-option-title">Private devices</span><span class="access-mode-option-note">Available only to your Tailscale network.</span></button>
-                      <button class="access-mode-option" data-access-mode="funnel" type="button" aria-pressed="false"><span class="access-mode-option-title">Public API link</span><span class="access-mode-option-note">Share the key-protected inference API publicly.</span></button>
+                      <button class="access-mode-option" data-access-mode="funnel" type="button" aria-pressed="false"><span class="access-mode-option-title">Public access</span><span class="access-mode-option-note">Share the key-protected inference API publicly.</span></button>
                     </div>
                     <div id="local-api-url" class="local-api-url" hidden><span class="local-api-url-label">API URL</span><div class="copy-field"><code id="local-api-base-url">Available after startup</code><button class="quiet-button" data-copy-target="local-api-base-url" type="button">Copy</button></div></div>
                     <div id="remote-access-details" class="remote-access-details" hidden>
@@ -75,7 +75,7 @@
                       <div id="remote-access-links" class="remote-access-links" hidden><div><span>Dashboard</span><code id="remote-access-dashboard"></code><button class="quiet-button" data-copy-target="remote-access-dashboard" type="button">Copy</button></div><div><span>Inference base URL</span><code id="remote-access-base"></code><button class="quiet-button" data-copy-target="remote-access-base" type="button">Copy</button></div></div>
                       <p id="remote-access-error" class="provider-feedback" role="alert" hidden></p>
                       <div class="modal-actions remote-access-actions" id="remote-access-actions"><button class="quiet-button" id="remote-access-retry" type="button" hidden>Retry</button><button class="quiet-button" id="remote-access-stop" type="button" hidden>Stop sharing</button><button class="quiet-button" id="remote-access-forget" type="button" hidden>Forget identity</button></div>
-                      <small class="card-note">Private mode requires Tailscale on the device. Public API link is beta: anyone can reach its hostname, but every inference request still needs a PayLessForAI client key.</small>
+                      <small class="card-note">Private mode requires Tailscale on the device. Public access is beta: anyone can reach its hostname, but every inference request still needs a PayLessForAI client key.</small>
                     </div>
                   </article>
                   <article class="panel-card settings-card listener-card">
@@ -110,6 +110,6 @@
 
     <div class="modal-backdrop" id="version-history-modal" hidden><div class="modal version-history-modal" role="dialog" aria-modal="true" aria-labelledby="version-history-title"><div class="modal-heading"><div><span class="section-label">SELF-UPDATING</span><h3 id="version-history-title">Version history</h3></div><button class="icon-button close-modal" type="button" aria-label="Close version history">×</button></div><p class="modal-note">Recent update attempts, including successful promotions and rollback events.</p><div class="table-wrap"><table><thead><tr><th>Version</th><th>Channel</th><th>Outcome</th><th>When</th><th>Details</th></tr></thead><tbody id="update-history-body"></tbody></table></div><div class="empty-state" id="update-history-empty" hidden>No update attempts yet.</div></div></div>
 
-    <script src="/static/app.js?v=groups-v40-tailscale"></script>
+    <script src="/static/app.js?v=groups-v41-mode-labels"></script>
   </body>
 </html>

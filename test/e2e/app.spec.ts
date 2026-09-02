@@ -577,6 +577,7 @@ test('switches remote access modes with direct Tailscale auth and a running-serv
   await expect(page.locator('#remote-access-action-link')).toHaveAttribute('href', 'https://login.tailscale.com/a/test-auth');
   await expect(page.locator('#remote-auth-modal')).toHaveCount(0);
   await expect(page.locator('#remote-access-links')).toBeHidden();
+  await expect(page.locator('#remote-access-hostname-field')).toBeVisible();
   await expect(page.locator('#sidebar-access-title')).toHaveText('Authorize Tailscale');
   await page.getByRole('button', { name: /^Local only/ }).click();
   await expect(page.locator('.access-mode-option[data-access-mode="disabled"]')).toHaveAttribute('aria-pressed', 'true');
@@ -584,6 +585,7 @@ test('switches remote access modes with direct Tailscale auth and a running-serv
   expect(dialogSeen).toBeFalsy();
   await page.getByRole('button', { name: /^Private devices/ }).click();
   await expect(page.locator('#remote-access-phase')).toHaveText('Online');
+  await expect(page.locator('#remote-access-hostname-field')).toBeHidden();
   await expect(page.locator('#sidebar-access-title')).toHaveText('Private devices');
   dialogAction = 'dismiss';
   await page.getByRole('button', { name: /^Local only/ }).click();

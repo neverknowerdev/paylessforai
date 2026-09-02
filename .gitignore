@@ -1,0 +1,6 @@
+/test/stat-server-e2e/node_modules/
+/test/stat-server-e2e/test-results/
+/test/stat-server-e2e/playwright-report/
+/stat-server-plan.md
+/stat-server-public.png
+/stat-server-admin.png

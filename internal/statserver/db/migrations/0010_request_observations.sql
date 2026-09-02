@@ -1,0 +1,25 @@
+CREATE TABLE IF NOT EXISTS request_observations (
+  id BIGSERIAL PRIMARY KEY,
+  installation_id BIGINT NOT NULL REFERENCES telemetry_installations(id),
+  event_id TEXT NOT NULL,
+  model_id BIGINT REFERENCES models(id),
+  model_name TEXT NOT NULL DEFAULT '',
+  provider TEXT NOT NULL DEFAULT '',
+  occurred_at TIMESTAMPTZ NOT NULL,
+  total_ms INTEGER,
+  ttft_ms INTEGER,
+  generation_ms INTEGER,
+  input_tokens INTEGER,
+  output_tokens INTEGER,
+  cached_read_tokens INTEGER,
+  cache_write_tokens INTEGER,
+  cache_status TEXT NOT NULL DEFAULT 'unknown',
+  cache_ttl_seconds INTEGER,
+  observed_reuse_age_seconds INTEGER,
+  success BOOLEAN NOT NULL DEFAULT true,
+  retry_count INTEGER NOT NULL DEFAULT 0,
+  cost_usd NUMERIC(20,8),
+  metadata JSONB NOT NULL DEFAULT '{}'::jsonb,
+  UNIQUE(installation_id, event_id)
+);
+CREATE INDEX IF NOT EXISTS request_obs_model_time_idx ON request_observations(model_id, occurred_at);

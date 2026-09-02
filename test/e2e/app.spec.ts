@@ -500,23 +500,36 @@ test('shows listener settings and saves a port for the next restart', async ({ p
   await page.goto('/#settings');
   await expect(page.locator('#page-title')).toHaveText('Settings');
   await expect(page.locator('[data-view-panel="settings"]')).toHaveCount(1);
+  await expect(page.locator('.settings-section')).toHaveCount(2);
+  await expect(page.locator('#settings-remote-title')).toHaveText('Remote access');
+  await expect(page.locator('#settings-updates-title')).toHaveText('Updates');
+  await expect(page.locator('#update-current-version')).toHaveText('dev');
+  await expect(page.locator('#sidebar-build-version')).toHaveText('dev');
+  await expect(page.locator('#version-history-modal')).toBeHidden();
+  await expect(page.locator('[data-view-panel="settings"]')).not.toContainText('Previous versions');
+  await page.getByRole('button', { name: /Version history/ }).click();
+  await expect(page.locator('#version-history-modal')).toBeVisible();
+  await expect(page.locator('#version-history-title')).toHaveText('Version history');
+  await page.locator('#version-history-modal').getByRole('button', { name: 'Close version history' }).click();
+  await expect(page.locator('#version-history-modal')).toBeHidden();
   await expect(page.locator('#access-mode-selector')).toBeVisible();
   await expect(page.locator('.access-mode-option')).toHaveCount(3);
   await expect(page.locator('.access-mode-option[data-access-mode="disabled"]')).toHaveAttribute('aria-pressed', 'true');
   await expect(page.getByRole('button', { name: /^Private devices/ })).toBeVisible();
-  await expect(page.getByRole('button', { name: /^Public API link/ })).toBeVisible();
+  await expect(page.getByRole('button', { name: /^Public access/ })).toBeVisible();
+  await expect(page.locator('#sidebar-access-title')).toHaveText('Local only');
   await expect(page.locator('#network-settings-form')).toBeVisible();
   await expect(page.locator('#remote-access-details')).toBeHidden();
+  await expect(page.locator('#local-api-url')).toBeVisible();
   await expect(page.locator('#remote-access-mode')).toHaveCount(0);
-  await expect(page.locator('#network-active')).toContainText('127.0.0.1:19477');
-  await expect(page.locator('#network-settings-form').locator('..').locator('.credential-main strong').first()).toHaveText('Local server address');
+  await expect(page.locator('#network-active')).toHaveCount(0);
+  await expect(page.locator('#network-base-url')).toHaveCount(0);
   const modeStyle = await page.locator('.access-mode-option[data-access-mode="private"]').evaluate((element) => {
     const style = getComputedStyle(element);
     return { backgroundColor: style.backgroundColor, borderRadius: style.borderRadius };
   });
   expect(modeStyle).toEqual({ backgroundColor: 'rgb(16, 24, 43)', borderRadius: '12px' });
-  await expect(page.locator('#network-active')).toContainText('127.0.0.1:19477');
-  await expect(page.locator('#network-base-url')).toHaveText('http://127.0.0.1:19477/v1');
+  await expect(page.locator('#local-api-base-url')).toHaveText('http://127.0.0.1:19477/v1');
   await page.locator('#network-port').fill('19490');
   await page.getByRole('button', { name: 'Save port' }).click();
   await expect(page.locator('#network-feedback')).toContainText('Restart PayLessForAI');
@@ -524,6 +537,18 @@ test('shows listener settings and saves a port for the next restart', async ({ p
   expect(settings.configured.port).toBe(19490);
   expect(settings.active.port).toBe(19477);
   expect(settings.restart_required).toBeTruthy();
+});
+
+test('shows an error and restores the update button when the check request times out', async ({ page }) => {
+  await page.route('**/api/updates/check', async () => {
+    await new Promise((resolve) => setTimeout(resolve, 20_000));
+  });
+  await page.goto('/#settings');
+  const checkButton = page.locator('#updates-check');
+  await checkButton.click();
+  await expect(page.locator('#updates-feedback')).toHaveText('Request timed out after 10 seconds.', { timeout: 15_000 });
+  await expect(checkButton).toBeEnabled();
+  await expect(checkButton).toHaveText('Check for updates');
 });
 
 test('switches remote access modes with direct Tailscale auth and a running-server stop confirmation', async ({ page }) => {
@@ -558,24 +583,32 @@ test('switches remote access modes with direct Tailscale auth and a running-serv
   await page.getByRole('button', { name: /^Private devices/ }).click();
   await expect(page.locator('#network-settings-form')).toBeHidden();
   await expect(page.locator('#remote-access-details')).toBeVisible();
+  await expect(page.locator('#local-api-url')).toBeHidden();
   await expect(page.locator('#remote-access-action')).toBeVisible();
   await expect(page.locator('#remote-access-action-link')).toHaveText('Auth Tailscale');
   await expect(page.locator('#remote-access-action-link')).toHaveAttribute('href', 'https://login.tailscale.com/a/test-auth');
   await expect(page.locator('#remote-auth-modal')).toHaveCount(0);
   await expect(page.locator('#remote-access-links')).toBeHidden();
-  await page.getByRole('button', { name: /^Off/ }).click();
+  await expect(page.locator('#remote-access-hostname-field')).toBeVisible();
+  await expect(page.locator('#sidebar-access-title')).toHaveText('Authorize Tailscale');
+  await page.getByRole('button', { name: /^Local only/ }).click();
   await expect(page.locator('.access-mode-option[data-access-mode="disabled"]')).toHaveAttribute('aria-pressed', 'true');
+  await expect(page.locator('#local-api-url')).toBeVisible();
   expect(dialogSeen).toBeFalsy();
   await page.getByRole('button', { name: /^Private devices/ }).click();
   await expect(page.locator('#remote-access-phase')).toHaveText('Online');
+  await expect(page.locator('#remote-access-hostname-field')).toBeHidden();
+  await expect(page.locator('#sidebar-access-title')).toHaveText('Private devices');
   dialogAction = 'dismiss';
-  await page.getByRole('button', { name: /^Off/ }).click();
+  await page.getByRole('button', { name: /^Local only/ }).click();
   await expect(page.locator('.access-mode-option[data-access-mode="private"]')).toHaveAttribute('aria-pressed', 'true');
   expect(dialogSeen).toBeTruthy();
   dialogAction = 'accept';
-  await page.getByRole('button', { name: /^Off/ }).click();
+  await page.getByRole('button', { name: /^Local only/ }).click();
   await expect(page.locator('#network-settings-form')).toBeVisible();
   await expect(page.locator('#remote-access-details')).toBeHidden();
+  await expect(page.locator('#local-api-url')).toBeVisible();
+  await expect(page.locator('#sidebar-access-title')).toHaveText('Local only');
   expect(putModes).toEqual(['private', 'disabled', 'private', 'disabled']);
 });
 
@@ -605,12 +638,13 @@ test('waits for public Funnel DNS before showing the public API URL', async ({ p
     });
   });
   await page.goto('/#settings');
-  await page.getByRole('button', { name: /^Public API link/ }).click();
+  await page.getByRole('button', { name: /^Public access/ }).click();
   await expect(page.locator('#remote-access-phase')).toHaveText('Preparing public link');
   await expect(page.locator('#remote-access-description')).toContainText('Public DNS can take a few minutes');
   await expect(page.locator('#remote-access-links')).toBeHidden();
   dnsReady = true;
   await expect(page.locator('#remote-access-links')).toBeVisible({ timeout: 3000 });
+  await expect(page.locator('#sidebar-access-title')).toHaveText('Public access');
   await expect(page.locator('#remote-access-base')).toHaveText('https://paylessforai.example.ts.net/v1');
   await expect(page.locator('#remote-access-dashboard').locator('..')).toBeHidden();
 });

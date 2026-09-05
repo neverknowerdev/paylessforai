@@ -140,22 +140,21 @@ func (m *Manager) Refresh(ctx context.Context) (refreshErr error) {
 		}
 		all = append(all, discovered{provider: client.Name(), models: models, client: client})
 	}
-	openRouterIDs := make([]string, 0)
+	catalogIDs := make([]string, 0)
 	for _, batch := range all {
-		if batch.provider == "openrouter" {
-			for _, model := range batch.models {
-				openRouterIDs = append(openRouterIDs, model.ID)
-			}
+		for _, model := range batch.models {
+			catalogIDs = append(catalogIDs, model.ID)
 		}
 	}
-	// Keep alias normalization stable while OpenRouter discovery is unavailable.
+	// Failed discovery retains the same alias evidence as the retained routes,
+	// regardless of which provider supplied the qualified model ID.
 	for _, route := range previous.Routes {
 		key := route.ExecutionKey
 		if key == "" {
 			key = route.Provider
 		}
-		if route.Provider == "openrouter" && failed[key] {
-			openRouterIDs = append(openRouterIDs, route.UpstreamModel)
+		if failed[key] {
+			catalogIDs = append(catalogIDs, route.LogicalModel)
 		}
 	}
 	now := time.Now().UTC()
@@ -177,7 +176,7 @@ func (m *Manager) Refresh(ctx context.Context) (refreshErr error) {
 			}
 		}
 		for _, model := range batch.models {
-			logical := logicalModel(batch.provider, model.ID, openRouterIDs)
+			logical := logicalModel(model.ID, catalogIDs)
 			// Providers classify free routes while parsing their native catalog
 			// metadata. Do not infer free from zero token prices here: media APIs
 			// commonly expose prompt/completion as zero while charging per image,
@@ -295,15 +294,27 @@ func (m *Manager) ClientForRoute(route matcher.Route) providers.Client {
 	return m.Client(route.Provider)
 }
 
-func logicalModel(provider, id string, openRouterIDs []string) string {
-	if provider == "openrouter" {
-		return strings.TrimSuffix(id, ":free")
+// logicalModel merges a bare ID with a qualified ID only when the catalog
+// supplies one unambiguous match. Qualified IDs remain distinct, and provider
+// names and discovery order have no influence on the result.
+func logicalModel(id string, catalogIDs []string) string {
+	id = strings.TrimSuffix(id, ":free")
+	if strings.Contains(id, "/") {
+		return id
 	}
-	for _, openRouterID := range openRouterIDs {
-		canonical := strings.TrimSuffix(openRouterID, ":free")
-		if canonical == id || strings.HasSuffix(canonical, "/"+id) {
-			return canonical
+	match := ""
+	for _, candidate := range catalogIDs {
+		canonical := strings.TrimSuffix(candidate, ":free")
+		if !strings.HasSuffix(canonical, "/"+id) {
+			continue
 		}
+		if match != "" && match != canonical {
+			return id
+		}
+		match = canonical
+	}
+	if match != "" {
+		return match
 	}
 	return id
 }

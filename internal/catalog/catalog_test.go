@@ -219,3 +219,65 @@ func TestPartialRefreshRetainsFailedProviderButRemovesDeletedProvider(t *testing
 		t.Fatal("last provider retained")
 	}
 }
+
+func TestRefreshAliasesAreProviderIndependent(t *testing.T) {
+	for _, names := range [][2]string{{"custom-a", "custom-b"}, {"surplus", "openrouter"}, {"openrouter", "surplus"}} {
+		for _, reverse := range []bool{false, true} {
+			t.Run(fmt.Sprintf("%s/%s/reverse=%t", names[0], names[1], reverse), func(t *testing.T) {
+				qualified := fakeClient{name: names[0], models: []providers.Model{{ID: "vendor/model-a"}}}
+				bare := fakeClient{name: names[1], models: []providers.Model{{ID: "model-a:free", Free: true}}}
+				clients := []providers.Client{qualified, bare}
+				if reverse {
+					clients[0], clients[1] = clients[1], clients[0]
+				}
+				manager := New(clients)
+				ctx := context.Background()
+				assertMerged := func() {
+					t.Helper()
+					snapshot := manager.Snapshot()
+					if len(snapshot.Models) != 1 || snapshot.Models[0].ID != "vendor/model-a" || len(snapshot.Routes) != 2 {
+						t.Fatalf("aliases not merged: %#v", snapshot)
+					}
+					for _, route := range snapshot.Routes {
+						if route.LogicalModel != "vendor/model-a" {
+							t.Fatalf("incorrect alias: %#v", route)
+						}
+					}
+					if len(snapshot.Additions) != 0 {
+						t.Fatalf("outage announced existing model: %#v", snapshot.Additions)
+					}
+				}
+				if err := manager.Refresh(ctx); err != nil {
+					t.Fatal(err)
+				}
+				assertMerged()
+				// Either provider may fail; both failure directions preserve the identity.
+				for _, failed := range [][]providers.Client{{failingClient{qualified}, bare}, {qualified, failingClient{bare}}} {
+					manager.SetClients(failed)
+					if err := manager.Refresh(ctx); err == nil {
+						t.Fatal("expected partial refresh failure")
+					}
+					assertMerged()
+				}
+				manager.SetClients(clients)
+				if err := manager.Refresh(ctx); err != nil {
+					t.Fatal(err)
+				}
+				assertMerged()
+			})
+		}
+	}
+}
+
+func TestLogicalModelDoesNotGuessAmbiguousAliases(t *testing.T) {
+	for _, ids := range [][]string{{"vendor-a/model", "vendor-b/model", "model"}, {"model", "vendor-b/model", "vendor-a/model"}} {
+		for _, id := range ids {
+			if got := logicalModel(id, ids); got != id {
+				t.Fatalf("ambiguous alias %q became %q", id, got)
+			}
+		}
+	}
+	if got := logicalModel("model", []string{"vendor/model", "vendor/model:free", "vendor/model"}); got != "vendor/model" {
+		t.Fatalf("duplicate variants must not create ambiguity: %q", got)
+	}
+}

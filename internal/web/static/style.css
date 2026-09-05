@@ -581,3 +581,10 @@ code { display: inline-block; max-width: 100%; overflow: hidden; padding: 10px 1
 .remote-access-links code { overflow:auto; }
 @media (max-width: 700px) { .access-mode-selector { grid-template-columns: 1fr; } }
 @media (max-width: 620px) { .remote-access-form { grid-template-columns:1fr; } .remote-access-form small { grid-column:auto; } .remote-access-links > div { grid-template-columns:1fr auto; } .remote-access-links code { grid-column:1 / -1; } }
+
+.models-link { text-decoration: none; cursor: pointer; gap: 8px; }
+.models-link:focus-visible { outline: 2px solid var(--blue); outline-offset: 3px; }
+.badge.new-model { color: var(--blue-bright); background: #8ea9ff20; border: 1px solid #8ea9ff55; }
+.new-model-row td:first-child { box-shadow: inset 2px 0 var(--blue); }
+.catalog-refresh-status { color: var(--faint); font-size: 12px; margin: 14px 0; }
+.badge.new-model[hidden] { display: none; }

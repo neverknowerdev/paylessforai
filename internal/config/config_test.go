@@ -1,6 +1,9 @@
 package config
 
-import "testing"
+import (
+	"testing"
+	"time"
+)
 
 func TestParseAndValidate(t *testing.T) {
 	c, err := Parse([]string{"-data-dir", "/tmp/payless-test", "-listen", "127.0.0.1:1234"})
@@ -41,5 +44,22 @@ func TestParseProviderBaseURLOverride(t *testing.T) {
 	}
 	if c.ProviderBaseURLs["local"] != "http://127.0.0.1:9999/v1" {
 		t.Fatalf("unexpected provider base URLs: %#v", c.ProviderBaseURLs)
+	}
+}
+
+func TestCatalogRefreshDefaultAndOverride(t *testing.T) {
+	if DefaultCatalogRefreshInterval != 15*time.Minute {
+		t.Fatal("expected 15 minute default")
+	}
+	c, err := Parse(nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if c.RefreshInterval != DefaultCatalogRefreshInterval {
+		t.Fatalf("unexpected default: %v", c.RefreshInterval)
+	}
+	c, err = Parse([]string{"-refresh-interval", "1h"})
+	if err != nil || c.RefreshInterval != time.Hour {
+		t.Fatalf("override: %v, %v", c.RefreshInterval, err)
 	}
 }

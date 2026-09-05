@@ -237,7 +237,7 @@ Useful command-line flags include:
 ```text
 -data-dir                 Database and master-key directory
 -listen                   One-launch HTTP address override (default selection prefers 127.0.0.1:9472)
--refresh-interval         Catalog refresh interval (default: 5m)
+-refresh-interval         Catalog refresh interval (default: 15m; DefaultCatalogRefreshInterval in internal/config/config.go)
 -provider-base-url        Provider endpoint override (repeatable: name=url)
 -openrouter-base-url      OpenRouter endpoint override (compatibility alias)
 -surplus-base-url         Surplus endpoint override (compatibility alias)
@@ -279,3 +279,10 @@ The same checks run in separate GitHub Actions workflows:
 
 - [Unit tests](.github/workflows/unit-tests.yml)
 - [Browser E2E](.github/workflows/e2e.yml)
+
+Model discovery runs at startup and every 15 minutes by default, including when
+providers are first configured after startup. The top-right Models badge opens
+the catalog; models discovered after the initial baseline appear first with a
+New badge for seven days. Discovery history is stored in the application database
+and survives restarts. The catalog shows the last scan time and refresh errors;
+failed providers retain their previously discovered routes while the app retries.

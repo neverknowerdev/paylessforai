@@ -25,12 +25,17 @@ type Model struct {
 }
 
 type Snapshot struct {
+	Additions []Addition
+	LastError string
 	UpdatedAt time.Time
 	Models    []Model
 	Routes    []matcher.Route
 }
 
 type Manager struct {
+	refreshMu sync.Mutex
+	store     StateStore
+	known     map[string]bool
 	clients   []providers.Client
 	mu        sync.RWMutex
 	current   Snapshot
@@ -71,6 +76,8 @@ func (m *Manager) ProviderBlocked(provider string, now time.Time) bool {
 }
 
 func (m *Manager) SetClients(clients []providers.Client) {
+	m.refreshMu.Lock()
+	defer m.refreshMu.Unlock()
 	m.mu.Lock()
 	m.clients = append([]providers.Client(nil), clients...)
 	m.mu.Unlock()
@@ -95,12 +102,25 @@ func (m *Manager) Snapshot() Snapshot {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
 	result := m.current
+	result.Additions = append([]Addition(nil), result.Additions...)
 	result.Models = append([]Model(nil), result.Models...)
 	result.Routes = append([]matcher.Route(nil), result.Routes...)
 	return result
 }
 
-func (m *Manager) Refresh(ctx context.Context) error {
+func (m *Manager) Refresh(ctx context.Context) (refreshErr error) {
+	m.refreshMu.Lock()
+	defer m.refreshMu.Unlock()
+	defer func() {
+		m.mu.Lock()
+		defer m.mu.Unlock()
+		m.current.LastError = ""
+		if refreshErr != nil {
+			m.current.LastError = refreshErr.Error()
+		}
+	}()
+	ctx, cancel := context.WithTimeout(ctx, 2*time.Minute)
+	defer cancel()
 	previous := m.Snapshot()
 	type discovered struct {
 		provider string
@@ -110,16 +130,15 @@ func (m *Manager) Refresh(ctx context.Context) error {
 	clients := m.Clients()
 	all := make([]discovered, 0, len(clients))
 	var failures []string
+	failed := map[string]bool{}
 	for _, client := range clients {
 		models, err := client.Discover(ctx)
 		if err != nil {
 			failures = append(failures, client.Name()+": "+err.Error())
+			failed[executionKey(client)] = true
 			continue
 		}
 		all = append(all, discovered{provider: client.Name(), models: models, client: client})
-	}
-	if len(all) == 0 {
-		return fmt.Errorf("all provider catalog refreshes failed: %s", strings.Join(failures, "; "))
 	}
 	openRouterIDs := make([]string, 0)
 	for _, batch := range all {
@@ -129,7 +148,20 @@ func (m *Manager) Refresh(ctx context.Context) error {
 			}
 		}
 	}
+	// Keep alias normalization stable while OpenRouter discovery is unavailable.
+	for _, route := range previous.Routes {
+		key := route.ExecutionKey
+		if key == "" {
+			key = route.Provider
+		}
+		if route.Provider == "openrouter" && failed[key] {
+			openRouterIDs = append(openRouterIDs, route.UpstreamModel)
+		}
+	}
 	now := time.Now().UTC()
+	if len(all) == 0 && len(clients) > 0 {
+		now = previous.UpdatedAt
+	}
 	modelMap := map[string]Model{}
 	routes := make([]matcher.Route, 0)
 	for _, batch := range all {
@@ -178,14 +210,37 @@ func (m *Manager) Refresh(ctx context.Context) error {
 			routes = append(routes, matcher.Route{ID: executionKey + ":" + model.ID, Provider: batch.provider, LogicalModel: logical, UpstreamModel: model.ID, Free: free, Price: model.Pricing, PriceAvailable: model.PriceAvailable, OfficialPrice: model.OfficialPricing, OfficialPriceAvailable: model.OfficialPriceAvailable, CredentialID: credentialID, ExecutionKey: executionKey, BillingClass: routeBilling, Capabilities: matcher.Capabilities{Protocols: protocols, Parameters: parameters, Tools: parameters["tools"], StructuredOutput: parameters["response_format"] || parameters["structured_outputs"], MaxContext: model.ContextLength, MaxOutput: model.MaxCompletionTokens, InputModalities: inputModalities, OutputModalities: outputModalities, Tags: append([]string(nil), model.Tags...)}, Health: matcher.HealthHealthy, Trusted: true})
 		}
 	}
+	// Preserve routes only for still-configured clients whose discovery failed.
+	for _, route := range previous.Routes {
+		key := route.ExecutionKey
+		if key == "" {
+			key = route.Provider
+		}
+		if !failed[key] {
+			continue
+		}
+		routes = append(routes, route)
+		if _, exists := modelMap[route.LogicalModel]; !exists {
+			for _, model := range previous.Models {
+				if model.ID == route.LogicalModel {
+					modelMap[model.ID] = model
+					break
+				}
+			}
+		}
+	}
 	models := make([]Model, 0, len(modelMap))
 	for _, model := range modelMap {
 		models = append(models, model)
 	}
 	sort.Slice(models, func(i, j int) bool { return models[i].ID < models[j].ID })
 	sort.Slice(routes, func(i, j int) bool { return routes[i].ID < routes[j].ID })
+	next := Snapshot{UpdatedAt: now, Models: models, Routes: routes, Additions: previous.Additions}
+	if err := m.recordDiscoveries(ctx, &next); err != nil {
+		return err
+	}
 	m.mu.Lock()
-	m.current = Snapshot{UpdatedAt: now, Models: models, Routes: routes}
+	m.current = next
 	hook := m.onRefresh
 	m.mu.Unlock()
 	if hook != nil {

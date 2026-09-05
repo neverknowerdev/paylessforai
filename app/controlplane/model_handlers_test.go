@@ -1,7 +1,14 @@
 package controlplane
 
 import (
+	"context"
+	"encoding/json"
+	"github.com/neverknowerdev/paylessforai/internal/catalog"
+	"github.com/neverknowerdev/paylessforai/internal/providers"
+	"net/http"
+	"net/http/httptest"
 	"testing"
+	"time"
 
 	"github.com/neverknowerdev/paylessforai/internal/matcher"
 )
@@ -38,5 +45,61 @@ func TestCatalogDiscountsClampOverpricedRoutesAndUseProviderBaseline(t *testing.
 	item, ok := discounts["surplus\x00market-model\x00market-model"]
 	if !ok || item.InputBPS != 0 || item.OutputBPS != 5000 || item.MaxBPS != 5000 || item.OfficialInput != 100 || item.Source != "surplus" {
 		t.Fatalf("unexpected provider baseline discount: %#v", discounts)
+	}
+}
+
+type discoveryTestClient struct{ providers.Client }
+
+func (discoveryTestClient) Name() string { return "surplus" }
+func (discoveryTestClient) Discover(context.Context) ([]providers.Model, error) {
+	return []providers.Model{{ID: "recent"}, {ID: "expired"}}, nil
+}
+
+type discoveryTestStore struct{ value string }
+
+func (s discoveryTestStore) Get(context.Context, string) (string, bool, error) {
+	return s.value, true, nil
+}
+func (discoveryTestStore) Set(context.Context, string, string) error { return nil }
+
+func TestCatalogModelsHighlightsOnlyRecentPersistedDiscoveries(t *testing.T) {
+	manager := catalog.New([]providers.Client{discoveryTestClient{}})
+	history, err := json.Marshal(map[string]any{
+		"known":     map[string]bool{"recent": true, "expired": true},
+		"additions": []catalog.Addition{{ID: "recent", AddedAt: time.Now().Add(-time.Hour)}, {ID: "expired", AddedAt: time.Now().Add(-catalog.NewModelWindow - time.Hour)}},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := manager.Restore(context.Background(), discoveryTestStore{string(history)}); err != nil {
+		t.Fatal(err)
+	}
+	if err := manager.Refresh(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	server := &Server{catalog: manager}
+	response := httptest.NewRecorder()
+	server.handleCatalogModels(response, httptest.NewRequest(http.MethodGet, "/api/models", nil))
+	var payload struct {
+		Data []struct {
+			Model   string `json:"model"`
+			IsNew   bool   `json:"is_new"`
+			AddedAt string `json:"added_at"`
+		}
+		UpdatedAt time.Time `json:"updated_at"`
+	}
+	if err := json.Unmarshal(response.Body.Bytes(), &payload); err != nil {
+		t.Fatal(err)
+	}
+	if len(payload.Data) != 2 || payload.UpdatedAt.IsZero() {
+		t.Fatalf("invalid payload: %s", response.Body.String())
+	}
+	for _, model := range payload.Data {
+		if model.IsNew != (model.Model == "recent") {
+			t.Fatalf("incorrect new flag: %#v", model)
+		}
+		if model.IsNew && model.AddedAt == "" {
+			t.Fatal("missing discovery date")
+		}
 	}
 }

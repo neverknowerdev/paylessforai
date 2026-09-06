@@ -48,10 +48,20 @@ test('configures providers, creates a client key, and routes an OpenAI request',
   await expect(page.locator('#provider-feedback')).toContainText('Found 1 model');
   await expect(page.locator('#provider-list')).toContainText('surplus');
 
+  await page.getByRole('button', { name: 'Add provider' }).click();
+  await page.locator('#provider-type').selectOption('opencode-zen');
+  await expect(page.locator('#provider-access-mode')).toHaveValue('subscription');
+  await page.locator('#provider-type').selectOption('opencode-go');
+  await expect(page.locator('#provider-access-mode')).toHaveValue('subscription');
+  await page.locator('#provider-modal').getByRole('button', { name: 'Cancel' }).click();
+
   await page.getByRole('button', { name: 'Create API key' }).click();
+  await page.locator('#key-harness').selectOption('Cursor');
   await page.locator('#key-label').fill('playwright');
   await page.locator('#key-modal').getByRole('button', { name: 'Create key' }).click();
   await expect(page.locator('#new-key')).toContainText('plai_');
+  await expect(page.locator('#new-key-value')).toContainText('plai_');
+  await expect(page.locator('#new-key').getByRole('button', { name: 'Copy key' })).toBeVisible();
   const secretText = await page.locator('#new-key').textContent();
   const secret = secretText?.match(/plai_[0-9a-f]+/)?.[0];
   expect(secret).toBeTruthy();
@@ -84,6 +94,7 @@ test('supports Responses and Anthropic Messages contracts', async ({ page, reque
   await page.goto('/');
   await page.getByRole('link', { name: 'Access & keys' }).click();
   await page.getByRole('button', { name: 'Create API key' }).click();
+  await page.locator('#key-harness').selectOption('Claude Code');
   await page.locator('#key-label').fill('protocols');
   await page.locator('#key-modal').getByRole('button', { name: 'Create key' }).click();
   await expect(page.locator('#new-key')).toContainText('plai_');
@@ -359,6 +370,7 @@ test('creates and exposes a callable group alias', async ({ page, request }) => 
   await page.locator('#close-group-editor').click();
   await page.getByRole('link', { name: 'Access & keys' }).click();
   await page.getByRole('button', { name: 'Create API key' }).click();
+  await page.locator('#key-harness').selectOption('Codex');
   await page.locator('#key-label').fill('group-models');
   await page.locator('#key-modal').getByRole('button', { name: 'Create key' }).click();
   await expect(page.locator('#new-key')).toContainText('plai_');
@@ -454,6 +466,7 @@ test('configures a subscription, records quota blocking, and shows dynamic prici
   expect(configured.data.find((item: { provider: string }) => item.provider === 'subscription-mock')).toMatchObject({ access_mode: 'subscription', subscription_fee_pico_usd: 20000000000000 });
 
   await page.getByRole('button', { name: 'Create API key' }).click();
+  await page.locator('#key-harness').selectOption('OpenCode');
   await page.locator('#key-label').fill('subscription-e2e');
   await page.locator('#key-modal').getByRole('button', { name: 'Create key' }).click();
   await expect(page.locator('#new-key')).toContainText('plai_');

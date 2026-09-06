@@ -581,3 +581,4 @@ code { display: inline-block; max-width: 100%; overflow: hidden; padding: 10px 1
 .remote-access-links code { overflow:auto; }
 @media (max-width: 700px) { .access-mode-selector { grid-template-columns: 1fr; } }
 @media (max-width: 620px) { .remote-access-form { grid-template-columns:1fr; } .remote-access-form small { grid-column:auto; } .remote-access-links > div { grid-template-columns:1fr auto; } .remote-access-links code { grid-column:1 / -1; } }
+.secret p { margin: 0 0 9px; }.secret-value-row { display: flex; align-items: center; gap: 8px; }.secret-value-row code { flex: 1; min-width: 0; color: #efffc7; font-size: 11px; word-break: break-all; }.secret-value-row .quiet-button { flex: 0 0 auto; color: #dafa9a; border-color: #c7f36a55; }

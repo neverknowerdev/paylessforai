@@ -22,6 +22,7 @@ import (
 type ClientAPIKey struct {
 	ID         string           `db:"id,pk" `
 	Label      string           `db:"label" `
+	Harness    string           `db:"harness" `
 	KeyHash    string           `db:"key_hash" `
 	KeyPrefix  string           `db:"key_prefix" `
 	CreatedAt  string           `db:"created_at" `
@@ -41,7 +42,7 @@ type ClientAPIKeysQuery = *sqlite.ViewQuery[*ClientAPIKey, ClientAPIKeySlice]
 
 func buildClientAPIKeyColumns(tableName string) clientAPIKeyColumns {
 	columnsExpr := expr.NewColumnsExpr(
-		"id", "label", "key_hash", "key_prefix", "created_at", "last_used_at", "revoked_at",
+		"id", "label", "harness", "key_hash", "key_prefix", "created_at", "last_used_at", "revoked_at",
 	)
 
 	if tableName != "" {
@@ -53,6 +54,7 @@ func buildClientAPIKeyColumns(tableName string) clientAPIKeyColumns {
 		tableAlias:  tableName,
 		ID:          buildClientAPIKeyColumn(tableName, "id"),
 		Label:       buildClientAPIKeyColumn(tableName, "label"),
+		Harness:     buildClientAPIKeyColumn(tableName, "harness"),
 		KeyHash:     buildClientAPIKeyColumn(tableName, "key_hash"),
 		KeyPrefix:   buildClientAPIKeyColumn(tableName, "key_prefix"),
 		CreatedAt:   buildClientAPIKeyColumn(tableName, "created_at"),
@@ -66,6 +68,7 @@ type clientAPIKeyColumns struct {
 	tableAlias string
 	ID         clientAPIKeyColumn
 	Label      clientAPIKeyColumn
+	Harness    clientAPIKeyColumn
 	KeyHash    clientAPIKeyColumn
 	KeyPrefix  clientAPIKeyColumn
 	CreatedAt  clientAPIKeyColumn
@@ -118,6 +121,7 @@ func (c clientAPIKeyColumn) ShouldOmitParens() bool {
 type ClientAPIKeySetter struct {
 	ID         *string           `db:"id,pk" `
 	Label      *string           `db:"label" `
+	Harness    *string           `db:"harness" `
 	KeyHash    *string           `db:"key_hash" `
 	KeyPrefix  *string           `db:"key_prefix" `
 	CreatedAt  *string           `db:"created_at" `
@@ -126,12 +130,15 @@ type ClientAPIKeySetter struct {
 }
 
 func (s ClientAPIKeySetter) SetColumns() []string {
-	vals := make([]string, 0, 7)
+	vals := make([]string, 0, 8)
 	if s.ID != nil {
 		vals = append(vals, "id")
 	}
 	if s.Label != nil {
 		vals = append(vals, "label")
+	}
+	if s.Harness != nil {
+		vals = append(vals, "harness")
 	}
 	if s.KeyHash != nil {
 		vals = append(vals, "key_hash")
@@ -166,6 +173,14 @@ func (s ClientAPIKeySetter) Overwrite(t *ClientAPIKey) {
 				return *new(string)
 			}
 			return *s.Label
+		}()
+	}
+	if s.Harness != nil {
+		t.Harness = func() string {
+			if s.Harness == nil {
+				return *new(string)
+			}
+			return *s.Harness
 		}()
 	}
 	if s.KeyHash != nil {
@@ -252,6 +267,18 @@ func (s *ClientAPIKeySetter) Apply(q *dialect.InsertQuery) {
 					return *s.Label
 				}()).WriteSQL(ctx, w, d, start)
 			}))
+		case "harness":
+			vals = append(vals, bob.ExpressionFunc(func(ctx context.Context, w io.StringWriter, d bob.Dialect, start int) ([]any, error) {
+				if s.Harness == nil {
+					return sqlite.Arg(nil).WriteSQL(ctx, w, d, start)
+				}
+				return sqlite.Arg(func() string {
+					if s.Harness == nil {
+						return *new(string)
+					}
+					return *s.Harness
+				}()).WriteSQL(ctx, w, d, start)
+			}))
 		case "key_hash":
 			vals = append(vals, bob.ExpressionFunc(func(ctx context.Context, w io.StringWriter, d bob.Dialect, start int) ([]any, error) {
 				if s.KeyHash == nil {
@@ -325,7 +352,7 @@ func (s ClientAPIKeySetter) UpdateMod() bob.Mod[*dialect.UpdateQuery] {
 }
 
 func (s ClientAPIKeySetter) Expressions(prefix ...string) []bob.Expression {
-	exprs := make([]bob.Expression, 0, 7)
+	exprs := make([]bob.Expression, 0, 8)
 
 	if s.ID != nil {
 		exprs = append(exprs, expr.Join{Sep: " = ", Exprs: []bob.Expression{
@@ -338,6 +365,13 @@ func (s ClientAPIKeySetter) Expressions(prefix ...string) []bob.Expression {
 		exprs = append(exprs, expr.Join{Sep: " = ", Exprs: []bob.Expression{
 			sqlite.Quote(append(prefix, "label")...),
 			sqlite.Arg(s.Label),
+		}})
+	}
+
+	if s.Harness != nil {
+		exprs = append(exprs, expr.Join{Sep: " = ", Exprs: []bob.Expression{
+			sqlite.Quote(append(prefix, "harness")...),
+			sqlite.Arg(s.Harness),
 		}})
 	}
 
@@ -386,13 +420,15 @@ func clientAPIKeyScanMapper(ctx context.Context, cols []string) (scan.BeforeFunc
 		idx int
 		dst func(o *ClientAPIKey) any
 	}
-	targets := make([]target, 0, 7)
+	targets := make([]target, 0, 8)
 	for i, col := range cols {
 		switch col {
 		case "id":
 			targets = append(targets, target{i, func(o *ClientAPIKey) any { return &o.ID }})
 		case "label":
 			targets = append(targets, target{i, func(o *ClientAPIKey) any { return &o.Label }})
+		case "harness":
+			targets = append(targets, target{i, func(o *ClientAPIKey) any { return &o.Harness }})
 		case "key_hash":
 			targets = append(targets, target{i, func(o *ClientAPIKey) any { return &o.KeyHash }})
 		case "key_prefix":

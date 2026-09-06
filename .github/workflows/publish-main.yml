@@ -42,7 +42,7 @@ jobs:
           UPDATE_SIGNING_PRIVATE_KEY: ${{ secrets.UPDATE_SIGNING_PRIVATE_KEY }}
           GH_TOKEN: ${{ github.token }}
         run: |
-          snapshot_date="$(date -u +%d.%m)"
+          snapshot_date="$(date -u +%m.%d)"
           existing_tags="$(gh api --paginate "/repos/${GITHUB_REPOSITORY}/releases?per_page=100" --jq '.[].tag_name')"
           version="$(printf '%s\n' "$existing_tags" | bash scripts/next-main-version.sh "$snapshot_date")"
           echo "Publishing main snapshot as $version"

@@ -38,7 +38,8 @@ for path in sorted(base.iterdir()):
 manifest = {"schema": 1, "channel": channel, "version": version, "commit": commit,
     "published_at": built_at, "min_supervisor_protocol": 1,
     "schema_compatibility": {"min": 1, "max": 999999}, "artifacts": artifacts}
-pathlib.Path(out, "update-manifest.json").write_text(json.dumps(manifest, separators=(',', ':')) + "\n")
+# Keep the signed bytes identical to updater.Manifest.CanonicalBytes: no trailing newline.
+pathlib.Path(out, "update-manifest.json").write_text(json.dumps(manifest, separators=(',', ':')))
 with open(pathlib.Path(out, "checksums.txt"), 'w') as f:
     for p in sorted(base.iterdir()): f.write(hashlib.sha256(p.read_bytes()).hexdigest() + "  " + p.name + "\n")
 PY

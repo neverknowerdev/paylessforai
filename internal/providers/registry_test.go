@@ -11,6 +11,18 @@ func TestBuiltinRegistryResolvesKnownProvidersWithoutCredentials(t *testing.T) {
 	if client.Name() != "openrouter" || definition.DisplayName != "OpenRouter" {
 		t.Fatalf("unexpected resolution: client=%q definition=%#v", client.Name(), definition)
 	}
+	for _, expected := range []struct {
+		name string
+		url  string
+	}{
+		{name: "opencode-zen", url: "https://opencode.ai/zen/v1"},
+		{name: "opencode-go", url: "https://opencode.ai/zen/go/v1"},
+	} {
+		_, definition, err := registry.Resolve(expected.name, "", "key")
+		if err != nil || definition.DefaultBaseURL != expected.url || definition.DefaultAccessMode != "subscription" {
+			t.Fatalf("unexpected %s definition: %#v, %v", expected.name, definition, err)
+		}
+	}
 }
 
 func TestRegistryResolvesCustomOpenAICompatibleProvider(t *testing.T) {

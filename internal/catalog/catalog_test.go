@@ -31,8 +31,62 @@ func TestRefreshMergesOpenRouterAndSurplusAliases(t *testing.T) {
 		t.Fatal(err)
 	}
 	snapshot := manager.Snapshot()
-	if len(snapshot.Routes) != 2 || snapshot.Routes[0].LogicalModel != "anthropic/model-a" || snapshot.Routes[1].LogicalModel != "anthropic/model-a" {
+	if len(snapshot.Routes) != 2 || snapshot.Routes[0].LogicalModel != "model-a" || snapshot.Routes[1].LogicalModel != "model-a" {
 		t.Fatalf("unexpected snapshot: %#v", snapshot)
+	}
+}
+
+func TestRefreshCanonicalizesAliasesRegardlessOfProviderOrder(t *testing.T) {
+	providersByAlias := []providers.Client{
+		fakeClient{name: "openrouter", models: []providers.Model{{ID: "meta/muse-spark-1.3-contributor", Name: "Meta: Muse Spark 1.3 Contributor"}}},
+		fakeClient{name: "opencode-go", models: []providers.Model{{ID: "muse-spark-1.3-contributor", Name: "Muse Spark 1.3 Contributor"}}},
+		fakeClient{name: "opencode", models: []providers.Model{{ID: "muse-spark-1.3-contributor-free", Name: "Muse Spark 1.3 Free"}}},
+	}
+	for _, order := range [][]int{{0, 1, 2}, {2, 1, 0}, {1, 0, 2}} {
+		t.Run(fmt.Sprint(order), func(t *testing.T) {
+			manager := New(nil)
+			configured := make([]providers.Client, 0, len(order))
+			for _, index := range order {
+				configured = append(configured, providersByAlias[index])
+				manager.SetClients(configured)
+				if err := manager.Refresh(context.Background()); err != nil {
+					t.Fatal(err)
+				}
+			}
+			snapshot := manager.Snapshot()
+			if len(snapshot.Models) != 1 || snapshot.Models[0].ID != "muse-spark-1.3-contributor" || snapshot.Models[0].Name != "Muse Spark 1.3 Contributor" || len(snapshot.Routes) != 3 {
+				t.Fatalf("aliases were not canonicalized independently of order: %#v", snapshot)
+			}
+			for _, route := range snapshot.Routes {
+				if route.LogicalModel != "muse-spark-1.3-contributor" {
+					t.Fatalf("route retained non-canonical logical model: %#v", route)
+				}
+			}
+		})
+	}
+}
+
+func TestLogicalModelCanonicalizesVersionsAndPreservesEmbeddedFree(t *testing.T) {
+	for input, expected := range map[string]string{
+		"anthropic/claude-opus-4.6":       "claude-opus-4.6",
+		"claude-opus-4-6":                 "claude-opus-4.6",
+		"meta/muse-spark-1.3-contributor": "muse-spark-1.3-contributor",
+		"muse-spark-1.3-contributor-free": "muse-spark-1.3-contributor",
+		"fish-audio/s2.1-pro-free:free":   "s2.1-pro-free",
+	} {
+		if got := logicalModel(input); got != expected {
+			t.Fatalf("logicalModel(%q) = %q, want %q", input, got, expected)
+		}
+	}
+}
+
+func TestMergeModelsIsOrderIndependent(t *testing.T) {
+	left := Model{ID: "m", Name: "M", ContextLength: 100, SupportedParameters: []string{"tools"}, Tags: []string{"z"}}
+	right := Model{ID: "m", Name: "M", Free: true, ContextLength: 200, MaxCompletionTokens: 50, SupportedParameters: []string{"response_format"}, Tags: []string{"a"}}
+	ab := mergeModels(left, right)
+	ba := mergeModels(right, left)
+	if fmt.Sprintf("%#v", ab) != fmt.Sprintf("%#v", ba) {
+		t.Fatalf("model merge depends on order: ab=%#v ba=%#v", ab, ba)
 	}
 }
 
@@ -217,67 +271,5 @@ func TestPartialRefreshRetainsFailedProviderButRemovesDeletedProvider(t *testing
 	}
 	if len(manager.Snapshot().Routes) != 0 {
 		t.Fatal("last provider retained")
-	}
-}
-
-func TestRefreshAliasesAreProviderIndependent(t *testing.T) {
-	for _, names := range [][2]string{{"custom-a", "custom-b"}, {"surplus", "openrouter"}, {"openrouter", "surplus"}} {
-		for _, reverse := range []bool{false, true} {
-			t.Run(fmt.Sprintf("%s/%s/reverse=%t", names[0], names[1], reverse), func(t *testing.T) {
-				qualified := fakeClient{name: names[0], models: []providers.Model{{ID: "vendor/model-a"}}}
-				bare := fakeClient{name: names[1], models: []providers.Model{{ID: "model-a:free", Free: true}}}
-				clients := []providers.Client{qualified, bare}
-				if reverse {
-					clients[0], clients[1] = clients[1], clients[0]
-				}
-				manager := New(clients)
-				ctx := context.Background()
-				assertMerged := func() {
-					t.Helper()
-					snapshot := manager.Snapshot()
-					if len(snapshot.Models) != 1 || snapshot.Models[0].ID != "vendor/model-a" || len(snapshot.Routes) != 2 {
-						t.Fatalf("aliases not merged: %#v", snapshot)
-					}
-					for _, route := range snapshot.Routes {
-						if route.LogicalModel != "vendor/model-a" {
-							t.Fatalf("incorrect alias: %#v", route)
-						}
-					}
-					if len(snapshot.Additions) != 0 {
-						t.Fatalf("outage announced existing model: %#v", snapshot.Additions)
-					}
-				}
-				if err := manager.Refresh(ctx); err != nil {
-					t.Fatal(err)
-				}
-				assertMerged()
-				// Either provider may fail; both failure directions preserve the identity.
-				for _, failed := range [][]providers.Client{{failingClient{qualified}, bare}, {qualified, failingClient{bare}}} {
-					manager.SetClients(failed)
-					if err := manager.Refresh(ctx); err == nil {
-						t.Fatal("expected partial refresh failure")
-					}
-					assertMerged()
-				}
-				manager.SetClients(clients)
-				if err := manager.Refresh(ctx); err != nil {
-					t.Fatal(err)
-				}
-				assertMerged()
-			})
-		}
-	}
-}
-
-func TestLogicalModelDoesNotGuessAmbiguousAliases(t *testing.T) {
-	for _, ids := range [][]string{{"vendor-a/model", "vendor-b/model", "model"}, {"model", "vendor-b/model", "vendor-a/model"}} {
-		for _, id := range ids {
-			if got := logicalModel(id, ids); got != id {
-				t.Fatalf("ambiguous alias %q became %q", id, got)
-			}
-		}
-	}
-	if got := logicalModel("model", []string{"vendor/model", "vendor/model:free", "vendor/model"}); got != "vendor/model" {
-		t.Fatalf("duplicate variants must not create ambiguity: %q", got)
 	}
 }

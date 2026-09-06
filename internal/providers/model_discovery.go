@@ -168,8 +168,14 @@ func normalizeTags(values []string) []string {
 
 func isFreeModel(provider, id, name, description string, input, output int64, priced bool) bool {
 	label := strings.ToLower(strings.TrimSpace(id + " " + name))
+	// A trailing -free is a provider-neutral route qualifier used by
+	// OpenCode and other OpenAI-compatible catalogs. It is distinct from
+	// zero pricing inference, which is unsafe for media models.
+	if strings.HasSuffix(strings.ToLower(strings.TrimSpace(id)), "-free") {
+		return true
+	}
 	if provider == "openrouter" {
-		if strings.HasSuffix(strings.ToLower(id), ":free") || strings.HasSuffix(strings.ToLower(id), "-free") || strings.Contains(label, "(free)") || strings.Contains(strings.ToLower(description), "free") || id == "openrouter/free" {
+		if strings.HasSuffix(strings.ToLower(id), ":free") || strings.Contains(label, "(free)") || strings.Contains(strings.ToLower(description), "free") || id == "openrouter/free" {
 			return true
 		}
 		return priced && input == 0 && output == 0

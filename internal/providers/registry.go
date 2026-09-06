@@ -10,10 +10,11 @@ import (
 // client. Provider-specific discovery and protocol behavior stays behind the
 // Client interface; the application lifecycle only deals with definitions.
 type Definition struct {
-	Name           string
-	DisplayName    string
-	DefaultBaseURL string
-	NewClient      func(baseURL, apiKey string) Client
+	Name              string
+	DisplayName       string
+	DefaultBaseURL    string
+	DefaultAccessMode string
+	NewClient         func(baseURL, apiKey string) Client
 }
 
 // Registry owns the provider definitions known by this build. Credentials
@@ -103,6 +104,8 @@ func Builtin(overrides map[string]string) *Registry {
 	definitions := []Definition{
 		{Name: "openrouter", DisplayName: "OpenRouter", DefaultBaseURL: "https://openrouter.ai/api/v1"},
 		{Name: "surplus", DisplayName: "Surplus Intelligence", DefaultBaseURL: "https://api.surplusintelligence.ai/v1"},
+		{Name: "opencode-zen", DisplayName: "OpenCode Zen", DefaultBaseURL: "https://opencode.ai/zen/v1", DefaultAccessMode: "subscription"},
+		{Name: "opencode-go", DisplayName: "OpenCode Go", DefaultBaseURL: "https://opencode.ai/zen/go/v1", DefaultAccessMode: "subscription"},
 	}
 	for index := range definitions {
 		if override := strings.TrimSpace(overrides[definitions[index].Name]); override != "" {

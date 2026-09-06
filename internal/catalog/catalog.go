@@ -3,6 +3,7 @@ package catalog
 import (
 	"context"
 	"fmt"
+	"regexp"
 	"sort"
 	"strings"
 	"sync"
@@ -140,23 +141,6 @@ func (m *Manager) Refresh(ctx context.Context) (refreshErr error) {
 		}
 		all = append(all, discovered{provider: client.Name(), models: models, client: client})
 	}
-	catalogIDs := make([]string, 0)
-	for _, batch := range all {
-		for _, model := range batch.models {
-			catalogIDs = append(catalogIDs, model.ID)
-		}
-	}
-	// Failed discovery retains the same alias evidence as the retained routes,
-	// regardless of which provider supplied the qualified model ID.
-	for _, route := range previous.Routes {
-		key := route.ExecutionKey
-		if key == "" {
-			key = route.Provider
-		}
-		if failed[key] {
-			catalogIDs = append(catalogIDs, route.LogicalModel)
-		}
-	}
 	now := time.Now().UTC()
 	if len(all) == 0 && len(clients) > 0 {
 		now = previous.UpdatedAt
@@ -176,18 +160,20 @@ func (m *Manager) Refresh(ctx context.Context) (refreshErr error) {
 			}
 		}
 		for _, model := range batch.models {
-			logical := logicalModel(model.ID, catalogIDs)
+			// A logical model is derived from the upstream ID itself, rather
+			// than from whichever provider happened to be scanned first. This
+			// lets a user add OpenCode, OpenCode Go, and OpenRouter in any order.
+			logical := logicalModel(model.ID)
 			// Providers classify free routes while parsing their native catalog
 			// metadata. Do not infer free from zero token prices here: media APIs
 			// commonly expose prompt/completion as zero while charging per image,
 			// audio minute, video, or job.
-			free := model.Free
-			if _, ok := modelMap[logical]; !ok {
-				modelMap[logical] = Model{ID: logical, Name: model.Name, Free: free, ContextLength: model.ContextLength, MaxCompletionTokens: model.MaxCompletionTokens, SupportedParameters: append([]string(nil), model.SupportedParameters...), InputModalities: append([]string(nil), model.InputModalities...), OutputModalities: append([]string(nil), model.OutputModalities...), Tags: append([]string(nil), model.Tags...)}
-			} else if free {
-				merged := modelMap[logical]
-				merged.Free = true
-				modelMap[logical] = merged
+			free := model.Free || modelIDHasFreeRouteQualifier(model.ID)
+			candidate := Model{ID: logical, Name: canonicalModelName(logical), Free: free, ContextLength: model.ContextLength, MaxCompletionTokens: model.MaxCompletionTokens, SupportedParameters: append([]string(nil), model.SupportedParameters...), InputModalities: append([]string(nil), model.InputModalities...), OutputModalities: append([]string(nil), model.OutputModalities...), Tags: append([]string(nil), model.Tags...)}
+			if existing, ok := modelMap[logical]; ok {
+				modelMap[logical] = mergeModels(existing, candidate)
+			} else {
+				modelMap[logical] = candidate
 			}
 			protocols := map[matcher.Protocol]bool{matcher.ProtocolChatCompletions: true, matcher.ProtocolResponses: true, matcher.ProtocolAnthropic: true}
 			parameters := make(map[string]bool, len(model.SupportedParameters))
@@ -209,7 +195,7 @@ func (m *Manager) Refresh(ctx context.Context) (refreshErr error) {
 			routes = append(routes, matcher.Route{ID: executionKey + ":" + model.ID, Provider: batch.provider, LogicalModel: logical, UpstreamModel: model.ID, Free: free, Price: model.Pricing, PriceAvailable: model.PriceAvailable, OfficialPrice: model.OfficialPricing, OfficialPriceAvailable: model.OfficialPriceAvailable, CredentialID: credentialID, ExecutionKey: executionKey, BillingClass: routeBilling, Capabilities: matcher.Capabilities{Protocols: protocols, Parameters: parameters, Tools: parameters["tools"], StructuredOutput: parameters["response_format"] || parameters["structured_outputs"], MaxContext: model.ContextLength, MaxOutput: model.MaxCompletionTokens, InputModalities: inputModalities, OutputModalities: outputModalities, Tags: append([]string(nil), model.Tags...)}, Health: matcher.HealthHealthy, Trusted: true})
 		}
 	}
-	// Preserve routes only for still-configured clients whose discovery failed.
+	// Preserve routes for configured providers during transient discovery failures.
 	for _, route := range previous.Routes {
 		key := route.ExecutionKey
 		if key == "" {
@@ -294,27 +280,86 @@ func (m *Manager) ClientForRoute(route matcher.Route) providers.Client {
 	return m.Client(route.Provider)
 }
 
-// logicalModel merges a bare ID with a qualified ID only when the catalog
-// supplies one unambiguous match. Qualified IDs remain distinct, and provider
-// names and discovery order have no influence on the result.
-func logicalModel(id string, catalogIDs []string) string {
-	id = strings.TrimSuffix(id, ":free")
-	if strings.Contains(id, "/") {
-		return id
+var hyphenatedVersion = regexp.MustCompile(`([0-9]+)-([0-9]+)`)
+
+// logicalModel produces a provider-neutral, stable public slug. Namespaces
+// such as "meta/" identify the publisher's upstream naming scheme; they are
+// not part of the model a PayLessForAI client requests. Free is a route tier,
+// not a distinct model.
+func logicalModel(id string) string {
+	value := strings.ToLower(strings.TrimSpace(id))
+	// Catalogs occasionally use multiple path components. The final component
+	// is the provider's model alias; preceding components are namespace or
+	// publisher hints and deliberately do not affect identity.
+	if index := strings.LastIndexByte(value, '/'); index >= 0 {
+		value = value[index+1:]
 	}
-	match := ""
-	for _, candidate := range catalogIDs {
-		canonical := strings.TrimSuffix(candidate, ":free")
-		if !strings.HasSuffix(canonical, "/"+id) {
+	if strings.HasSuffix(value, ":free") {
+		value = strings.TrimSuffix(value, ":free")
+	} else if strings.HasSuffix(value, "-free") {
+		// OpenCode exposes free offers as bare `model-free` aliases. Do not
+		// repeatedly trim: `s2.1-pro-free:free` is a distinct base slug with
+		// an additional :free route qualifier.
+		value = strings.TrimSuffix(value, "-free")
+	}
+	value = strings.NewReplacer("_", "-", " ", "-").Replace(value)
+	value = strings.Trim(value, "-.")
+	for {
+		normalized := hyphenatedVersion.ReplaceAllString(value, "$1.$2")
+		if normalized == value {
+			break
+		}
+		value = normalized
+	}
+	return value
+}
+
+func modelIDHasFreeRouteQualifier(id string) bool {
+	value := strings.ToLower(strings.TrimSpace(id))
+	return strings.HasSuffix(value, ":free") || strings.HasSuffix(value, "-free")
+}
+
+func canonicalModelName(slug string) string {
+	words := strings.FieldsFunc(slug, func(r rune) bool { return r == '-' || r == '_' || r == ' ' })
+	initialisms := map[string]string{"api": "API", "glm": "GLM", "gpt": "GPT", "llm": "LLM"}
+	for index, word := range words {
+		if replacement, ok := initialisms[word]; ok {
+			words[index] = replacement
 			continue
 		}
-		if match != "" && match != canonical {
-			return id
+		if word != "" {
+			words[index] = strings.ToUpper(word[:1]) + word[1:]
 		}
-		match = canonical
 	}
-	if match != "" {
-		return match
+	return strings.Join(words, " ")
+}
+
+func mergeModels(current, candidate Model) Model {
+	if current.Name == "" || (candidate.Name != "" && candidate.Name < current.Name) {
+		current.Name = candidate.Name
 	}
-	return id
+	current.Free = current.Free || candidate.Free
+	current.ContextLength = max(current.ContextLength, candidate.ContextLength)
+	current.MaxCompletionTokens = max(current.MaxCompletionTokens, candidate.MaxCompletionTokens)
+	current.SupportedParameters = mergeStrings(current.SupportedParameters, candidate.SupportedParameters)
+	current.InputModalities = mergeStrings(current.InputModalities, candidate.InputModalities)
+	current.OutputModalities = mergeStrings(current.OutputModalities, candidate.OutputModalities)
+	current.Tags = mergeStrings(current.Tags, candidate.Tags)
+	return current
+}
+
+func mergeStrings(left, right []string) []string {
+	seen := make(map[string]struct{}, len(left)+len(right))
+	for _, value := range append(append([]string(nil), left...), right...) {
+		value = strings.ToLower(strings.TrimSpace(value))
+		if value != "" {
+			seen[value] = struct{}{}
+		}
+	}
+	result := make([]string, 0, len(seen))
+	for value := range seen {
+		result = append(result, value)
+	}
+	sort.Strings(result)
+	return result
 }

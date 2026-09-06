@@ -243,9 +243,14 @@ func TestServerUI(t *testing.T) {
 func TestClientKeyManagementAPI(t *testing.T) {
 	server, cleanup := testServer(t)
 	defer cleanup()
+	missingHarness := httptest.NewRecorder()
+	server.httpServer.Handler.ServeHTTP(missingHarness, httptest.NewRequest(http.MethodPost, "/api/client-keys", strings.NewReader(`{"label":"editor"}`)))
+	if missingHarness.Code != http.StatusBadRequest || !strings.Contains(missingHarness.Body.String(), "harness is required") {
+		t.Fatalf("expected required harness validation: %d %s", missingHarness.Code, missingHarness.Body.String())
+	}
 	create := httptest.NewRecorder()
-	server.httpServer.Handler.ServeHTTP(create, httptest.NewRequest(http.MethodPost, "/api/client-keys", strings.NewReader(`{"label":"editor"}`)))
-	if create.Code != http.StatusCreated || !strings.Contains(create.Body.String(), `"secret":"plai_`) {
+	server.httpServer.Handler.ServeHTTP(create, httptest.NewRequest(http.MethodPost, "/api/client-keys", strings.NewReader(`{"label":"editor","harness":"Cursor"}`)))
+	if create.Code != http.StatusCreated || !strings.Contains(create.Body.String(), `"secret":"plai_`) || !strings.Contains(create.Body.String(), `"harness":"Cursor"`) {
 		t.Fatalf("unexpected create response: %d %s", create.Code, create.Body.String())
 	}
 	list := httptest.NewRecorder()
@@ -282,6 +287,19 @@ func TestProviderCredentialManagementAPI(t *testing.T) {
 	server.httpServer.Handler.ServeHTTP(list, httptest.NewRequest(http.MethodGet, "/api/providers/credentials", nil))
 	if list.Code != http.StatusOK || !strings.Contains(list.Body.String(), `"provider":"openrouter"`) {
 		t.Fatalf("unexpected credential list: %d %s", list.Code, list.Body.String())
+	}
+	var listed struct {
+		Data []struct {
+			ID string `json:"id"`
+		} `json:"data"`
+	}
+	if err := json.Unmarshal(list.Body.Bytes(), &listed); err != nil || len(listed.Data) != 1 {
+		t.Fatalf("decode provider list: %v %s", err, list.Body.String())
+	}
+	rename := httptest.NewRecorder()
+	server.httpServer.Handler.ServeHTTP(rename, httptest.NewRequest(http.MethodPut, "/api/providers/credentials/"+listed.Data[0].ID, strings.NewReader(`{"label":"renamed"}`)))
+	if rename.Code != http.StatusOK || !strings.Contains(rename.Body.String(), `"label":"renamed"`) {
+		t.Fatalf("unexpected provider rename response: %d %s", rename.Code, rename.Body.String())
 	}
 	custom := httptest.NewRecorder()
 	server.httpServer.Handler.ServeHTTP(custom, httptest.NewRequest(http.MethodPost, "/api/providers/credentials", strings.NewReader(`{"provider":"local-llm","label":"local","base_url":"http://custom.invalid/v1","api_key":"different-secret"}`)))

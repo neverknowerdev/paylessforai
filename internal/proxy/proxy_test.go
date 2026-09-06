@@ -228,6 +228,41 @@ func TestProxyFailsOverImmediatelyFromFreeRoute(t *testing.T) {
 	}
 }
 
+func TestProxyRoutesCanonicalMuseModelAcrossAllProviderAliases(t *testing.T) {
+	free := &fakeProvider{name: "opencode", models: []providers.Model{model("muse-spark-1.3-contributor-free", 0, 0)}, responses: []func(*http.Request) (*http.Response, error){
+		func(*http.Request) (*http.Response, error) {
+			return nil, &providers.UpstreamError{Provider: "opencode", StatusCode: http.StatusServiceUnavailable, Class: retry.ErrorServer, Message: "free capacity exhausted"}
+		},
+	}}
+	goProvider := &fakeProvider{name: "opencode-go", models: []providers.Model{model("muse-spark-1.3-contributor", 1, 1)}, responses: []func(*http.Request) (*http.Response, error){
+		func(*http.Request) (*http.Response, error) {
+			return nil, &providers.UpstreamError{Provider: "opencode-go", StatusCode: http.StatusNotFound, Class: retry.ErrorModelNotFound, Message: "model unavailable"}
+		},
+	}}
+	openRouter := &fakeProvider{name: "openrouter", models: []providers.Model{model("meta/muse-spark-1.3-contributor", 2, 2)}}
+	proxy, db, secret := testProxy(t, free, goProvider, openRouter)
+	defer db.Close()
+	request := httptest.NewRequest(http.MethodPost, "/v1/chat/completions", strings.NewReader(`{"model":"muse-spark-1.3-contributor","messages":[]}`))
+	request.Header.Set("Authorization", "Bearer "+secret)
+	response := httptest.NewRecorder()
+	proxy.ServeHTTP(response, request, matcher.ProtocolChatCompletions)
+	if response.Code != http.StatusOK {
+		t.Fatalf("unexpected response: %d %s", response.Code, response.Body.String())
+	}
+	free.mu.Lock()
+	freeSeen := append([]string(nil), free.modelsSeen...)
+	free.mu.Unlock()
+	goProvider.mu.Lock()
+	goSeen := append([]string(nil), goProvider.modelsSeen...)
+	goProvider.mu.Unlock()
+	openRouter.mu.Lock()
+	openRouterSeen := append([]string(nil), openRouter.modelsSeen...)
+	openRouter.mu.Unlock()
+	if len(freeSeen) != 1 || freeSeen[0] != "muse-spark-1.3-contributor-free" || len(goSeen) != 1 || goSeen[0] != "muse-spark-1.3-contributor" || len(openRouterSeen) != 1 || openRouterSeen[0] != "meta/muse-spark-1.3-contributor" {
+		t.Fatalf("canonical request did not fail over through all aliases: free=%v go=%v openrouter=%v", freeSeen, goSeen, openRouterSeen)
+	}
+}
+
 func TestHumanErrorMessageExtractsNestedProviderDetail(t *testing.T) {
 	err := &providers.UpstreamError{Provider: "openrouter", Message: `{"error":{"message":"Provider returned error","metadata":{"raw":"temporarily rate-limited upstream"}}}`}
 	if got := humanErrorMessage(err); got != "temporarily rate-limited upstream" {

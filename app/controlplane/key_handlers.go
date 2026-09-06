@@ -27,13 +27,18 @@ func (s *Server) handleClientKeys(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusOK, map[string]any{"data": keys})
 	case http.MethodPost:
 		var input struct {
-			Label string `json:"label"`
+			Label   string `json:"label"`
+			Harness string `json:"harness"`
 		}
 		if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 4096)).Decode(&input); err != nil && err != io.EOF {
 			writeError(w, http.StatusBadRequest, "invalid_request", "invalid key request")
 			return
 		}
-		key, secret, err := s.db.ClientAPIKeys.Create(r.Context(), input.Label)
+		if strings.TrimSpace(input.Harness) == "" {
+			writeError(w, http.StatusBadRequest, "invalid_request", "harness is required")
+			return
+		}
+		key, secret, err := s.db.ClientAPIKeys.Create(r.Context(), input.Label, input.Harness)
 		if err != nil {
 			writeError(w, http.StatusInternalServerError, "key_create_failed", "could not create client key")
 			return

@@ -4,11 +4,11 @@ import "testing"
 
 func TestClientAPIKeysRepositoryIntegration(t *testing.T) {
 	i := newIntegrationDB(t)
-	key, secret, err := i.repos.ClientAPIKeys.Create(i.ctx, "integration")
+	key, secret, err := i.repos.ClientAPIKeys.Create(i.ctx, "integration", "Cursor")
 	if err != nil {
 		t.Fatal(err)
 	}
-	if authenticated, ok, err := i.repos.ClientAPIKeys.Authenticate(i.ctx, secret); err != nil || !ok || authenticated.ID != key.ID {
+	if authenticated, ok, err := i.repos.ClientAPIKeys.Authenticate(i.ctx, secret); err != nil || !ok || authenticated.ID != key.ID || authenticated.Harness != "Cursor" {
 		t.Fatalf("authenticate: %+v, %v, %v", authenticated, ok, err)
 	}
 	keys, err := i.repos.ClientAPIKeys.List(i.ctx)

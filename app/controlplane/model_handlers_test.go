@@ -2,16 +2,28 @@ package controlplane
 
 import (
 	"context"
-	"encoding/json"
-	"github.com/neverknowerdev/paylessforai/internal/catalog"
-	"github.com/neverknowerdev/paylessforai/internal/providers"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
-	"time"
 
+	"github.com/neverknowerdev/paylessforai/internal/catalog"
 	"github.com/neverknowerdev/paylessforai/internal/matcher"
+	"github.com/neverknowerdev/paylessforai/internal/providers"
 )
+
+type catalogModelTestClient struct {
+	provider string
+	model    providers.Model
+}
+
+func (c catalogModelTestClient) Name() string { return c.provider }
+func (c catalogModelTestClient) Discover(context.Context) ([]providers.Model, error) {
+	return []providers.Model{c.model}, nil
+}
+func (c catalogModelTestClient) Do(context.Context, matcher.Protocol, string, []byte) (*http.Response, error) {
+	return nil, nil
+}
 
 func TestCatalogDiscountsCompareRoutesWithOpenRouterBaseline(t *testing.T) {
 	routes := []matcher.Route{
@@ -48,58 +60,20 @@ func TestCatalogDiscountsClampOverpricedRoutesAndUseProviderBaseline(t *testing.
 	}
 }
 
-type discoveryTestClient struct{ providers.Client }
-
-func (discoveryTestClient) Name() string { return "surplus" }
-func (discoveryTestClient) Discover(context.Context) ([]providers.Model, error) {
-	return []providers.Model{{ID: "recent"}, {ID: "expired"}}, nil
-}
-
-type discoveryTestStore struct{ value string }
-
-func (s discoveryTestStore) Get(context.Context, string) (string, bool, error) {
-	return s.value, true, nil
-}
-func (discoveryTestStore) Set(context.Context, string, string) error { return nil }
-
-func TestCatalogModelsHighlightsOnlyRecentPersistedDiscoveries(t *testing.T) {
-	manager := catalog.New([]providers.Client{discoveryTestClient{}})
-	history, err := json.Marshal(map[string]any{
-		"known":     map[string]bool{"recent": true, "expired": true},
-		"additions": []catalog.Addition{{ID: "recent", AddedAt: time.Now().Add(-time.Hour)}, {ID: "expired", AddedAt: time.Now().Add(-catalog.NewModelWindow - time.Hour)}},
+func TestCatalogModelsEndpointReturnsCanonicalModelName(t *testing.T) {
+	server, cleanup := testServer(t)
+	defer cleanup()
+	modelCatalog := catalog.New([]providers.Client{
+		catalogModelTestClient{provider: "opencode", model: providers.Model{ID: "muse-spark-1.3-contributor-free"}},
+		catalogModelTestClient{provider: "openrouter", model: providers.Model{ID: "meta/muse-spark-1.3-contributor"}},
 	})
-	if err != nil {
+	if err := modelCatalog.Refresh(context.Background()); err != nil {
 		t.Fatal(err)
 	}
-	if err := manager.Restore(context.Background(), discoveryTestStore{string(history)}); err != nil {
-		t.Fatal(err)
-	}
-	if err := manager.Refresh(context.Background()); err != nil {
-		t.Fatal(err)
-	}
-	server := &Server{catalog: manager}
+	server.catalog = modelCatalog
 	response := httptest.NewRecorder()
-	server.handleCatalogModels(response, httptest.NewRequest(http.MethodGet, "/api/models", nil))
-	var payload struct {
-		Data []struct {
-			Model   string `json:"model"`
-			IsNew   bool   `json:"is_new"`
-			AddedAt string `json:"added_at"`
-		}
-		UpdatedAt time.Time `json:"updated_at"`
-	}
-	if err := json.Unmarshal(response.Body.Bytes(), &payload); err != nil {
-		t.Fatal(err)
-	}
-	if len(payload.Data) != 2 || payload.UpdatedAt.IsZero() {
-		t.Fatalf("invalid payload: %s", response.Body.String())
-	}
-	for _, model := range payload.Data {
-		if model.IsNew != (model.Model == "recent") {
-			t.Fatalf("incorrect new flag: %#v", model)
-		}
-		if model.IsNew && model.AddedAt == "" {
-			t.Fatal("missing discovery date")
-		}
+	server.httpServer.Handler.ServeHTTP(response, httptest.NewRequest(http.MethodGet, "/api/models", nil))
+	if response.Code != http.StatusOK || !strings.Contains(response.Body.String(), `"model":"muse-spark-1.3-contributor"`) || !strings.Contains(response.Body.String(), `"name":"Muse Spark 1.3 Contributor"`) {
+		t.Fatalf("unexpected canonical catalog response: %d %s", response.Code, response.Body.String())
 	}
 }

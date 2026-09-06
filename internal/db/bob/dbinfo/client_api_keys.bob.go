@@ -78,6 +78,15 @@ var ClientAPIKeys = Table[
 			Generated: false,
 			AutoIncr:  false,
 		},
+		Harness: column{
+			Name:      "harness",
+			DBType:    "TEXT",
+			Default:   "'Other'",
+			Comment:   "",
+			Nullable:  false,
+			Generated: false,
+			AutoIncr:  false,
+		},
 	},
 	Indexes: clientAPIKeyIndexes{
 		SqliteAutoindexClientAPIKeys2: index{
@@ -134,11 +143,12 @@ type clientAPIKeyColumns struct {
 	CreatedAt  column
 	LastUsedAt column
 	RevokedAt  column
+	Harness    column
 }
 
 func (c clientAPIKeyColumns) AsSlice() []column {
 	return []column{
-		c.ID, c.Label, c.KeyHash, c.KeyPrefix, c.CreatedAt, c.LastUsedAt, c.RevokedAt,
+		c.ID, c.Label, c.KeyHash, c.KeyPrefix, c.CreatedAt, c.LastUsedAt, c.RevokedAt, c.Harness,
 	}
 }
 

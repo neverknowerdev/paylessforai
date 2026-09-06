@@ -33,15 +33,6 @@ var ClientAPIKeys = Table[
 			Generated: false,
 			AutoIncr:  false,
 		},
-		Harness: column{
-			Name:      "harness",
-			DBType:    "TEXT",
-			Default:   "'Other'",
-			Comment:   "",
-			Nullable:  false,
-			Generated: false,
-			AutoIncr:  false,
-		},
 		KeyHash: column{
 			Name:      "key_hash",
 			DBType:    "TEXT",
@@ -84,6 +75,15 @@ var ClientAPIKeys = Table[
 			Default:   "NULL",
 			Comment:   "",
 			Nullable:  true,
+			Generated: false,
+			AutoIncr:  false,
+		},
+		Harness: column{
+			Name:      "harness",
+			DBType:    "TEXT",
+			Default:   "'Other'",
+			Comment:   "",
+			Nullable:  false,
 			Generated: false,
 			AutoIncr:  false,
 		},
@@ -138,17 +138,17 @@ var ClientAPIKeys = Table[
 type clientAPIKeyColumns struct {
 	ID         column
 	Label      column
-	Harness    column
 	KeyHash    column
 	KeyPrefix  column
 	CreatedAt  column
 	LastUsedAt column
 	RevokedAt  column
+	Harness    column
 }
 
 func (c clientAPIKeyColumns) AsSlice() []column {
 	return []column{
-		c.ID, c.Label, c.Harness, c.KeyHash, c.KeyPrefix, c.CreatedAt, c.LastUsedAt, c.RevokedAt,
+		c.ID, c.Label, c.KeyHash, c.KeyPrefix, c.CreatedAt, c.LastUsedAt, c.RevokedAt, c.Harness,
 	}
 }
 

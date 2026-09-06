@@ -342,7 +342,16 @@ func sameLogicalModel(routeModel, requestedModel string) bool {
 }
 
 func canonicalModelID(value string) string {
-	return strings.TrimSuffix(strings.TrimSpace(value), ":free")
+	value = strings.ToLower(strings.TrimSpace(value))
+	if index := strings.LastIndexByte(value, '/'); index >= 0 {
+		value = value[index+1:]
+	}
+	if strings.HasSuffix(value, ":free") {
+		value = strings.TrimSuffix(value, ":free")
+	} else if strings.HasSuffix(value, "-free") {
+		value = strings.TrimSuffix(value, "-free")
+	}
+	return value
 }
 
 func expectedCost(inputTokens, outputTokens int64, price Price) (int64, error) {

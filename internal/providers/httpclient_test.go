@@ -97,6 +97,17 @@ func TestDiscoverRecognizesFreeVariantWithoutPricing(t *testing.T) {
 	}
 }
 
+func TestDiscoverRecognizesProviderNeutralHyphenFreeVariant(t *testing.T) {
+	client := NewHTTPClient("opencode", "https://provider.invalid/v1", "key")
+	client.Client = &http.Client{Transport: roundTripFunc(func(r *http.Request) (*http.Response, error) {
+		return &http.Response{StatusCode: http.StatusOK, Body: io.NopCloser(strings.NewReader(`{"data":[{"id":"muse-spark-1.3-contributor-free"}]}`)), Header: make(http.Header), Request: r}, nil
+	})}
+	models, err := client.Discover(context.Background())
+	if err != nil || len(models) != 1 || !models[0].Free {
+		t.Fatalf("unexpected hyphen-free model: %#v, %v", models, err)
+	}
+}
+
 func TestDiscoverMapsTopLevelModalityTags(t *testing.T) {
 	client := NewHTTPClient("surplus", "https://provider.invalid/v1", "key")
 	client.Client = &http.Client{Transport: roundTripFunc(func(r *http.Request) (*http.Response, error) {

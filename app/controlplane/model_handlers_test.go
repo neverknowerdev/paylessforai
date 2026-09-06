@@ -1,10 +1,29 @@
 package controlplane
 
 import (
+	"context"
+	"net/http"
+	"net/http/httptest"
+	"strings"
 	"testing"
 
+	"github.com/neverknowerdev/paylessforai/internal/catalog"
 	"github.com/neverknowerdev/paylessforai/internal/matcher"
+	"github.com/neverknowerdev/paylessforai/internal/providers"
 )
+
+type catalogModelTestClient struct {
+	provider string
+	model    providers.Model
+}
+
+func (c catalogModelTestClient) Name() string { return c.provider }
+func (c catalogModelTestClient) Discover(context.Context) ([]providers.Model, error) {
+	return []providers.Model{c.model}, nil
+}
+func (c catalogModelTestClient) Do(context.Context, matcher.Protocol, string, []byte) (*http.Response, error) {
+	return nil, nil
+}
 
 func TestCatalogDiscountsCompareRoutesWithOpenRouterBaseline(t *testing.T) {
 	routes := []matcher.Route{
@@ -38,5 +57,23 @@ func TestCatalogDiscountsClampOverpricedRoutesAndUseProviderBaseline(t *testing.
 	item, ok := discounts["surplus\x00market-model\x00market-model"]
 	if !ok || item.InputBPS != 0 || item.OutputBPS != 5000 || item.MaxBPS != 5000 || item.OfficialInput != 100 || item.Source != "surplus" {
 		t.Fatalf("unexpected provider baseline discount: %#v", discounts)
+	}
+}
+
+func TestCatalogModelsEndpointReturnsCanonicalModelName(t *testing.T) {
+	server, cleanup := testServer(t)
+	defer cleanup()
+	modelCatalog := catalog.New([]providers.Client{
+		catalogModelTestClient{provider: "opencode", model: providers.Model{ID: "muse-spark-1.3-contributor-free"}},
+		catalogModelTestClient{provider: "openrouter", model: providers.Model{ID: "meta/muse-spark-1.3-contributor"}},
+	})
+	if err := modelCatalog.Refresh(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	server.catalog = modelCatalog
+	response := httptest.NewRecorder()
+	server.httpServer.Handler.ServeHTTP(response, httptest.NewRequest(http.MethodGet, "/api/models", nil))
+	if response.Code != http.StatusOK || !strings.Contains(response.Body.String(), `"model":"muse-spark-1.3-contributor"`) || !strings.Contains(response.Body.String(), `"name":"Muse Spark 1.3 Contributor"`) {
+		t.Fatalf("unexpected canonical catalog response: %d %s", response.Code, response.Body.String())
 	}
 }

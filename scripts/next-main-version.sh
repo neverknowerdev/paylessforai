@@ -1,9 +1,9 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-date_part="${1:-$(date -u +%d.%m)}"
+date_part="${1:-$(date -u +%m.%d)}"
 if [[ ! "$date_part" =~ ^[0-9]{2}\.[0-9]{2}$ ]]; then
-  echo "date must be in DD.MM format" >&2
+  echo "date must be in MM.DD format" >&2
   exit 1
 fi
 

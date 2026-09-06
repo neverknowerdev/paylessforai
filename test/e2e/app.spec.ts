@@ -59,9 +59,12 @@ test('configures providers, creates a client key, and routes an OpenAI request',
   await page.locator('#key-harness').selectOption('Cursor');
   await page.locator('#key-label').fill('playwright');
   await page.locator('#key-modal').getByRole('button', { name: 'Create key' }).click();
+  await expect(page.locator('#key-form')).toBeHidden();
+  await expect(page.locator('#key-modal-title')).toHaveText('API key created');
   await expect(page.locator('#new-key')).toContainText('plai_');
   await expect(page.locator('#new-key-value')).toContainText('plai_');
   await expect(page.locator('#new-key').getByRole('button', { name: 'Copy key' })).toBeVisible();
+  await expect(page.locator('#new-key').getByRole('button', { name: 'Done' })).toBeVisible();
   const secretText = await page.locator('#new-key').textContent();
   const secret = secretText?.match(/plai_[0-9a-f]+/)?.[0];
   expect(secret).toBeTruthy();

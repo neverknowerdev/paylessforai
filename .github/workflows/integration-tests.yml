@@ -28,8 +28,8 @@ jobs:
       - name: Verify Bob generated models
         run: |
           GOBIN="$RUNNER_TEMP/bin" go install github.com/stephenafamo/bob/gen/bobgen-sql@v0.50.0
-          PATH="$RUNNER_TEMP/bin:$PATH" GOCACHE="$RUNNER_TEMP/go-cache" go generate ./internal/db
+          PATH="$RUNNER_TEMP/bin:$PATH" go generate ./internal/db
           git diff --exit-code -- internal/db/bob
 
       - name: Run SQLite repository integration tests
-        run: GOCACHE="$RUNNER_TEMP/go-cache" go test ./internal/db/repositories -run Integration -count=1
+        run: go test ./internal/db/repositories -run Integration -count=1

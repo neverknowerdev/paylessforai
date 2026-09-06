@@ -2,6 +2,7 @@ package catalog
 
 import (
 	"context"
+	"fmt"
 	"net/http"
 	"testing"
 
@@ -30,8 +31,62 @@ func TestRefreshMergesOpenRouterAndSurplusAliases(t *testing.T) {
 		t.Fatal(err)
 	}
 	snapshot := manager.Snapshot()
-	if len(snapshot.Routes) != 2 || snapshot.Routes[0].LogicalModel != "anthropic/model-a" || snapshot.Routes[1].LogicalModel != "anthropic/model-a" {
+	if len(snapshot.Routes) != 2 || snapshot.Routes[0].LogicalModel != "model-a" || snapshot.Routes[1].LogicalModel != "model-a" {
 		t.Fatalf("unexpected snapshot: %#v", snapshot)
+	}
+}
+
+func TestRefreshCanonicalizesAliasesRegardlessOfProviderOrder(t *testing.T) {
+	providersByAlias := []providers.Client{
+		fakeClient{name: "openrouter", models: []providers.Model{{ID: "meta/muse-spark-1.3-contributor", Name: "Meta: Muse Spark 1.3 Contributor"}}},
+		fakeClient{name: "opencode-go", models: []providers.Model{{ID: "muse-spark-1.3-contributor", Name: "Muse Spark 1.3 Contributor"}}},
+		fakeClient{name: "opencode", models: []providers.Model{{ID: "muse-spark-1.3-contributor-free", Name: "Muse Spark 1.3 Free"}}},
+	}
+	for _, order := range [][]int{{0, 1, 2}, {2, 1, 0}, {1, 0, 2}} {
+		t.Run(fmt.Sprint(order), func(t *testing.T) {
+			manager := New(nil)
+			configured := make([]providers.Client, 0, len(order))
+			for _, index := range order {
+				configured = append(configured, providersByAlias[index])
+				manager.SetClients(configured)
+				if err := manager.Refresh(context.Background()); err != nil {
+					t.Fatal(err)
+				}
+			}
+			snapshot := manager.Snapshot()
+			if len(snapshot.Models) != 1 || snapshot.Models[0].ID != "muse-spark-1.3-contributor" || snapshot.Models[0].Name != "Muse Spark 1.3 Contributor" || len(snapshot.Routes) != 3 {
+				t.Fatalf("aliases were not canonicalized independently of order: %#v", snapshot)
+			}
+			for _, route := range snapshot.Routes {
+				if route.LogicalModel != "muse-spark-1.3-contributor" {
+					t.Fatalf("route retained non-canonical logical model: %#v", route)
+				}
+			}
+		})
+	}
+}
+
+func TestLogicalModelCanonicalizesVersionsAndPreservesEmbeddedFree(t *testing.T) {
+	for input, expected := range map[string]string{
+		"anthropic/claude-opus-4.6":       "claude-opus-4.6",
+		"claude-opus-4-6":                 "claude-opus-4.6",
+		"meta/muse-spark-1.3-contributor": "muse-spark-1.3-contributor",
+		"muse-spark-1.3-contributor-free": "muse-spark-1.3-contributor",
+		"fish-audio/s2.1-pro-free:free":   "s2.1-pro-free",
+	} {
+		if got := logicalModel(input); got != expected {
+			t.Fatalf("logicalModel(%q) = %q, want %q", input, got, expected)
+		}
+	}
+}
+
+func TestMergeModelsIsOrderIndependent(t *testing.T) {
+	left := Model{ID: "m", Name: "M", ContextLength: 100, SupportedParameters: []string{"tools"}, Tags: []string{"z"}}
+	right := Model{ID: "m", Name: "M", Free: true, ContextLength: 200, MaxCompletionTokens: 50, SupportedParameters: []string{"response_format"}, Tags: []string{"a"}}
+	ab := mergeModels(left, right)
+	ba := mergeModels(right, left)
+	if fmt.Sprintf("%#v", ab) != fmt.Sprintf("%#v", ba) {
+		t.Fatalf("model merge depends on order: ab=%#v ba=%#v", ab, ba)
 	}
 }
 

@@ -3,6 +3,7 @@ package catalog
 import (
 	"context"
 	"fmt"
+	"regexp"
 	"sort"
 	"strings"
 	"sync"
@@ -121,14 +122,6 @@ func (m *Manager) Refresh(ctx context.Context) error {
 	if len(all) == 0 {
 		return fmt.Errorf("all provider catalog refreshes failed: %s", strings.Join(failures, "; "))
 	}
-	openRouterIDs := make([]string, 0)
-	for _, batch := range all {
-		if batch.provider == "openrouter" {
-			for _, model := range batch.models {
-				openRouterIDs = append(openRouterIDs, model.ID)
-			}
-		}
-	}
 	now := time.Now().UTC()
 	modelMap := map[string]Model{}
 	routes := make([]matcher.Route, 0)
@@ -145,18 +138,20 @@ func (m *Manager) Refresh(ctx context.Context) error {
 			}
 		}
 		for _, model := range batch.models {
-			logical := logicalModel(batch.provider, model.ID, openRouterIDs)
+			// A logical model is derived from the upstream ID itself, rather
+			// than from whichever provider happened to be scanned first. This
+			// lets a user add OpenCode, OpenCode Go, and OpenRouter in any order.
+			logical := logicalModel(model.ID)
 			// Providers classify free routes while parsing their native catalog
 			// metadata. Do not infer free from zero token prices here: media APIs
 			// commonly expose prompt/completion as zero while charging per image,
 			// audio minute, video, or job.
-			free := model.Free
-			if _, ok := modelMap[logical]; !ok {
-				modelMap[logical] = Model{ID: logical, Name: model.Name, Free: free, ContextLength: model.ContextLength, MaxCompletionTokens: model.MaxCompletionTokens, SupportedParameters: append([]string(nil), model.SupportedParameters...), InputModalities: append([]string(nil), model.InputModalities...), OutputModalities: append([]string(nil), model.OutputModalities...), Tags: append([]string(nil), model.Tags...)}
-			} else if free {
-				merged := modelMap[logical]
-				merged.Free = true
-				modelMap[logical] = merged
+			free := model.Free || modelIDHasFreeRouteQualifier(model.ID)
+			candidate := Model{ID: logical, Name: canonicalModelName(logical), Free: free, ContextLength: model.ContextLength, MaxCompletionTokens: model.MaxCompletionTokens, SupportedParameters: append([]string(nil), model.SupportedParameters...), InputModalities: append([]string(nil), model.InputModalities...), OutputModalities: append([]string(nil), model.OutputModalities...), Tags: append([]string(nil), model.Tags...)}
+			if existing, ok := modelMap[logical]; ok {
+				modelMap[logical] = mergeModels(existing, candidate)
+			} else {
+				modelMap[logical] = candidate
 			}
 			protocols := map[matcher.Protocol]bool{matcher.ProtocolChatCompletions: true, matcher.ProtocolResponses: true, matcher.ProtocolAnthropic: true}
 			parameters := make(map[string]bool, len(model.SupportedParameters))
@@ -240,15 +235,86 @@ func (m *Manager) ClientForRoute(route matcher.Route) providers.Client {
 	return m.Client(route.Provider)
 }
 
-func logicalModel(provider, id string, openRouterIDs []string) string {
-	if provider == "openrouter" {
-		return strings.TrimSuffix(id, ":free")
+var hyphenatedVersion = regexp.MustCompile(`([0-9]+)-([0-9]+)`)
+
+// logicalModel produces a provider-neutral, stable public slug. Namespaces
+// such as "meta/" identify the publisher's upstream naming scheme; they are
+// not part of the model a PayLessForAI client requests. Free is a route tier,
+// not a distinct model.
+func logicalModel(id string) string {
+	value := strings.ToLower(strings.TrimSpace(id))
+	// Catalogs occasionally use multiple path components. The final component
+	// is the provider's model alias; preceding components are namespace or
+	// publisher hints and deliberately do not affect identity.
+	if index := strings.LastIndexByte(value, '/'); index >= 0 {
+		value = value[index+1:]
 	}
-	for _, openRouterID := range openRouterIDs {
-		canonical := strings.TrimSuffix(openRouterID, ":free")
-		if canonical == id || strings.HasSuffix(canonical, "/"+id) {
-			return canonical
+	if strings.HasSuffix(value, ":free") {
+		value = strings.TrimSuffix(value, ":free")
+	} else if strings.HasSuffix(value, "-free") {
+		// OpenCode exposes free offers as bare `model-free` aliases. Do not
+		// repeatedly trim: `s2.1-pro-free:free` is a distinct base slug with
+		// an additional :free route qualifier.
+		value = strings.TrimSuffix(value, "-free")
+	}
+	value = strings.NewReplacer("_", "-", " ", "-").Replace(value)
+	value = strings.Trim(value, "-.")
+	for {
+		normalized := hyphenatedVersion.ReplaceAllString(value, "$1.$2")
+		if normalized == value {
+			break
+		}
+		value = normalized
+	}
+	return value
+}
+
+func modelIDHasFreeRouteQualifier(id string) bool {
+	value := strings.ToLower(strings.TrimSpace(id))
+	return strings.HasSuffix(value, ":free") || strings.HasSuffix(value, "-free")
+}
+
+func canonicalModelName(slug string) string {
+	words := strings.FieldsFunc(slug, func(r rune) bool { return r == '-' || r == '_' || r == ' ' })
+	initialisms := map[string]string{"api": "API", "glm": "GLM", "gpt": "GPT", "llm": "LLM"}
+	for index, word := range words {
+		if replacement, ok := initialisms[word]; ok {
+			words[index] = replacement
+			continue
+		}
+		if word != "" {
+			words[index] = strings.ToUpper(word[:1]) + word[1:]
 		}
 	}
-	return id
+	return strings.Join(words, " ")
+}
+
+func mergeModels(current, candidate Model) Model {
+	if current.Name == "" || (candidate.Name != "" && candidate.Name < current.Name) {
+		current.Name = candidate.Name
+	}
+	current.Free = current.Free || candidate.Free
+	current.ContextLength = max(current.ContextLength, candidate.ContextLength)
+	current.MaxCompletionTokens = max(current.MaxCompletionTokens, candidate.MaxCompletionTokens)
+	current.SupportedParameters = mergeStrings(current.SupportedParameters, candidate.SupportedParameters)
+	current.InputModalities = mergeStrings(current.InputModalities, candidate.InputModalities)
+	current.OutputModalities = mergeStrings(current.OutputModalities, candidate.OutputModalities)
+	current.Tags = mergeStrings(current.Tags, candidate.Tags)
+	return current
+}
+
+func mergeStrings(left, right []string) []string {
+	seen := make(map[string]struct{}, len(left)+len(right))
+	for _, value := range append(append([]string(nil), left...), right...) {
+		value = strings.ToLower(strings.TrimSpace(value))
+		if value != "" {
+			seen[value] = struct{}{}
+		}
+	}
+	result := make([]string, 0, len(seen))
+	for value := range seen {
+		result = append(result, value)
+	}
+	sort.Strings(result)
+	return result
 }

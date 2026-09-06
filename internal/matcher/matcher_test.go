@@ -41,6 +41,15 @@ func TestMatchPrefersFreeRouteAndAcceptsFreeVariantRequests(t *testing.T) {
 	}
 }
 
+func TestMatchAcceptsProviderQualifiedAndHyphenFreeAliases(t *testing.T) {
+	route := testRoute("route", "openrouter", 1, 1)
+	route.LogicalModel = "muse-spark-1.3-contributor"
+	result := New().Match(MatchInput{Request: MatchRequest{Protocol: ProtocolChatCompletions, LogicalModel: "meta/muse-spark-1.3-contributor-free", InputTokens: 1, ExpectedOutput: 1}, Routes: []Route{route}, Now: time.Unix(20, 0)})
+	if result.Error != nil || len(result.Ranked) != 1 {
+		t.Fatalf("provider alias was not accepted: %#v", result)
+	}
+}
+
 func TestMatchRejectsIncompatibleRoutesWithReasons(t *testing.T) {
 	route := testRoute("r1", "openrouter", 1, 1)
 	route.Capabilities.Protocols = map[Protocol]bool{ProtocolChatCompletions: true}

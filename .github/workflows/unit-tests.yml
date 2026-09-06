@@ -26,13 +26,13 @@ jobs:
           cache: true
 
       - name: Run tests with race detection
-        run: GOCACHE="$RUNNER_TEMP/go-cache" go test -race ./...
+        run: go test -race ./...
 
       - name: Run vet
-        run: GOCACHE="$RUNNER_TEMP/go-cache" go vet ./...
+        run: go vet ./...
 
       - name: Verify a static build
-        run: CGO_ENABLED=0 GOCACHE="$RUNNER_TEMP/go-cache" go build -o "$RUNNER_TEMP/paylessforai-app" ./cmd/paylessforai-app
+        run: CGO_ENABLED=0 go build -o "$RUNNER_TEMP/paylessforai-app" ./cmd/paylessforai-app
 
       - name: Check diff formatting
         run: git diff --check

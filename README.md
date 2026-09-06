@@ -58,6 +58,11 @@ failure restores the snapshot and previous binary; diagnostics remain visible
 in the Settings view. Development builds identify themselves as `dev` and do
 not auto-update.
 
+Published main-branch snapshots are named `main-DD.MM`, with `.2`, `.3`, and
+so on for additional snapshots published on the same day (for example,
+`main-06.09` and `main-06.09.2`). Release binaries use their GitHub release
+tag unchanged, such as `v0.1` or `v0.1.1`.
+
 ## Quick start
 
 PayLessForAI currently requires Go 1.26 to build:

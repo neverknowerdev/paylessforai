@@ -16,7 +16,7 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          gh api --paginate "/repos/${GITHUB_REPOSITORY}/releases?per_page=100" --jq '.[] | select(.prerelease == true and (.tag_name | test("^main-[0-9a-f]{40}$"))) | [.id, .tag_name, .created_at] | @tsv' | sort -k3 -r | tail -n +31 | while IFS=$'\t' read -r id tag created; do
+          gh api --paginate "/repos/${GITHUB_REPOSITORY}/releases?per_page=100" --jq '.[] | select(.prerelease == true and (.tag_name | test("^main-[0-9]{2}\\.[0-9]{2}(\\.[0-9]+)?$"))) | [.id, .tag_name, .created_at] | @tsv' | sort -k3 -r | tail -n +31 | while IFS=$'\t' read -r id tag created; do
             gh api --method DELETE "/repos/${GITHUB_REPOSITORY}/releases/${id}"
             gh api --method DELETE "/repos/${GITHUB_REPOSITORY}/git/refs/tags/${tag}" || true
           done

@@ -4,6 +4,10 @@ on:
   push:
     branches: [main]
 
+concurrency:
+  group: publish-main
+  cancel-in-progress: false
+
 permissions:
   contents: write
   id-token: write
@@ -36,8 +40,16 @@ jobs:
           OFFICIAL_BUILD: "true"
           UPDATE_PUBLIC_KEY: ${{ vars.UPDATE_PUBLIC_KEY }}
           UPDATE_SIGNING_PRIVATE_KEY: ${{ secrets.UPDATE_SIGNING_PRIVATE_KEY }}
-        run: bash scripts/build-release.sh "main-${GITHUB_SHA}" main "main-${GITHUB_SHA}" dist
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          snapshot_date="$(date -u +%d.%m)"
+          existing_tags="$(gh api --paginate "/repos/${GITHUB_REPOSITORY}/releases?per_page=100" --jq '.[].tag_name')"
+          version="$(printf '%s\n' "$existing_tags" | bash scripts/next-main-version.sh "$snapshot_date")"
+          echo "Publishing main snapshot as $version"
+          bash scripts/build-release.sh "$version" main "$version" dist
       - name: Publish immutable prerelease
         env:
           GH_TOKEN: ${{ github.token }}
-        run: gh release create "main-${GITHUB_SHA}" dist/assets/* dist/update-manifest.json dist/update-manifest.json.sig dist/checksums.txt --repo "$GITHUB_REPOSITORY" --target "$GITHUB_SHA" --prerelease --title "Main ${GITHUB_SHA}" --notes "Automated snapshot for ${GITHUB_SHA}."
+        run: |
+          version="$(jq -r .version dist/update-manifest.json)"
+          gh release create "$version" dist/assets/* dist/update-manifest.json dist/update-manifest.json.sig dist/checksums.txt --repo "$GITHUB_REPOSITORY" --target "$GITHUB_SHA" --prerelease --title "$version" --notes "Automated main snapshot for ${GITHUB_SHA}."

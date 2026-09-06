@@ -14,6 +14,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"sort"
 	"strings"
 	"sync"
 	"time"
@@ -361,6 +362,24 @@ type githubAsset struct {
 	Size int64  `json:"size"`
 }
 
+func eligibleRelease(release githubRelease, channel string) bool {
+	return !release.Draft && !(channel == "releases" && release.Prerelease) && !(channel == "main" && (!release.Prerelease || !strings.HasPrefix(release.TagName, "main-")))
+}
+
+func sortReleasesNewestFirst(releases []githubRelease) {
+	sort.SliceStable(releases, func(i, j int) bool {
+		left, leftErr := time.Parse(time.RFC3339Nano, releases[i].PublishedAt)
+		right, rightErr := time.Parse(time.RFC3339Nano, releases[j].PublishedAt)
+		if leftErr != nil {
+			return false
+		}
+		if rightErr != nil {
+			return true
+		}
+		return left.After(right)
+	})
+}
+
 func (s *Service) fetchManifest(ctx context.Context, baseURL, channel string) (Manifest, []byte, error) {
 	req, _ := http.NewRequestWithContext(ctx, http.MethodGet, baseURL, nil)
 	req.Header.Set("Accept", "application/vnd.github+json")
@@ -376,10 +395,15 @@ func (s *Service) fetchManifest(ctx context.Context, baseURL, channel string) (M
 	if err := json.NewDecoder(io.LimitReader(response.Body, 4<<20)).Decode(&releases); err != nil {
 		return Manifest{}, nil, err
 	}
+	eligible := make([]githubRelease, 0, len(releases))
 	for _, release := range releases {
-		if release.Draft || (channel == "releases" && release.Prerelease) || (channel == "main" && (!release.Prerelease || !strings.HasPrefix(release.TagName, "main-"))) {
+		if !eligibleRelease(release, channel) {
 			continue
 		}
+		eligible = append(eligible, release)
+	}
+	sortReleasesNewestFirst(eligible)
+	for _, release := range eligible {
 		var manifestAsset, signatureAsset githubAsset
 		for _, asset := range release.Assets {
 			if asset.Name == "update-manifest.json" {

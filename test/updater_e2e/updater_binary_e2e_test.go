@@ -20,6 +20,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"runtime"
+	"strconv"
 	"strings"
 	"sync/atomic"
 	"syscall"
@@ -39,32 +40,91 @@ type updateResponse struct {
 
 type githubMock struct {
 	server        *httptest.Server
-	artifactName  string
-	manifest      []byte
-	signature     []byte
-	artifact      []byte
+	releases      []githubReleaseFixture
 	releaseChecks atomic.Int32
+}
+
+type githubReleaseSpec struct {
+	tagName         string
+	publishedAt     string
+	version         string
+	commit          string
+	artifact        []byte
+	privateKey      ed25519.PrivateKey
+	trailingNewline bool
+}
+
+type githubReleaseFixture struct {
+	tagName      string
+	publishedAt  string
+	manifest     []byte
+	signature    []byte
+	artifact     []byte
+	artifactName string
 }
 
 func newGitHubMock(t *testing.T, artifact []byte, version, commit string, private ed25519.PrivateKey) *githubMock {
 	t.Helper()
-	mock := &githubMock{artifactName: "paylessforai-app.tar.gz", artifact: artifact}
+	return newGitHubMockWithSpecs(t, []githubReleaseSpec{{
+		tagName:     "v" + strings.TrimPrefix(version, "v"),
+		publishedAt: "2026-09-01T00:00:00Z",
+		version:     version,
+		commit:      commit,
+		artifact:    artifact,
+		privateKey:  private,
+	}})
+}
+
+func newGitHubMockWithSpecs(t *testing.T, specs []githubReleaseSpec) *githubMock {
+	t.Helper()
+	mock := &githubMock{}
 	serverHandler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/octet-stream")
 		var body []byte
 		switch r.URL.Path {
 		case "/releases":
 			mock.releaseChecks.Add(1)
-			body = []byte(fmt.Sprintf(`[{"tag_name":%q,"prerelease":false,"draft":false,"published_at":"2026-09-01T00:00:00Z","assets":[{"name":"update-manifest.json","browser_download_url":%q},{"name":"update-manifest.json.sig","browser_download_url":%q},{"name":%q,"browser_download_url":%q}]}]`, "v"+strings.TrimPrefix(version, "v"), mock.server.URL+"/assets/update-manifest.json", mock.server.URL+"/assets/update-manifest.json.sig", mock.artifactName, mock.server.URL+"/assets/"+mock.artifactName))
-		case "/assets/update-manifest.json":
-			body = mock.manifest
-		case "/assets/update-manifest.json.sig":
-			body = mock.signature
-		case "/assets/" + mock.artifactName:
-			body = mock.artifact
+			releases := make([]map[string]any, 0, len(mock.releases))
+			for index, release := range mock.releases {
+				prefix := fmt.Sprintf("%s/assets/%d", mock.server.URL, index)
+				releases = append(releases, map[string]any{
+					"tag_name": release.tagName, "prerelease": false, "draft": false, "published_at": release.publishedAt,
+					"assets": []map[string]string{
+						{"name": "update-manifest.json", "browser_download_url": prefix + "/manifest"},
+						{"name": "update-manifest.json.sig", "browser_download_url": prefix + "/signature"},
+						{"name": release.artifactName, "browser_download_url": prefix + "/artifact"},
+					},
+				})
+			}
+			var err error
+			body, err = json.Marshal(releases)
+			if err != nil {
+				http.Error(w, err.Error(), http.StatusInternalServerError)
+				return
+			}
 		default:
-			http.NotFound(w, r)
-			return
+			parts := strings.Split(strings.TrimPrefix(r.URL.Path, "/assets/"), "/")
+			if len(parts) != 2 {
+				http.NotFound(w, r)
+				return
+			}
+			index, err := strconv.Atoi(parts[0])
+			if err != nil || index < 0 || index >= len(mock.releases) {
+				http.NotFound(w, r)
+				return
+			}
+			release := mock.releases[index]
+			switch parts[1] {
+			case "manifest":
+				body = release.manifest
+			case "signature":
+				body = release.signature
+			case "artifact":
+				body = release.artifact
+			default:
+				http.NotFound(w, r)
+				return
+			}
 		}
 		w.WriteHeader(http.StatusOK)
 		_, _ = w.Write(body)
@@ -76,17 +136,23 @@ func newGitHubMock(t *testing.T, artifact []byte, version, commit string, privat
 	}
 	mock.server.Listener = listener
 	mock.server.Start()
-	manifest := updater.Manifest{Schema: 1, Channel: "releases", Version: version, Commit: commit, PublishedAt: "2026-09-01T00:00:00Z", MinSupervisorProtocol: 1}
-	manifest.SchemaCompatibility.Min = 1
-	manifest.SchemaCompatibility.Max = 999999
-	digest := sha256.Sum256(artifact)
-	manifest.Artifacts = []updater.Artifact{{OS: runtime.GOOS, Arch: runtime.GOARCH, URL: mock.server.URL + "/assets/" + mock.artifactName, Size: int64(len(artifact)), SHA256: hex.EncodeToString(digest[:]), Name: mock.artifactName}}
-	var marshalErr error
-	mock.manifest, marshalErr = manifest.CanonicalBytes()
-	if marshalErr != nil {
-		t.Fatal(marshalErr)
+	for index, spec := range specs {
+		artifactName := "paylessforai-app.tar.gz"
+		manifest := updater.Manifest{Schema: 1, Channel: "releases", Version: spec.version, Commit: spec.commit, PublishedAt: spec.publishedAt, MinSupervisorProtocol: 1}
+		manifest.SchemaCompatibility.Min = 1
+		manifest.SchemaCompatibility.Max = 999999
+		digest := sha256.Sum256(spec.artifact)
+		manifest.Artifacts = []updater.Artifact{{OS: runtime.GOOS, Arch: runtime.GOARCH, URL: fmt.Sprintf("%s/assets/%d/artifact", mock.server.URL, index), Size: int64(len(spec.artifact)), SHA256: hex.EncodeToString(digest[:]), Name: artifactName}}
+		contents, err := manifest.CanonicalBytes()
+		if err != nil {
+			t.Fatal(err)
+		}
+		published := contents
+		if spec.trailingNewline {
+			published = append(append([]byte(nil), contents...), '\n')
+		}
+		mock.releases = append(mock.releases, githubReleaseFixture{tagName: spec.tagName, publishedAt: spec.publishedAt, manifest: published, signature: ed25519.Sign(spec.privateKey, published), artifact: spec.artifact, artifactName: artifactName})
 	}
-	mock.signature = ed25519.Sign(private, mock.manifest)
 	t.Cleanup(mock.server.Close)
 	return mock
 }
@@ -171,6 +237,61 @@ func TestUpdaterBinaryE2E(t *testing.T) {
 				t.Fatalf("rollback was not durable: state=%#v", after)
 			}
 		})
+	}
+}
+
+func TestUpdaterBinaryE2ESelectsNewestRelease(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("the supervisor E2E harness uses Unix signals")
+	}
+	repoRoot := findRepoRoot(t)
+	root := t.TempDir()
+	public, private, err := ed25519.GenerateKey(rand.Reader)
+	if err != nil {
+		t.Fatal(err)
+	}
+	publicHex := hex.EncodeToString(public)
+	base := buildBinary(t, repoRoot, root, "v0.1.0-newest-e2e", "base-newest-e2e", publicHex)
+	candidate := buildBinary(t, repoRoot, root, "v0.1.1-newest-e2e", "newest-e2e", publicHex)
+	candidateArtifact := archiveBinary(t, candidate)
+	mock := newGitHubMockWithSpecs(t, []githubReleaseSpec{
+		{
+			tagName:         "v9.9.9-old-e2e",
+			publishedAt:     "2026-09-01T00:00:00Z",
+			version:         "v9.9.9-old-e2e",
+			commit:          "old-e2e",
+			artifact:        candidateArtifact,
+			privateKey:      private,
+			trailingNewline: true,
+		},
+		{
+			tagName:     "v0.1.1-newest-e2e",
+			publishedAt: "2026-09-02T00:00:00Z",
+			version:     "v0.1.1-newest-e2e",
+			commit:      "newest-e2e",
+			artifact:    candidateArtifact,
+			privateKey:  private,
+		},
+	})
+	dataDir := filepath.Join(root, "select-newest-release")
+	listenAddr := freeListenAddr(t)
+	cmd := exec.Command(base, "--data-dir", dataDir, "--listen", listenAddr)
+	cmd.Env = append(os.Environ(), "PAYLESSFORAI_UPDATE_BASE_URL="+mock.server.URL+"/releases")
+	cmd.Stdout = io.Discard
+	cmd.Stderr = io.Discard
+	if err := cmd.Start(); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { stopProcess(t, cmd) })
+	waitHTTP(t, "http://"+listenAddr+"/readyz", 20*time.Second)
+	result := waitForUpdate(t, "http://"+listenAddr+"/api/updates", func(payload updateResponse) bool {
+		return payload.State.Phase == updater.PhasePromoted
+	}, 30*time.Second)
+	if mock.releaseChecks.Load() == 0 {
+		t.Fatal("updater did not query the mock GitHub Releases API")
+	}
+	if result.State.CurrentVersion != "v0.1.1-newest-e2e" || len(result.History) != 1 || result.History[0].Commit != "newest-e2e" {
+		t.Fatalf("newest release was not promoted: state=%#v history=%#v", result.State, result.History)
 	}
 }
 

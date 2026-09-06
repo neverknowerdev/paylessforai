@@ -56,6 +56,15 @@ func (r *ProviderCredentialsRepository) Delete(ctx context.Context, id string) e
 	}
 	return row.Delete(ctx, r.exec)
 }
+
+func (r *ProviderCredentialsRepository) UpdateLabel(ctx context.Context, id, label string) error {
+	row, err := bobmodels.FindProviderCredential(ctx, r.exec, id)
+	if err != nil {
+		return err
+	}
+	now := time.Now().UTC().Format(time.RFC3339Nano)
+	return row.Update(ctx, r.exec, &bobmodels.ProviderCredentialSetter{Label: &label, UpdatedAt: &now})
+}
 func (r *ProviderCredentialsRepository) MarkLimited(ctx context.Context, provider string, next *time.Time, reason string) error {
 	var n *string
 	if next != nil {

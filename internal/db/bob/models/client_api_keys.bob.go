@@ -27,6 +27,7 @@ type ClientAPIKey struct {
 	CreatedAt  string           `db:"created_at" `
 	LastUsedAt sql.Null[string] `db:"last_used_at" `
 	RevokedAt  sql.Null[string] `db:"revoked_at" `
+	Harness    string           `db:"harness" `
 }
 
 // ClientAPIKeySlice is an alias for a slice of pointers to ClientAPIKey.
@@ -41,7 +42,7 @@ type ClientAPIKeysQuery = *sqlite.ViewQuery[*ClientAPIKey, ClientAPIKeySlice]
 
 func buildClientAPIKeyColumns(tableName string) clientAPIKeyColumns {
 	columnsExpr := expr.NewColumnsExpr(
-		"id", "label", "key_hash", "key_prefix", "created_at", "last_used_at", "revoked_at",
+		"id", "label", "key_hash", "key_prefix", "created_at", "last_used_at", "revoked_at", "harness",
 	)
 
 	if tableName != "" {
@@ -58,6 +59,7 @@ func buildClientAPIKeyColumns(tableName string) clientAPIKeyColumns {
 		CreatedAt:   buildClientAPIKeyColumn(tableName, "created_at"),
 		LastUsedAt:  buildClientAPIKeyColumn(tableName, "last_used_at"),
 		RevokedAt:   buildClientAPIKeyColumn(tableName, "revoked_at"),
+		Harness:     buildClientAPIKeyColumn(tableName, "harness"),
 	}
 }
 
@@ -71,6 +73,7 @@ type clientAPIKeyColumns struct {
 	CreatedAt  clientAPIKeyColumn
 	LastUsedAt clientAPIKeyColumn
 	RevokedAt  clientAPIKeyColumn
+	Harness    clientAPIKeyColumn
 }
 
 // Alias returns the current table alias for the columns set.
@@ -123,10 +126,11 @@ type ClientAPIKeySetter struct {
 	CreatedAt  *string           `db:"created_at" `
 	LastUsedAt *sql.Null[string] `db:"last_used_at" `
 	RevokedAt  *sql.Null[string] `db:"revoked_at" `
+	Harness    *string           `db:"harness" `
 }
 
 func (s ClientAPIKeySetter) SetColumns() []string {
-	vals := make([]string, 0, 7)
+	vals := make([]string, 0, 8)
 	if s.ID != nil {
 		vals = append(vals, "id")
 	}
@@ -147,6 +151,9 @@ func (s ClientAPIKeySetter) SetColumns() []string {
 	}
 	if s.RevokedAt != nil {
 		vals = append(vals, "revoked_at")
+	}
+	if s.Harness != nil {
+		vals = append(vals, "harness")
 	}
 	return vals
 }
@@ -208,6 +215,14 @@ func (s ClientAPIKeySetter) Overwrite(t *ClientAPIKey) {
 			}
 			v := s.RevokedAt
 			return *v
+		}()
+	}
+	if s.Harness != nil {
+		t.Harness = func() string {
+			if s.Harness == nil {
+				return *new(string)
+			}
+			return *s.Harness
 		}()
 	}
 }
@@ -314,6 +329,18 @@ func (s *ClientAPIKeySetter) Apply(q *dialect.InsertQuery) {
 					return *v
 				}()).WriteSQL(ctx, w, d, start)
 			}))
+		case "harness":
+			vals = append(vals, bob.ExpressionFunc(func(ctx context.Context, w io.StringWriter, d bob.Dialect, start int) ([]any, error) {
+				if s.Harness == nil {
+					return sqlite.Arg(nil).WriteSQL(ctx, w, d, start)
+				}
+				return sqlite.Arg(func() string {
+					if s.Harness == nil {
+						return *new(string)
+					}
+					return *s.Harness
+				}()).WriteSQL(ctx, w, d, start)
+			}))
 		}
 	}
 
@@ -325,7 +352,7 @@ func (s ClientAPIKeySetter) UpdateMod() bob.Mod[*dialect.UpdateQuery] {
 }
 
 func (s ClientAPIKeySetter) Expressions(prefix ...string) []bob.Expression {
-	exprs := make([]bob.Expression, 0, 7)
+	exprs := make([]bob.Expression, 0, 8)
 
 	if s.ID != nil {
 		exprs = append(exprs, expr.Join{Sep: " = ", Exprs: []bob.Expression{
@@ -376,6 +403,13 @@ func (s ClientAPIKeySetter) Expressions(prefix ...string) []bob.Expression {
 		}})
 	}
 
+	if s.Harness != nil {
+		exprs = append(exprs, expr.Join{Sep: " = ", Exprs: []bob.Expression{
+			sqlite.Quote(append(prefix, "harness")...),
+			sqlite.Arg(s.Harness),
+		}})
+	}
+
 	return exprs
 }
 
@@ -386,7 +420,7 @@ func clientAPIKeyScanMapper(ctx context.Context, cols []string) (scan.BeforeFunc
 		idx int
 		dst func(o *ClientAPIKey) any
 	}
-	targets := make([]target, 0, 7)
+	targets := make([]target, 0, 8)
 	for i, col := range cols {
 		switch col {
 		case "id":
@@ -403,6 +437,8 @@ func clientAPIKeyScanMapper(ctx context.Context, cols []string) (scan.BeforeFunc
 			targets = append(targets, target{i, func(o *ClientAPIKey) any { return &o.LastUsedAt }})
 		case "revoked_at":
 			targets = append(targets, target{i, func(o *ClientAPIKey) any { return &o.RevokedAt }})
+		case "harness":
+			targets = append(targets, target{i, func(o *ClientAPIKey) any { return &o.Harness }})
 		}
 	}
 

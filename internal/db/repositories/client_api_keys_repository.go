@@ -17,9 +17,13 @@ import (
 
 type ClientAPIKeysRepository struct{ bobRepository }
 
-func (r *ClientAPIKeysRepository) Create(ctx context.Context, label string) (ClientKey, string, error) {
+func (r *ClientAPIKeysRepository) Create(ctx context.Context, label string, harness ...string) (ClientKey, string, error) {
 	if strings.TrimSpace(label) == "" {
 		label = "default"
+	}
+	harnessName := "Other"
+	if len(harness) > 0 && strings.TrimSpace(harness[0]) != "" {
+		harnessName = strings.TrimSpace(harness[0])
 	}
 	b := make([]byte, 32)
 	if _, err := rand.Read(b); err != nil {
@@ -31,8 +35,8 @@ func (r *ClientAPIKeysRepository) Create(ctx context.Context, label string) (Cli
 	id := ids.New()
 	now := time.Now().UTC().Format(time.RFC3339Nano)
 	prefix := secret[:13]
-	_, err := bobmodels.ClientAPIKeys.Insert(&bobmodels.ClientAPIKeySetter{ID: &id, Label: &label, KeyHash: &hash, KeyPrefix: &prefix, CreatedAt: &now}).One(ctx, r.exec)
-	return ClientKey{ID: id, Label: label, Prefix: prefix, CreatedAt: now}, secret, err
+	_, err := bobmodels.ClientAPIKeys.Insert(&bobmodels.ClientAPIKeySetter{ID: &id, Label: &label, Harness: &harnessName, KeyHash: &hash, KeyPrefix: &prefix, CreatedAt: &now}).One(ctx, r.exec)
+	return ClientKey{ID: id, Label: label, Harness: harnessName, Prefix: prefix, CreatedAt: now}, secret, err
 }
 
 func (r *ClientAPIKeysRepository) Authenticate(ctx context.Context, secret string) (ClientKey, bool, error) {
@@ -44,7 +48,7 @@ func (r *ClientAPIKeysRepository) Authenticate(ctx context.Context, secret strin
 	if err != nil {
 		return ClientKey{}, false, err
 	}
-	key := ClientKey{ID: row.ID, Label: row.Label, Prefix: row.KeyPrefix, CreatedAt: row.CreatedAt, LastUsedAt: stringPointer(row.LastUsedAt), RevokedAt: stringPointer(row.RevokedAt)}
+	key := ClientKey{ID: row.ID, Label: row.Label, Harness: row.Harness, Prefix: row.KeyPrefix, CreatedAt: row.CreatedAt, LastUsedAt: stringPointer(row.LastUsedAt), RevokedAt: stringPointer(row.RevokedAt)}
 	if row.RevokedAt.Valid {
 		return key, false, nil
 	}
@@ -64,7 +68,7 @@ func (r *ClientAPIKeysRepository) List(ctx context.Context) ([]ClientKey, error)
 	}
 	out := make([]ClientKey, 0, len(rows))
 	for _, row := range rows {
-		out = append(out, ClientKey{ID: row.ID, Label: row.Label, Prefix: row.KeyPrefix, CreatedAt: row.CreatedAt, LastUsedAt: stringPointer(row.LastUsedAt), RevokedAt: stringPointer(row.RevokedAt)})
+		out = append(out, ClientKey{ID: row.ID, Label: row.Label, Harness: row.Harness, Prefix: row.KeyPrefix, CreatedAt: row.CreatedAt, LastUsedAt: stringPointer(row.LastUsedAt), RevokedAt: stringPointer(row.RevokedAt)})
 	}
 	return out, nil
 }

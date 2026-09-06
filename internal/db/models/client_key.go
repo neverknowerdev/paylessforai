@@ -3,6 +3,7 @@ package models
 type ClientKey struct {
 	ID         string  `json:"id"`
 	Label      string  `json:"label"`
+	Harness    string  `json:"harness"`
 	Prefix     string  `json:"prefix"`
 	CreatedAt  string  `json:"created_at"`
 	LastUsedAt *string `json:"last_used_at,omitempty"`

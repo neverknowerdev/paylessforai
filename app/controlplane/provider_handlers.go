@@ -34,7 +34,7 @@ func (s *Server) handleProviders(w http.ResponseWriter, r *http.Request) {
 	}
 	data := make([]map[string]string, 0)
 	for _, definition := range s.credentials.Registry.Definitions() {
-		data = append(data, map[string]string{"name": definition.Name, "display_name": definition.DisplayName, "default_base_url": definition.DefaultBaseURL})
+		data = append(data, map[string]string{"name": definition.Name, "display_name": definition.DisplayName, "default_base_url": definition.DefaultBaseURL, "default_access_mode": definition.DefaultAccessMode})
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"data": data})
 }
@@ -75,7 +75,7 @@ func (s *Server) createProviderCredential(w http.ResponseWriter, r *http.Request
 		SubscriptionCycleStart string                  `json:"subscription_cycle_start"`
 		SubscriptionCycleEnd   string                  `json:"subscription_cycle_end"`
 	}
-	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 4096)).Decode(&input); err != nil || strings.TrimSpace(input.Provider) == "" || strings.TrimSpace(input.APIKey) == "" {
+	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 4096)).Decode(&input); err != nil || strings.TrimSpace(input.Provider) == "" || strings.TrimSpace(input.Label) == "" || strings.TrimSpace(input.APIKey) == "" {
 		writeError(w, http.StatusBadRequest, "invalid_request", "provider, label, and api_key are required")
 		return
 	}
@@ -199,13 +199,33 @@ func (s *Server) findDuplicateProviderCredential(ctx context.Context, apiKey str
 }
 
 func (s *Server) handleProviderCredential(w http.ResponseWriter, r *http.Request) {
-	if s.db == nil || r.Method != http.MethodDelete {
-		writeError(w, http.StatusMethodNotAllowed, "method_not_allowed", "provider credential deletion only accepts DELETE")
+	if s.db == nil {
+		writeError(w, http.StatusServiceUnavailable, "database_unavailable", "database is unavailable")
 		return
 	}
 	id := strings.TrimPrefix(r.URL.Path, "/api/providers/credentials/")
 	if id == "" {
 		writeError(w, http.StatusBadRequest, "invalid_request", "provider credential ID is required")
+		return
+	}
+	if r.Method == http.MethodPut {
+		var input struct {
+			Label string `json:"label"`
+		}
+		if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 4096)).Decode(&input); err != nil || strings.TrimSpace(input.Label) == "" {
+			writeError(w, http.StatusBadRequest, "invalid_request", "label is required")
+			return
+		}
+		label := strings.TrimSpace(input.Label)
+		if err := s.db.ProviderCredentials.UpdateLabel(r.Context(), id, label); err != nil {
+			writeError(w, http.StatusInternalServerError, "credential_update_failed", "could not update provider credential")
+			return
+		}
+		writeJSON(w, http.StatusOK, map[string]any{"updated": true, "label": label})
+		return
+	}
+	if r.Method != http.MethodDelete {
+		writeError(w, http.StatusMethodNotAllowed, "method_not_allowed", "provider credential endpoint only accepts PUT and DELETE")
 		return
 	}
 	if err := s.db.ProviderCredentials.Delete(r.Context(), id); err != nil {

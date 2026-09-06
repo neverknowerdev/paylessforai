@@ -521,6 +521,12 @@ test('shows listener settings and saves a port for the next restart', async ({ p
   await expect(page.locator('#settings-updates-title')).toHaveText('Updates');
   await expect(page.locator('#update-current-version')).toHaveText('dev');
   await expect(page.locator('#sidebar-build-version')).toHaveText('dev');
+  const sidebarVersionLayout = await page.locator('#sidebar-build-version').evaluate((element) => {
+    element.textContent = `main-${'a'.repeat(64)}`;
+    const style = getComputedStyle(element);
+    return { overflow: style.overflow, textOverflow: style.textOverflow, whiteSpace: style.whiteSpace, truncates: element.scrollWidth > element.clientWidth };
+  });
+  expect(sidebarVersionLayout).toEqual({ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', truncates: true });
   await expect(page.locator('#version-history-modal')).toBeHidden();
   await expect(page.locator('[data-view-panel="settings"]')).not.toContainText('Previous versions');
   await page.getByRole('button', { name: /Version history/ }).click();

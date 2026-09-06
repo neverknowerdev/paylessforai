@@ -37,8 +37,9 @@ a { color: inherit; text-decoration: none; }
 .sidebar-note strong, .sidebar-note small { display: block; }
 .sidebar-note strong { font-size: 11px; }
 .sidebar-note small { margin-top: 4px; color: var(--faint); font-size: 10px; line-height: 1.35; }
-.sidebar-build-version { display: flex; justify-content: space-between; gap: 12px; padding: 0 12px; color: var(--faint); font-size: 10px; }
-.sidebar-build-version strong { color: var(--muted); font: 10px ui-monospace, SFMono-Regular, Menlo, monospace; }
+.sidebar-build-version { display: flex; align-items: baseline; justify-content: space-between; gap: 12px; min-width: 0; padding: 0 12px; color: var(--faint); font-size: 10px; }
+.sidebar-build-version span { flex: 0 0 auto; }
+.sidebar-build-version strong { min-width: 0; overflow: hidden; color: var(--muted); font: 10px ui-monospace, SFMono-Regular, Menlo, monospace; text-align: right; text-overflow: ellipsis; white-space: nowrap; }
 .pulse-dot, .status-dot { display: inline-block; flex: 0 0 auto; width: 7px; height: 7px; margin-top: 4px; border-radius: 50%; background: var(--lime); box-shadow: 0 0 12px var(--lime); }
 
 .content-shell { width: calc(100% - 254px); margin-left: 254px; }

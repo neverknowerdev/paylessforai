@@ -119,7 +119,10 @@
       const channel = $('#updates-channel'); if (channel) channel.value = settings.channel || 'releases';
       const interval = $('#updates-interval'); if (interval) interval.value = String(settings.interval_seconds || 3600);
       setText('#update-current-version', build.version || '—');
-      setText('#sidebar-build-version', build.version || '—');
+      const sidebarVersion = build.version || '—';
+      setText('#sidebar-build-version', sidebarVersion);
+      const sidebarVersionNode = $('#sidebar-build-version');
+      if (sidebarVersionNode) sidebarVersionNode.title = sidebarVersion;
       const details = $('#update-build-details'); if (details) { details.replaceChildren(); [['Channel', build.channel], ['Commit', build.commit], ['Platform', `${build.os || ''}/${build.arch || ''}`], ['Built', build.built_at]].forEach(([label, value]) => { const row = document.createElement('div'); row.className = 'detail-row'; const key = document.createElement('span'); key.textContent = label; const val = document.createElement('strong'); val.textContent = value || '—'; row.append(key, val); details.append(row); }); }
       const available = payload.available; const card = $('#update-available'); if (card) card.hidden = !available; if (available) setText('#update-available-version', `${available.version} · ${available.channel}`);
       const warning = $('#update-warning'); const failed = stateUpdate.phase === 'rolled_back' || stateUpdate.phase === 'needs_manual_recovery'; if (warning) { warning.hidden = !failed || Boolean(stateUpdate.warning_acknowledged_at); warning.textContent = failed ? `Update warning: ${stateUpdate.error || 'The new version could not start.'}` : ''; if (failed && !stateUpdate.warning_acknowledged_at) { const button = document.createElement('button'); button.className = 'quiet-button'; button.textContent = 'Dismiss'; button.onclick = async () => { await fetchJSON('/api/updates/warning/acknowledge', { method: 'POST' }); loadUpdates(); }; warning.append(button); } }

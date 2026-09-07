@@ -6,7 +6,7 @@ test('new models lead the table and the top-right count opens the catalog', asyn
     data: [
       route('a-existing', 'surplus', { name: 'A Existing', pricing: { input: 900000 }, price_available: true, usage_7d: 2 }),
       route('z-new', 'surplus', { is_new: true, added_at: '2026-09-07T08:30:00Z', free: true, tags: ['reasoning'], usage_7d: 7 }),
-      route('z-new', 'openrouter', { is_new: true, added_at: '2026-09-07T08:30:00Z', pricing: { input: 100000 }, price_available: true, discount_percent_bps: 8000, discount_input_percent_bps: 8000, discount_output_percent_bps: 7000, usage_7d: 1 }),
+      route('z-new', 'openrouter', { is_new: true, added_at: '2026-09-07T08:30:00Z', pricing: { input: 100000 }, price_available: true, discount_percent_bps: 8000, discount_input_percent_bps: 8000, discount_output_percent_bps: 7000, usage_7d: 120200 }),
     ],
     updated_at: '2026-09-05T10:00:00Z',
   } }));
@@ -19,6 +19,7 @@ test('new models lead the table and the top-right count opens the catalog', asyn
   await expect(page.locator('[data-view-panel="models"] thead')).not.toContainText('Provider');
   await expect(page.locator('#models-table-body tr').first().locator('.model-provider')).toHaveText('OpenRouter');
   await expect(page.locator('#models-table-body tr').first().locator('.model-id')).toHaveCount(0);
+  await expect(page.locator('#models-table-body tr').first().locator('.usage-cell')).toHaveText('120.2k reqs');
   await expect(page.locator('#models-table-body .new-model')).toHaveCount(0);
   await expect(page.locator('#models-table-body .new-model-row')).toHaveCount(2);
   const freeRow = page.locator('#models-table-body tr').filter({ has: page.locator('.price-free') });

@@ -2,10 +2,43 @@ package repositories_test
 
 import (
 	"testing"
+	"time"
 
 	"github.com/neverknowerdev/paylessforai/internal/db/models"
 	"github.com/neverknowerdev/paylessforai/internal/groups"
 )
+
+func TestStatsRepositoryRouteUsageSinceCountsFinalSelectedRoutes(t *testing.T) {
+	i := newIntegrationDB(t)
+	for _, request := range []struct {
+		id, provider, upstream string
+	}{
+		{id: "route-a-1", provider: "surplus", upstream: "model-a"},
+		{id: "route-a-2", provider: "surplus", upstream: "model-a"},
+		{id: "route-b-1", provider: "openrouter", upstream: "model-a"},
+		{id: "unrouted"},
+	} {
+		if err := i.repos.ProxyRequests.Create(i.ctx, request.id, "", "chat.completions", "model-a"); err != nil {
+			t.Fatal(err)
+		}
+		if request.provider != "" {
+			if err := i.repos.ProxyRequests.RecordAttemptRoute(i.ctx, request.id, 1, request.provider, request.upstream); err != nil {
+				t.Fatal(err)
+			}
+		}
+	}
+	old := time.Now().UTC().Add(-8 * 24 * time.Hour).Format(time.RFC3339Nano)
+	if _, err := i.repos.DB().ExecContext(i.ctx, `UPDATE proxy_requests SET received_at = ? WHERE id = ?`, old, "route-a-2"); err != nil {
+		t.Fatal(err)
+	}
+	usage, err := i.repos.Stats.RouteUsageSince(i.ctx, time.Now().UTC().Add(-7*24*time.Hour))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if usage["surplus\x00model-a"] != 1 || usage["openrouter\x00model-a"] != 1 || len(usage) != 2 {
+		t.Fatalf("unexpected route usage: %#v", usage)
+	}
+}
 
 func TestStatsRepositoryIntegrationAggregatesBobRows(t *testing.T) {
 	i := newIntegrationDB(t)

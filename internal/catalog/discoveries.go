@@ -10,7 +10,7 @@ import (
 )
 
 // NewModelWindow is how long discovered models are highlighted in the catalog.
-const NewModelWindow = 7 * 24 * time.Hour
+const NewModelWindow = 24 * time.Hour
 const discoveryStateKey = "catalog.discovery.v1"
 
 type Addition struct {

@@ -16,10 +16,12 @@ test('new models lead the table and the top-right count opens the catalog', asyn
   await page.locator('#topbar-models').click();
   await expect(page.locator('[data-view-panel="models"]')).toBeVisible();
   await expect(page.locator('#models-table-body tr').first()).toContainText('z-new');
-  await expect(page.locator('#models-table-body tr').first().locator('.new-model')).toHaveText('NEW');
-  const freeRow = page.locator('#models-table-body tr').filter({ has: page.locator('.badge.free') });
+  await expect(page.locator('#models-table-body .new-model')).toHaveCount(0);
+  await expect(page.locator('#models-table-body .new-model-row')).toHaveCount(2);
+  const freeRow = page.locator('#models-table-body tr').filter({ has: page.locator('.price-free') });
   await expect(freeRow).toHaveCount(1);
-  await expect(freeRow.locator('.badge.free')).toHaveText('FREE');
+  await expect(freeRow.locator('.price-free')).toHaveText('FREE');
+  await expect(freeRow.locator('td').nth(0)).not.toContainText('FREE');
   await expect(freeRow.locator('td').nth(1)).not.toContainText('FREE');
   await expect(freeRow.locator('.tag-cell')).toContainText('free');
   await expect(page.locator('[data-view-panel="models"] thead')).toContainText('Pricing');

@@ -1,0 +1,9 @@
+CREATE TABLE IF NOT EXISTS manual_score_signals (
+  id BIGSERIAL PRIMARY KEY,
+  key TEXT NOT NULL UNIQUE,
+  display_name TEXT NOT NULL,
+  description TEXT NOT NULL DEFAULT '',
+  min_value NUMERIC(20,8) NOT NULL DEFAULT 0,
+  max_value NUMERIC(20,8) NOT NULL DEFAULT 100,
+  active BOOLEAN NOT NULL DEFAULT true
+);

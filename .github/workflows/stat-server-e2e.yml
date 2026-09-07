@@ -1,0 +1,86 @@
+name: Stat-server browser E2E
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened]
+  push:
+    branches: [main, 'codex/**']
+
+permissions:
+  contents: read
+
+jobs:
+  playwright:
+    name: Stat-server Playwright E2E
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_DB: stat_server_e2e
+          POSTGRES_USER: stat_server
+          POSTGRES_PASSWORD: stat_server
+        ports: ['5432:5432']
+        options: >-
+          --health-cmd "pg_isready -U stat_server -d stat_server_e2e"
+          --health-interval 5s --health-timeout 5s --health-retries 12
+    env:
+      STAT_SERVER_DATABASE_URL: postgres://stat_server:stat_server@127.0.0.1:5432/stat_server_e2e?sslmode=disable
+      STAT_SERVER_BOOTSTRAP_ADMIN_EMAIL: admin@localhost
+      STAT_SERVER_BOOTSTRAP_ADMIN_PASSWORD: e2e-password
+      STAT_SERVER_SKIP_INITIAL_REFRESH: 'true'
+      STAT_SERVER_REFRESH_INTERVAL: 1h
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+      - name: Build stat-server
+        run: CGO_ENABLED=0 go build -o "$RUNNER_TEMP/stat-server" ./cmd/stat-server
+      - name: Start stat-server
+        run: |
+          "$RUNNER_TEMP/stat-server" > "$RUNNER_TEMP/stat-server.log" 2>&1 &
+          echo $! > "$RUNNER_TEMP/stat-server.pid"
+          for attempt in $(seq 1 30); do
+            curl --fail --silent http://127.0.0.1:9580/healthz && exit 0
+            sleep 1
+          done
+          cat "$RUNNER_TEMP/stat-server.log"
+          exit 1
+      - name: Seed browser fixture
+        run: |
+          PGPASSWORD=stat_server psql -h 127.0.0.1 -p 5432 -U stat_server -d stat_server_e2e -v ON_ERROR_STOP=1 <<'SQL'
+          INSERT INTO models (canonical_slug, display_name, normalized_name, creator, family, revision, description, context_length, source_key, source_id, metadata)
+          VALUES ('fixture-deepseek-v4-pro', 'DeepSeek V4 Pro', 'deepseek v4 pro', 'DeepSeek', 'DeepSeek', '0423', 'Browser fixture model', 128000, 'fixture', 'fixture-deepseek-v4-pro', '{}');
+          INSERT INTO model_aliases (model_id, alias, normalized_alias, source_key, evidence)
+          SELECT id, 'deepseek-v4-pro', 'deepseek v4 pro', 'fixture', '{"fixture":true}' FROM models WHERE source_key='fixture' AND source_id='fixture-deepseek-v4-pro';
+          INSERT INTO provider_offerings (model_id, provider, provider_model_id, input_usd_per_million, output_usd_per_million, official_input_usd_per_million, official_output_usd_per_million, official_price_source, official_price_source_url)
+          SELECT id, 'OpenRouter', 'deepseek/deepseek-v4-pro', 1.25, 4.50, 1.25, 4.50, 'OpenRouter', 'https://openrouter.ai/api/v1/models' FROM models WHERE source_key='fixture' AND source_id='fixture-deepseek-v4-pro';
+          SQL
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Install E2E dependencies
+        working-directory: test/stat-server-e2e
+        run: npm install --no-audit --no-fund
+      - name: Install Chromium
+        working-directory: test/stat-server-e2e
+        run: npx playwright install --with-deps chromium
+      - name: Run browser tests
+        working-directory: test/stat-server-e2e
+        run: npm test
+      - name: Upload Playwright diagnostics
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: stat-server-playwright-diagnostics
+          if-no-files-found: ignore
+          path: |
+            test/stat-server-e2e/test-results
+            test/stat-server-e2e/playwright-report
+            ${{ runner.temp }}/stat-server.log
+      - name: Stop stat-server
+        if: always()
+        run: kill "$(cat "$RUNNER_TEMP/stat-server.pid")" || true

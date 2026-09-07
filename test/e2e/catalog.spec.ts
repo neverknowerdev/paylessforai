@@ -20,6 +20,7 @@ test('new models lead the table and the top-right count opens the catalog', asyn
   await expect(page.locator('#models-table-body tr').first().locator('.model-provider')).toHaveText('OpenRouter');
   await expect(page.locator('#models-table-body tr').first().locator('.model-id')).toHaveCount(0);
   await expect(page.locator('#models-table-body tr').first().locator('.usage-cell')).toHaveText('120.2k reqs');
+  await expect(page.locator('#models-table-body tr').first().locator('.discount-cell')).toHaveText('80%');
   await expect(page.locator('#models-table-body .new-model')).toHaveCount(0);
   await expect(page.locator('#models-table-body .new-model-row')).toHaveCount(2);
   const freeRow = page.locator('#models-table-body tr').filter({ has: page.locator('.price-free') });

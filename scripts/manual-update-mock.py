@@ -9,6 +9,7 @@ import signal
 import subprocess
 import tempfile
 import threading
+import time
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 
@@ -58,7 +59,23 @@ def main():
     parser.add_argument("--commit", default="mock-commit")
     parser.add_argument("--os", default="darwin")
     parser.add_argument("--arch", default="arm64")
+    parser.add_argument(
+        "--chunk-size",
+        type=int,
+        default=0,
+        help="artifact response chunk size in bytes (0 keeps the normal single-write behavior)",
+    )
+    parser.add_argument(
+        "--chunk-delay-ms",
+        type=int,
+        default=0,
+        help="delay between artifact response chunks in milliseconds",
+    )
     args = parser.parse_args()
+    if args.chunk_size < 0:
+        parser.error("--chunk-size must be zero or greater")
+    if args.chunk_delay_ms < 0:
+        parser.error("--chunk-delay-ms must be zero or greater")
 
     artifact_path = args.artifact.resolve()
     manifest, artifact = build_manifest(args, artifact_path, args.port)
@@ -78,12 +95,16 @@ def main():
         def do_GET(self):
             if self.path == "/releases":
                 body = json.dumps(releases, separators=(",", ":")).encode("utf-8")
+                stream_artifact = False
             elif self.path == "/assets/update-manifest.json":
                 body = manifest
+                stream_artifact = False
             elif self.path == "/assets/update-manifest.json.sig":
                 body = signature
+                stream_artifact = False
             elif self.path == f"/assets/{artifact_path.name}":
                 body = artifact
+                stream_artifact = True
             else:
                 self.send_error(404)
                 return
@@ -91,7 +112,22 @@ def main():
             self.send_header("Content-Type", "application/octet-stream")
             self.send_header("Content-Length", str(len(body)))
             self.end_headers()
-            self.wfile.write(body)
+            try:
+                chunk_size = args.chunk_size if stream_artifact else 0
+                if chunk_size <= 0:
+                    self.wfile.write(body)
+                    self.wfile.flush()
+                    return
+                delay = args.chunk_delay_ms / 1000
+                for offset in range(0, len(body), chunk_size):
+                    self.wfile.write(body[offset:offset + chunk_size])
+                    self.wfile.flush()
+                    if delay and offset + chunk_size < len(body):
+                        time.sleep(delay)
+            except (BrokenPipeError, ConnectionResetError):
+                # A browser may cancel a download when navigating away or
+                # after the updater has completed. The mock should stay up.
+                return
 
     server = ThreadingHTTPServer(("127.0.0.1", args.port), Handler)
     print(f"READY {args.port}", flush=True)

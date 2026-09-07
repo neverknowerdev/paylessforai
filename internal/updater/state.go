@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 	"sync"
 	"time"
 )
@@ -29,6 +30,7 @@ const (
 	PhaseRollingBack    Phase = "rolling_back"
 	PhaseRolledBack     Phase = "rolled_back"
 	PhaseManualRecovery Phase = "needs_manual_recovery"
+	PhaseFailed         Phase = "failed"
 )
 
 type State struct {
@@ -49,7 +51,21 @@ type State struct {
 	LastSuccessAt         string `json:"last_success_at,omitempty"`
 	WarningAcknowledgedAt string `json:"warning_acknowledged_at,omitempty"`
 	QuarantinedVersion    string `json:"quarantined_version,omitempty"`
+	DownloadBytes         int64  `json:"download_bytes,omitempty"`
+	DownloadTotalBytes    int64  `json:"download_total_bytes,omitempty"`
+	PhaseProgress         int    `json:"phase_progress,omitempty"`
+	OverallProgress       int    `json:"overall_progress,omitempty"`
 	UpdatedAt             string `json:"updated_at"`
+}
+
+// LogEntry is an append-only, user-visible updater lifecycle message. Logs are
+// kept separately from state.json so progress updates do not rewrite the whole
+// console history and a supervisor transition cannot accidentally discard it.
+type LogEntry struct {
+	OperationID string `json:"operation_id"`
+	At          string `json:"at"`
+	Phase       Phase  `json:"phase"`
+	Message     string `json:"message"`
 }
 
 type HistoryRecord struct {
@@ -152,6 +168,53 @@ func (j *Journal) AppendHistory(record HistoryRecord) error {
 		return err
 	}
 	return file.Sync()
+}
+
+func (j *Journal) AppendLog(operationID string, phase Phase, message string) error {
+	if strings.TrimSpace(message) == "" {
+		return nil
+	}
+	j.mu.Lock()
+	defer j.mu.Unlock()
+	entry := LogEntry{OperationID: operationID, At: time.Now().UTC().Format(time.RFC3339Nano), Phase: phase, Message: message}
+	data, err := json.Marshal(entry)
+	if err != nil {
+		return err
+	}
+	file, err := os.OpenFile(filepath.Join(j.root, "logs.jsonl"), os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0o600)
+	if err != nil {
+		return err
+	}
+	defer file.Close()
+	if _, err := file.Write(append(data, '\n')); err != nil {
+		return err
+	}
+	return file.Sync()
+}
+
+func (j *Journal) Logs(operationID string, limit int) ([]LogEntry, error) {
+	if limit <= 0 || limit > 500 {
+		limit = 200
+	}
+	data, err := os.ReadFile(filepath.Join(j.root, "logs.jsonl"))
+	if errors.Is(err, os.ErrNotExist) {
+		return []LogEntry{}, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	lines := splitLines(data)
+	entries := make([]LogEntry, 0, len(lines))
+	for _, line := range lines {
+		var entry LogEntry
+		if json.Unmarshal(line, &entry) == nil && strings.TrimSpace(entry.Message) != "" && entry.OperationID == operationID {
+			entries = append(entries, entry)
+		}
+	}
+	if len(entries) > limit {
+		entries = entries[len(entries)-limit:]
+	}
+	return entries, nil
 }
 
 func (j *Journal) History(limit int) ([]HistoryRecord, error) {

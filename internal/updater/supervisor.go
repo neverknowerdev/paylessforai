@@ -13,6 +13,7 @@ import (
 	"path/filepath"
 	"runtime"
 	"strings"
+	"sync"
 	"syscall"
 	"time"
 
@@ -241,27 +242,35 @@ func promoteCandidate(ctx context.Context, dataDir string, journal *Journal, pre
 	dbPath := filepath.Join(dataDir, "paylessforai.db")
 	backupDir := filepath.Join(dataDir, "updater", "backups", request.OperationID)
 	backupPath := filepath.Join(backupDir, "paylessforai.db")
-	state := State{OperationID: request.OperationID, Phase: PhaseSnapshotting, FailedPhase: PhaseSnapshotting, CurrentPath: previousPath, CurrentVersion: buildinfo.Current().Version, PreviousPath: previousPath, CandidatePath: request.CandidatePath, CandidateVersion: request.CandidateVersion, CandidateCommit: request.Commit, CandidateChannel: request.Channel, BackupPath: backupPath}
+	previousState := journal.Snapshot()
+	state := State{OperationID: request.OperationID, Phase: PhaseSnapshotting, FailedPhase: PhaseSnapshotting, CurrentPath: previousPath, CurrentVersion: buildinfo.Current().Version, PreviousPath: previousPath, CandidatePath: request.CandidatePath, CandidateVersion: request.CandidateVersion, CandidateCommit: request.Commit, CandidateChannel: request.Channel, BackupPath: backupPath, DownloadBytes: previousState.DownloadBytes, DownloadTotalBytes: previousState.DownloadTotalBytes, PhaseProgress: 0, OverallProgress: 68}
 	if err := journal.Transition(state); err != nil {
 		return err
 	}
+	_ = journal.AppendLog(state.OperationID, PhaseSnapshotting, "Snapshotting current database")
 	if err := copyDatabase(dbPath, backupPath); err != nil {
 		return rollbackFailure(journal, state, fmt.Errorf("snapshot database: %w", err))
 	}
 	if err := verifyDatabase(backupPath); err != nil {
 		return rollbackFailure(journal, state, fmt.Errorf("verify database snapshot: %w", err))
 	}
+	_ = journal.AppendLog(state.OperationID, PhaseSnapshotting, "Database snapshot verified")
 	state.FailedPhase = PhasePreflighting
-	if err := journal.Transition(State{OperationID: request.OperationID, Phase: PhasePreflighting, FailedPhase: PhasePreflighting, CurrentPath: previousPath, PreviousPath: previousPath, CandidatePath: request.CandidatePath, CandidateVersion: request.CandidateVersion, CandidateCommit: request.Commit, CandidateChannel: request.Channel, BackupPath: backupPath}); err != nil {
+	state.Phase, state.PhaseProgress, state.OverallProgress = PhasePreflighting, 0, 76
+	if err := journal.Transition(state); err != nil {
 		return err
 	}
-	if err := preflightCandidate(ctx, dataDir, backupPath, request.CandidatePath, args); err != nil {
+	_ = journal.AppendLog(state.OperationID, PhasePreflighting, "Running candidate preflight")
+	if err := preflightCandidate(ctx, dataDir, backupPath, request.CandidatePath, args, journal, request.OperationID); err != nil {
 		return rollbackFailure(journal, state, fmt.Errorf("candidate preflight: %w", err))
 	}
+	_ = journal.AppendLog(state.OperationID, PhasePreflighting, "Candidate preflight succeeded")
 	state.FailedPhase = PhaseMigrating
-	if err := journal.Transition(State{OperationID: request.OperationID, Phase: PhaseMigrating, FailedPhase: PhaseMigrating, CurrentPath: previousPath, PreviousPath: previousPath, CandidatePath: request.CandidatePath, CandidateVersion: request.CandidateVersion, CandidateCommit: request.Commit, CandidateChannel: request.Channel, BackupPath: backupPath}); err != nil {
+	state.Phase, state.PhaseProgress, state.OverallProgress = PhaseMigrating, 0, 84
+	if err := journal.Transition(state); err != nil {
 		return err
 	}
+	_ = journal.AppendLog(state.OperationID, PhaseMigrating, "Starting candidate migration")
 	token := randomID()
 	readyPath := filepath.Join(dataDir, "updater", "ready-"+request.OperationID)
 	gatePath := filepath.Join(dataDir, "updater", "gate-"+request.OperationID)
@@ -270,13 +279,17 @@ func promoteCandidate(ctx context.Context, dataDir string, journal *Journal, pre
 	candidateArgs := append([]string{"--internal-serve"}, args...)
 	candidate := exec.CommandContext(ctx, request.CandidatePath, candidateArgs...)
 	candidate.Env = childEnv("PAYLESSFORAI_SUPERVISED=1", "PAYLESSFORAI_CANDIDATE=1", "PAYLESSFORAI_READY_TOKEN="+token, "PAYLESSFORAI_READY_PATH="+readyPath, "PAYLESSFORAI_GATE_PATH="+gatePath)
+	candidate.Stdout = &candidateLogWriter{journal: journal, operationID: request.OperationID, phase: PhaseStarting, stream: "stdout"}
+	candidate.Stderr = &candidateLogWriter{journal: journal, operationID: request.OperationID, phase: PhaseStarting, stream: "stderr"}
 	if err := candidate.Start(); err != nil {
 		return rollbackCandidate(dataDir, journal, state, candidate, fmt.Errorf("start candidate: %w", err))
 	}
 	state.FailedPhase = PhaseStarting
+	state.Phase, state.PhaseProgress, state.OverallProgress = PhaseStarting, 0, 91
 	candidateWait := make(chan error, 1)
 	go func() { candidateWait <- candidate.Wait() }()
-	_ = journal.Transition(State{OperationID: request.OperationID, Phase: PhaseStarting, FailedPhase: PhaseStarting, CurrentPath: previousPath, PreviousPath: previousPath, CandidatePath: request.CandidatePath, CandidateVersion: request.CandidateVersion, CandidateCommit: request.Commit, CandidateChannel: request.Channel, BackupPath: backupPath})
+	_ = journal.Transition(state)
+	_ = journal.AppendLog(state.OperationID, PhaseStarting, "Waiting for candidate readiness")
 	readyErr, candidateExited := waitReady(ctx, readyPath, token, candidateWait, 30*time.Second)
 	if readyErr != nil {
 		_ = candidate.Process.Kill()
@@ -288,7 +301,9 @@ func promoteCandidate(ctx context.Context, dataDir string, journal *Journal, pre
 		return rollbackCandidate(dataDir, journal, state, nil, readyErr)
 	}
 	state.FailedPhase = PhaseStabilizing
-	_ = journal.Transition(State{OperationID: request.OperationID, Phase: PhaseStabilizing, FailedPhase: PhaseStabilizing, CurrentPath: previousPath, PreviousPath: previousPath, CandidatePath: request.CandidatePath, CandidateVersion: request.CandidateVersion, CandidateCommit: request.Commit, CandidateChannel: request.Channel, BackupPath: backupPath})
+	state.Phase, state.PhaseProgress, state.OverallProgress = PhaseStabilizing, 0, 96
+	_ = journal.Transition(state)
+	_ = journal.AppendLog(state.OperationID, PhaseStabilizing, "Candidate is ready; stabilizing service")
 	wait := candidateWait
 	select {
 	case <-time.After(3 * time.Second):
@@ -299,9 +314,12 @@ func promoteCandidate(ctx context.Context, dataDir string, journal *Journal, pre
 		<-candidateWait
 		return rollbackCandidate(dataDir, journal, state, nil, errors.New("update canceled"))
 	}
-	if err := journal.Transition(State{OperationID: request.OperationID, Phase: PhasePromoted, CurrentPath: request.CandidatePath, CurrentVersion: request.CandidateVersion, PreviousPath: previousPath, CandidatePath: request.CandidatePath, CandidateVersion: request.CandidateVersion, CandidateCommit: request.Commit, CandidateChannel: request.Channel, BackupPath: backupPath, LastSuccessAt: time.Now().UTC().Format(time.RFC3339Nano)}); err != nil {
+	state.Phase, state.PhaseProgress, state.OverallProgress = PhasePromoted, 100, 100
+	state.CurrentPath, state.CurrentVersion, state.LastSuccessAt = request.CandidatePath, request.CandidateVersion, time.Now().UTC().Format(time.RFC3339Nano)
+	if err := journal.Transition(state); err != nil {
 		return err
 	}
+	_ = journal.AppendLog(state.OperationID, PhasePromoted, "Update promoted successfully")
 	_ = journal.AppendHistory(HistoryRecord{OperationID: request.OperationID, Version: request.CandidateVersion, Commit: request.Commit, Channel: request.Channel, Outcome: "promoted", Phase: PhasePromoted, At: time.Now().UTC().Format(time.RFC3339Nano)})
 	_ = MarkReady(gatePath, token)
 	_ = os.Remove(filepath.Join(dataDir, "updater", "request.json"))
@@ -347,7 +365,7 @@ func waitReady(ctx context.Context, path, token string, candidateWait <-chan err
 	}
 }
 
-func preflightCandidate(ctx context.Context, dataDir, backupPath, candidatePath string, args []string) error {
+func preflightCandidate(ctx context.Context, dataDir, backupPath, candidatePath string, args []string, journal *Journal, operationID string) error {
 	tmp, err := os.MkdirTemp(filepath.Join(dataDir, "updater"), "preflight-")
 	if err != nil {
 		return err
@@ -358,10 +376,42 @@ func preflightCandidate(ctx context.Context, dataDir, backupPath, candidatePath 
 	}
 	preflightArgs := replaceDataDir(args, tmp)
 	command := exec.CommandContext(ctx, candidatePath, append([]string{"--internal-preflight"}, preflightArgs...)...)
-	if err := command.Run(); err != nil {
+	output, err := command.CombinedOutput()
+	if len(output) > 0 {
+		// Candidate output is useful for diagnosing a migration failure, but cap
+		// it so a noisy candidate cannot grow the durable updater log forever.
+		message := strings.TrimSpace(string(output))
+		if len(message) > 4000 {
+			message = message[:4000] + "…"
+		}
+		_ = journal.AppendLog(operationID, PhasePreflighting, "Candidate preflight output: "+message)
+	}
+	if err != nil {
 		return err
 	}
 	return nil
+}
+
+type candidateLogWriter struct {
+	mu          sync.Mutex
+	journal     *Journal
+	operationID string
+	phase       Phase
+	stream      string
+}
+
+func (w *candidateLogWriter) Write(data []byte) (int, error) {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	message := strings.TrimSpace(string(data))
+	if message == "" {
+		return len(data), nil
+	}
+	if len(message) > 4000 {
+		message = message[:4000] + "…"
+	}
+	_ = w.journal.AppendLog(w.operationID, w.phase, "Candidate "+w.stream+": "+message)
+	return len(data), nil
 }
 
 func replaceDataDir(args []string, dataDir string) []string {
@@ -397,7 +447,9 @@ func rollbackCandidate(dataDir string, journal *Journal, state State, candidate 
 }
 
 func rollbackFailure(journal *Journal, state State, cause error) error {
+	_ = journal.AppendLog(state.OperationID, state.FailedPhase, "Update failed before supervisor handoff")
 	state.Phase = PhaseRolledBack
+	state.PhaseProgress, state.OverallProgress = 100, 100
 	state.Error = cause.Error()
 	if state.FailedPhase == "" {
 		state.FailedPhase = PhaseSnapshotting
@@ -413,20 +465,28 @@ func rollbackFailureWithRestore(dataDir string, journal *Journal, state State, c
 	if failedPhase == "" {
 		failedPhase = PhaseStarting
 	}
-	_ = journal.Transition(State{OperationID: state.OperationID, Phase: PhaseRollingBack, FailedPhase: failedPhase, CurrentPath: state.PreviousPath, PreviousPath: state.PreviousPath, CandidatePath: state.CandidatePath, CandidateVersion: state.CandidateVersion, CandidateCommit: state.CandidateCommit, CandidateChannel: state.CandidateChannel, BackupPath: state.BackupPath, Error: cause.Error()})
+	state.Phase, state.FailedPhase, state.OverallProgress = PhaseRollingBack, failedPhase, 98
+	state.CurrentPath, state.Error = state.PreviousPath, cause.Error()
+	_ = journal.Transition(state)
+	_ = journal.AppendLog(state.OperationID, PhaseRollingBack, "Rolling back update after failure")
 	if candidate != nil && candidate.Process != nil {
 		_ = candidate.Process.Kill()
 		_, _ = candidate.Process.Wait()
 	}
 	if err := restoreDatabase(filepath.Join(dataDir, "paylessforai.db"), state.BackupPath); err != nil {
-		_ = journal.Transition(State{OperationID: state.OperationID, Phase: PhaseManualRecovery, FailedPhase: PhaseRollingBack, CurrentPath: state.PreviousPath, PreviousPath: state.PreviousPath, CandidatePath: state.CandidatePath, CandidateVersion: state.CandidateVersion, CandidateCommit: state.CandidateCommit, CandidateChannel: state.CandidateChannel, BackupPath: state.BackupPath, Error: fmt.Sprintf("%v; restore failed: %v", cause, err)})
+		state.Phase, state.FailedPhase, state.Error = PhaseManualRecovery, PhaseRollingBack, fmt.Sprintf("%v; restore failed: %v", cause, err)
+		state.PhaseProgress, state.OverallProgress = 100, 100
+		_ = journal.Transition(state)
+		_ = journal.AppendLog(state.OperationID, PhaseManualRecovery, "Automatic rollback failed; manual recovery is required")
 		return fmt.Errorf("%w: %v", errManualRecovery, err)
 	}
 	state.Phase = PhaseRolledBack
+	state.PhaseProgress, state.OverallProgress = 100, 100
 	state.Error = cause.Error()
 	state.FailedPhase = failedPhase
 	state.QuarantinedVersion = state.CandidateVersion
 	_ = journal.Transition(state)
+	_ = journal.AppendLog(state.OperationID, PhaseRolledBack, "Update rolled back; previous version restored")
 	_ = journal.AppendHistory(HistoryRecord{OperationID: state.OperationID, Version: state.CandidateVersion, Commit: state.CandidateCommit, Channel: state.CandidateChannel, Outcome: "rolled_back", Phase: state.FailedPhase, Error: state.Error, At: time.Now().UTC().Format(time.RFC3339Nano)})
 	_ = os.Remove(filepath.Join(dataDir, "updater", "request.json"))
 	return cause

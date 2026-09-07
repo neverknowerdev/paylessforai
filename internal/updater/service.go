@@ -38,6 +38,7 @@ type Snapshot struct {
 	State     State           `json:"state"`
 	Available *Manifest       `json:"available,omitempty"`
 	History   []HistoryRecord `json:"history"`
+	Logs      []LogEntry      `json:"logs"`
 }
 
 type Service struct {
@@ -126,10 +127,15 @@ func (s *Service) Snapshot(ctx context.Context) (Snapshot, error) {
 	if err != nil {
 		return Snapshot{}, err
 	}
+	currentState := s.journal.Snapshot()
+	logs, err := s.journal.Logs(currentState.OperationID, 200)
+	if err != nil {
+		return Snapshot{}, err
+	}
 	s.mu.Lock()
 	available := s.available
 	s.mu.Unlock()
-	return Snapshot{Settings: settings, Build: buildinfo.Current(), State: s.journal.Snapshot(), Available: available, History: history}, nil
+	return Snapshot{Settings: settings, Build: buildinfo.Current(), State: currentState, Available: available, History: history, Logs: logs}, nil
 }
 
 func (s *Service) Start(ctx context.Context) {
@@ -291,54 +297,88 @@ func (s *Service) Install(ctx context.Context, version string) error {
 	s.mu.Unlock()
 	defer func() { s.mu.Lock(); s.installing = false; s.mu.Unlock() }()
 	if manifest == nil || (version != "" && manifest.Version != version) {
-		return errors.New("update target is stale; check for updates again")
+		return s.failInstall(State{CandidateVersion: version}, PhaseStaged, errors.New("update target is stale; check for updates again"))
 	}
-	artifact, ok := manifest.ArtifactForCurrentPlatform()
+	manifestValue := *manifest
+	artifact, ok := manifestValue.ArtifactForCurrentPlatform()
 	if !ok {
-		return errors.New("no artifact for this platform")
-	}
-	response, err := s.client.Get(artifact.URL)
-	if err != nil {
-		return err
-	}
-	defer response.Body.Close()
-	if response.StatusCode != http.StatusOK {
-		return fmt.Errorf("download update: HTTP %d", response.StatusCode)
-	}
-	data, err := VerifyArtifact(response.Body, artifact.Size, artifact.SHA256)
-	if err != nil {
-		return err
+		return s.failInstall(State{CandidateVersion: manifestValue.Version, CandidateCommit: manifestValue.Commit, CandidateChannel: manifestValue.Channel}, PhaseStaged, errors.New("no artifact for this platform"))
 	}
 	id := randomID()
 	root := filepath.Join(s.dataDir, "updater", "releases", id)
 	if err := os.MkdirAll(root, 0o700); err != nil {
-		return err
+		return s.failInstall(State{OperationID: id, CandidateVersion: manifestValue.Version, CandidateCommit: manifestValue.Commit, CandidateChannel: manifestValue.Channel}, PhaseDownloading, fmt.Errorf("prepare update: %w", err))
 	}
 	state := s.journal.Snapshot()
-	state.OperationID, state.Phase, state.CandidateVersion, state.CandidatePath = id, PhaseDownloading, manifest.Version, root
-	state.CandidateCommit, state.CandidateChannel = manifest.Commit, manifest.Channel
+	state.OperationID, state.Phase, state.CandidateVersion, state.CandidatePath = id, PhaseDownloading, manifestValue.Version, root
+	state.CandidateCommit, state.CandidateChannel = manifestValue.Commit, manifestValue.Channel
+	state.DownloadBytes, state.DownloadTotalBytes, state.PhaseProgress, state.OverallProgress = 0, artifact.Size, 0, 10
 	state.QuarantinedVersion = ""
 	state.Error, state.FailedPhase = "", ""
-	_ = s.journal.Transition(state)
-	executable, err := ExtractArtifact(data, root)
-	if err != nil {
-		return err
-	}
-	if err := os.Chmod(executable, 0o700); err != nil {
-		return err
-	}
-	state.Phase, state.CandidatePath = PhaseStaged, executable
 	if err := s.journal.Transition(state); err != nil {
 		return err
 	}
-	request := map[string]string{"operation_id": id, "candidate_path": executable, "candidate_version": manifest.Version, "channel": manifest.Channel, "commit": manifest.Commit}
+	s.log(PhaseDownloading, "Starting update download")
+
+	response, err := s.client.Get(artifact.URL)
+	if err != nil {
+		return s.failInstall(state, PhaseDownloading, fmt.Errorf("download update: %w", err))
+	}
+	defer response.Body.Close()
+	if response.StatusCode != http.StatusOK {
+		return s.failInstall(state, PhaseDownloading, fmt.Errorf("download update: HTTP %d", response.StatusCode))
+	}
+	var downloaded int64
+	lastProgress := time.Time{}
+	progress := func(force bool) {
+		state.DownloadBytes = downloaded
+		if state.DownloadTotalBytes > 0 {
+			state.PhaseProgress = clampProgress(int(downloaded * 100 / state.DownloadTotalBytes))
+			state.OverallProgress = 10 + clampProgress(int(downloaded*45/state.DownloadTotalBytes))
+		}
+		now := time.Now()
+		if !force && !lastProgress.IsZero() && now.Sub(lastProgress) < 150*time.Millisecond {
+			return
+		}
+		if err := s.journal.Transition(state); err == nil {
+			lastProgress = now
+		}
+	}
+	reader := &downloadProgressReader{reader: response.Body, onRead: func(count int64) {
+		downloaded += count
+		progress(false)
+	}}
+	data, err := VerifyArtifact(reader, artifact.Size, artifact.SHA256)
+	if err != nil {
+		progress(true)
+		return s.failInstall(state, PhaseDownloading, fmt.Errorf("verify downloaded update: %w", err))
+	}
+	progress(true)
+	state.Phase, state.PhaseProgress, state.OverallProgress = PhaseVerified, 100, 60
+	if err := s.journal.Transition(state); err != nil {
+		return err
+	}
+	s.log(PhaseVerified, "Update artifact verified")
+	executable, err := ExtractArtifact(data, root)
+	if err != nil {
+		return s.failInstall(state, PhaseVerified, fmt.Errorf("stage update: %w", err))
+	}
+	if err := os.Chmod(executable, 0o700); err != nil {
+		return s.failInstall(state, PhaseVerified, fmt.Errorf("stage update: %w", err))
+	}
+	state.Phase, state.CandidatePath, state.PhaseProgress, state.OverallProgress = PhaseStaged, executable, 100, 65
+	if err := s.journal.Transition(state); err != nil {
+		return err
+	}
+	s.log(PhaseStaged, "Update staged; waiting for supervisor restart")
+	request := map[string]string{"operation_id": id, "candidate_path": executable, "candidate_version": manifestValue.Version, "channel": manifestValue.Channel, "commit": manifestValue.Commit}
 	encoded, _ := json.Marshal(request)
 	tmp := filepath.Join(s.dataDir, "updater", "request.json.tmp")
 	if err := os.WriteFile(tmp, append(encoded, '\n'), 0o600); err != nil {
-		return err
+		return s.failInstall(state, PhaseStaged, fmt.Errorf("request update restart: %w", err))
 	}
 	if err := os.Rename(tmp, filepath.Join(s.dataDir, "updater", "request.json")); err != nil {
-		return err
+		return s.failInstall(state, PhaseStaged, fmt.Errorf("request update restart: %w", err))
 	}
 	s.mu.Lock()
 	s.requested = true
@@ -347,6 +387,69 @@ func (s *Service) Install(ctx context.Context, version string) error {
 		go s.onUpdateRequested()
 	}
 	return nil
+}
+
+type downloadProgressReader struct {
+	reader io.Reader
+	onRead func(int64)
+}
+
+func (r *downloadProgressReader) Read(p []byte) (int, error) {
+	n, err := r.reader.Read(p)
+	if n > 0 && r.onRead != nil {
+		r.onRead(int64(n))
+	}
+	return n, err
+}
+
+func clampProgress(value int) int {
+	if value < 0 {
+		return 0
+	}
+	if value > 100 {
+		return 100
+	}
+	return value
+}
+
+func (s *Service) log(phase Phase, message string) {
+	_ = s.journal.AppendLog(s.journal.Snapshot().OperationID, phase, message)
+}
+
+func (s *Service) failInstall(state State, phase Phase, cause error) error {
+	if cause == nil {
+		cause = errors.New("update failed")
+	}
+	persisted := s.journal.Snapshot()
+	if state.CurrentPath == "" {
+		state.CurrentPath = persisted.CurrentPath
+	}
+	if state.CurrentVersion == "" {
+		state.CurrentVersion = persisted.CurrentVersion
+	}
+	if state.PreviousPath == "" {
+		state.PreviousPath = persisted.PreviousPath
+	}
+	if state.PreviousVersion == "" {
+		state.PreviousVersion = persisted.PreviousVersion
+	}
+	if state.LastCheckAt == "" {
+		state.LastCheckAt = persisted.LastCheckAt
+	}
+	if state.LastSuccessAt == "" {
+		state.LastSuccessAt = persisted.LastSuccessAt
+	}
+	if state.OperationID == "" {
+		state.OperationID = randomID()
+	}
+	state.Phase = PhaseFailed
+	state.FailedPhase = phase
+	state.Error = cause.Error()
+	state.PhaseProgress = clampProgress(state.PhaseProgress)
+	_ = s.journal.Transition(state)
+	_ = s.journal.AppendLog(state.OperationID, PhaseFailed, "Update failed: "+cause.Error())
+	_ = s.journal.AppendHistory(HistoryRecord{OperationID: state.OperationID, Version: state.CandidateVersion, Commit: state.CandidateCommit, Channel: state.CandidateChannel, Outcome: "failed", Phase: phase, Error: state.Error, At: time.Now().UTC().Format(time.RFC3339Nano)})
+	return cause
 }
 
 type githubRelease struct {

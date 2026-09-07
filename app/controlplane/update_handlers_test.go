@@ -29,7 +29,7 @@ func TestUpdateSettingsAPI(t *testing.T) {
 	}
 	get := httptest.NewRecorder()
 	server.httpServer.Handler.ServeHTTP(get, httptest.NewRequest(http.MethodGet, "/api/updates", nil))
-	if get.Code != http.StatusOK || !strings.Contains(get.Body.String(), `"interval_seconds":3600`) || !strings.Contains(get.Body.String(), `"channel":"releases"`) {
+	if get.Code != http.StatusOK || !strings.Contains(get.Body.String(), `"interval_seconds":3600`) || !strings.Contains(get.Body.String(), `"channel":"releases"`) || !strings.Contains(get.Body.String(), `"logs":[]`) {
 		t.Fatalf("unexpected defaults: %d %s", get.Code, get.Body.String())
 	}
 	put := httptest.NewRecorder()

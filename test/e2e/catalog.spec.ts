@@ -4,7 +4,7 @@ test('new models lead the table and the top-right count opens the catalog', asyn
   const route = (model: string, provider: string, options: Record<string, unknown> = {}) => ({ model, upstream_model: model, provider, name: model, pricing: {}, tags: [], input_modalities: ['text'], output_modalities: ['text'], ...options });
   await page.route('**/api/models', (request) => request.fulfill({ json: {
     data: [
-      route('a-existing', 'surplus', { pricing: { input: 900000 }, price_available: true, usage_7d: 2 }),
+      route('a-existing', 'surplus', { name: 'A Existing', pricing: { input: 900000 }, price_available: true, usage_7d: 2 }),
       route('z-new', 'surplus', { is_new: true, added_at: '2026-09-07T08:30:00Z', free: true, tags: ['reasoning'], usage_7d: 7 }),
       route('z-new', 'openrouter', { is_new: true, added_at: '2026-09-07T08:30:00Z', pricing: { input: 100000 }, price_available: true, discount_percent_bps: 8000, discount_input_percent_bps: 8000, discount_output_percent_bps: 7000, usage_7d: 1 }),
     ],
@@ -18,6 +18,7 @@ test('new models lead the table and the top-right count opens the catalog', asyn
   await expect(page.locator('#models-table-body tr').first()).toContainText('z-new');
   await expect(page.locator('[data-view-panel="models"] thead')).not.toContainText('Provider');
   await expect(page.locator('#models-table-body tr').first().locator('.model-provider')).toHaveText('OpenRouter');
+  await expect(page.locator('#models-table-body tr').first().locator('.model-id')).toHaveCount(0);
   await expect(page.locator('#models-table-body .new-model')).toHaveCount(0);
   await expect(page.locator('#models-table-body .new-model-row')).toHaveCount(2);
   const freeRow = page.locator('#models-table-body tr').filter({ has: page.locator('.price-free') });
@@ -46,6 +47,7 @@ test('new models lead the table and the top-right count opens the catalog', asyn
   await page.locator('#models-clear-filters').click();
   await page.locator('#models-search').fill('a-existing');
   await expect(page.locator('#models-table-body tr')).toHaveCount(1);
+  await expect(page.locator('#models-table-body tr').first().locator('.model-id')).toHaveText('a-existing');
   await expect(page.locator('#topbar-model-count')).toHaveText('2 Models');
   await page.locator('#topbar-models').click();
   await expect(page.locator('#models-table-body tr')).toHaveCount(3);

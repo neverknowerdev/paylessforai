@@ -590,12 +590,15 @@ code { display: inline-block; max-width: 100%; overflow: hidden; padding: 10px 1
 .badge.new-model { position: relative; cursor: help; }
 .badge.new-model::after { content: attr(data-tooltip); position: absolute; left: 50%; bottom: calc(100% + 7px); z-index: 30; padding: 5px 7px; border: 1px solid #3a4c73; border-radius: 6px; color: var(--ink); background: #0b1325; box-shadow: 0 8px 20px #0007; font-size: 10px; font-weight: 700; line-height: 1; white-space: nowrap; opacity: 0; pointer-events: none; transform: translate(-50%, 4px); transition: opacity .12s ease, transform .12s ease; }
 .badge.new-model:hover::after, .badge.new-model:focus-visible::after { opacity: 1; transform: translate(-50%, 0); }
+.model-cell { min-width: 205px; }
 .model-title-line { display: flex; align-items: center; gap: 5px; flex-wrap: nowrap; white-space: nowrap; }
-.model-title-line strong, .model-title-line small { display: inline; margin: 0; }
-.provider-cell { white-space: nowrap; }
-.price-free { flex: 0 0 auto; padding: 3px 6px; font-size: 8px; }
-.model-quick-filter { display: inline-grid; place-items: center; width: 20px; height: 20px; padding: 0; border: 1px solid #8ea9ff45; border-radius: 5px; color: var(--blue-bright); background: #8ea9ff12; cursor: pointer; font-size: 12px; line-height: 1; }
-.model-quick-filter:hover, .model-quick-filter:focus-visible { border-color: var(--blue-bright); background: #8ea9ff28; outline: 0; }
+.model-title-line strong { display: inline; margin: 0; }
+.model-id { display: inline; margin: 0; color: var(--faint); font-size: 8px; }
+.model-provider { display: block; margin-top: 3px; color: var(--faint); font-size: 9px; line-height: 1.1; white-space: nowrap; }
+.price-free { flex: 0 0 auto; padding: 4px 8px; font-size: 8px; }
+.model-quick-filter { display: inline-grid; place-items: center; width: 21px; height: 21px; flex: 0 0 21px; padding: 0; border: 1px solid #8ea9ff55; border-radius: 6px; color: var(--blue-bright); background: linear-gradient(135deg, #8ea9ff1c, #8ea9ff08); cursor: pointer; line-height: 1; transition: border-color .12s ease, background .12s ease, transform .12s ease; }
+.model-quick-filter svg { width: 13px; height: 13px; fill: none; stroke: currentColor; stroke-linecap: round; stroke-linejoin: round; stroke-width: 1.35; }
+.model-quick-filter:hover, .model-quick-filter:focus-visible { border-color: var(--blue-bright); background: #8ea9ff28; outline: 0; transform: translateY(-1px); }
 .discount-cell, .usage-cell { white-space: nowrap; }
 .discount-cell { color: #d9f994; font-weight: 800; }
 .usage-cell { color: var(--ink); font-variant-numeric: tabular-nums; }

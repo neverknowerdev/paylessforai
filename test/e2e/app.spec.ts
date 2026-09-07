@@ -83,8 +83,8 @@ test('configures providers, creates a client key, and routes an OpenAI request',
   await page.locator('#sidebar').getByRole('link', { name: 'Models' }).click();
   await expect(page.locator('[data-view-panel="models"] table')).toContainText('Modalities');
   await expect(page.locator('[data-view-panel="models"] table')).toContainText('free-tier');
-  await expect(page.locator('#models-table-body .modality-icon[aria-label="Text"]')).toHaveCount(2);
-  await expect(page.locator('#models-table-body .modality-icon[aria-label="Image"]')).toHaveCount(1);
+  await expect(page.locator('#models-table-body .modality-icon[aria-label="Text"]')).toHaveCount(4);
+  await expect(page.locator('#models-table-body .modality-icon[aria-label="Image"]')).toHaveCount(2);
   await page.getByRole('link', { name: 'Requests' }).click();
   await page.locator('#refresh-button').click();
   await expect(page.locator('[data-view-panel="requests"] table')).toContainText('Provider');

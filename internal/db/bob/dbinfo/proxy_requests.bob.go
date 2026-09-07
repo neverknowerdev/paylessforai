@@ -179,6 +179,30 @@ var ProxyRequests = Table[
 		},
 	},
 	Indexes: proxyRequestIndexes{
+		IdxProxyRequestsCatalogUsage: index{
+			Type: "c",
+			Name: "idx_proxy_requests_catalog_usage",
+			Columns: []indexColumn{
+				{
+					Name:         "received_at",
+					Desc:         null.FromCond(false, true),
+					IsExpression: false,
+				},
+				{
+					Name:         "selected_provider",
+					Desc:         null.FromCond(false, true),
+					IsExpression: false,
+				},
+				{
+					Name:         "selected_upstream_model",
+					Desc:         null.FromCond(false, true),
+					IsExpression: false,
+				},
+			},
+			Unique:  false,
+			Comment: "",
+			Partial: false,
+		},
 		SqliteAutoindexProxyRequests1: index{
 			Type: "pk",
 			Name: "sqlite_autoindex_proxy_requests_1",
@@ -231,12 +255,13 @@ func (c proxyRequestColumns) AsSlice() []column {
 }
 
 type proxyRequestIndexes struct {
+	IdxProxyRequestsCatalogUsage  index
 	SqliteAutoindexProxyRequests1 index
 }
 
 func (i proxyRequestIndexes) AsSlice() []index {
 	return []index{
-		i.SqliteAutoindexProxyRequests1,
+		i.IdxProxyRequestsCatalogUsage, i.SqliteAutoindexProxyRequests1,
 	}
 }
 

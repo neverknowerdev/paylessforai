@@ -20,6 +20,8 @@ type routeDiscount struct {
 	Available      bool
 }
 
+const catalogUsageWindow = 7 * 24 * time.Hour
+
 func catalogDiscounts(routes []matcher.Route) map[string]routeDiscount {
 	type baseline struct{ input, output int64 }
 	official := make(map[string]baseline)
@@ -102,6 +104,20 @@ func modalityNames(values map[string]bool) []string {
 	return result
 }
 
+func containsString(values []string, target string) bool {
+	for _, value := range values {
+		if strings.EqualFold(value, target) {
+			return true
+		}
+	}
+	return false
+}
+
+func isNewCatalogAddition(addedAt, now time.Time) bool {
+	age := now.Sub(addedAt)
+	return age >= 0 && age < catalog.NewModelWindow
+}
+
 func (s *Server) registerModelRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("/api/models", s.handleCatalogModels)
 }
@@ -117,9 +133,19 @@ func (s *Server) handleCatalogModels(w http.ResponseWriter, r *http.Request) {
 	}
 	snapshot := s.catalog.Snapshot()
 	routes := snapshot.Routes
+	usage := map[string]int64{}
+	if s.db != nil && s.db.Stats != nil {
+		var err error
+		usage, err = s.db.Stats.RouteUsageSince(r.Context(), time.Now().UTC().Add(-catalogUsageWindow))
+		if err != nil {
+			writeError(w, http.StatusInternalServerError, "model_usage_failed", "could not load model usage")
+			return
+		}
+	}
 	newModels := make(map[string]time.Time)
+	now := time.Now().UTC()
 	for _, addition := range snapshot.Additions {
-		if time.Since(addition.AddedAt) < catalog.NewModelWindow {
+		if isNewCatalogAddition(addition.AddedAt, now) {
 			newModels[addition.ID] = addition.AddedAt
 		}
 	}
@@ -136,13 +162,18 @@ func (s *Server) handleCatalogModels(w http.ResponseWriter, r *http.Request) {
 			continue
 		}
 		seen[key] = struct{}{}
+		tags := append([]string(nil), route.Capabilities.Tags...)
+		if route.Free && !containsString(tags, "free") {
+			tags = append(tags, "free")
+		}
 		item := map[string]any{
 			"id": route.ID, "provider": route.Provider, "model": route.LogicalModel, "upstream_model": route.UpstreamModel,
 			"name": modelNames[route.LogicalModel], "billing_class": route.BillingClass,
 			"free": route.Free, "price_available": route.PriceAvailable, "health": route.Health,
 			"context_length": route.Capabilities.MaxContext, "max_output_tokens": route.Capabilities.MaxOutput,
 			"supported_parameters": route.Capabilities.Parameters,
-			"input_modalities":     modalityNames(route.Capabilities.InputModalities), "output_modalities": modalityNames(route.Capabilities.OutputModalities), "tags": route.Capabilities.Tags,
+			"input_modalities":     modalityNames(route.Capabilities.InputModalities), "output_modalities": modalityNames(route.Capabilities.OutputModalities), "tags": tags,
+			"usage_7d": usage[route.Provider+"\x00"+route.UpstreamModel],
 			"pricing": map[string]any{
 				"input": route.Price.InputPicoUSDPerToken, "output": route.Price.OutputPicoUSDPerToken,
 				"cached_read": route.Price.CachedReadPicoUSDPerToken, "cache_write": route.Price.CacheWritePicoUSDPerToken,

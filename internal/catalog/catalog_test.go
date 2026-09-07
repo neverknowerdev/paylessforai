@@ -148,3 +148,128 @@ func TestRefreshHookReceivesOnlyNewProviderModelRoutes(t *testing.T) {
 		t.Fatalf("unexpected discovery hook batches: %#v", batches)
 	}
 }
+
+type memoryState struct {
+	value string
+	fail  bool
+}
+
+func (s *memoryState) Get(context.Context, string) (string, bool, error) {
+	return s.value, s.value != "", nil
+}
+func (s *memoryState) Set(_ context.Context, _, value string) error {
+	if s.fail {
+		return fmt.Errorf("storage unavailable")
+	}
+	s.value = value
+	return nil
+}
+
+func TestDiscoveryHistorySurvivesRestartAndDoesNotRepeat(t *testing.T) {
+	ctx := context.Background()
+	store := &memoryState{}
+	client := &fakeClient{name: "surplus", models: []providers.Model{{ID: "old"}}}
+	manager := New([]providers.Client{client})
+	if err := manager.Restore(ctx, store); err != nil {
+		t.Fatal(err)
+	}
+	if err := manager.Refresh(ctx); err != nil {
+		t.Fatal(err)
+	}
+	if len(manager.Snapshot().Additions) != 0 {
+		t.Fatal("initial catalog must be a baseline")
+	}
+	client.models = append(client.models, providers.Model{ID: "new"})
+	if err := manager.Refresh(ctx); err != nil {
+		t.Fatal(err)
+	}
+	added := manager.Snapshot().Additions
+	if len(added) != 1 || added[0].ID != "new" {
+		t.Fatalf("additions: %#v", added)
+	}
+	manager = New([]providers.Client{client})
+	if err := manager.Restore(ctx, store); err != nil {
+		t.Fatal(err)
+	}
+	if err := manager.Refresh(ctx); err != nil {
+		t.Fatal(err)
+	}
+	if got := manager.Snapshot().Additions; len(got) != 1 || !got[0].AddedAt.Equal(added[0].AddedAt) {
+		t.Fatalf("restart changed history: %#v", got)
+	}
+	client.models = client.models[:1]
+	if err := manager.Refresh(ctx); err != nil {
+		t.Fatal(err)
+	}
+	client.models = append(client.models, providers.Model{ID: "new"})
+	if err := manager.Refresh(ctx); err != nil {
+		t.Fatal(err)
+	}
+	if len(manager.Snapshot().Additions) != 1 {
+		t.Fatal("returning model announced twice")
+	}
+}
+
+func TestDiscoveryPersistenceFailureRetriesWithoutLosingAddition(t *testing.T) {
+	ctx := context.Background()
+	store := &memoryState{}
+	client := &fakeClient{name: "surplus", models: []providers.Model{{ID: "old"}}}
+	manager := New([]providers.Client{client})
+	if err := manager.Restore(ctx, store); err != nil {
+		t.Fatal(err)
+	}
+	if err := manager.Refresh(ctx); err != nil {
+		t.Fatal(err)
+	}
+	client.models = append(client.models, providers.Model{ID: "new"})
+	store.fail = true
+	if err := manager.Refresh(ctx); err == nil {
+		t.Fatal("expected storage failure")
+	}
+	if len(manager.Snapshot().Models) != 1 {
+		t.Fatal("published unpersisted discovery")
+	}
+	store.fail = false
+	if err := manager.Refresh(ctx); err != nil {
+		t.Fatal(err)
+	}
+	if len(manager.Snapshot().Additions) != 1 {
+		t.Fatal("lost addition after retry")
+	}
+}
+
+type failingClient struct{ fakeClient }
+
+func (f failingClient) Discover(context.Context) ([]providers.Model, error) {
+	return nil, fmt.Errorf("offline")
+}
+func TestPartialRefreshRetainsFailedProviderButRemovesDeletedProvider(t *testing.T) {
+	ctx := context.Background()
+	a := fakeClient{name: "a", models: []providers.Model{{ID: "a"}}}
+	b := fakeClient{name: "b", models: []providers.Model{{ID: "b"}}}
+	manager := New([]providers.Client{a, b})
+	if err := manager.Refresh(ctx); err != nil {
+		t.Fatal(err)
+	}
+	manager.SetClients([]providers.Client{a, failingClient{b}})
+	if err := manager.Refresh(ctx); err == nil {
+		t.Fatal("expected partial failure")
+	}
+	if len(manager.Snapshot().Routes) != 2 {
+		t.Fatal("failed provider routes lost")
+	}
+	manager.SetClients([]providers.Client{a})
+	if err := manager.Refresh(ctx); err != nil {
+		t.Fatal(err)
+	}
+	if len(manager.Snapshot().Routes) != 1 {
+		t.Fatal("deleted provider retained")
+	}
+	manager.SetClients(nil)
+	if err := manager.Refresh(ctx); err != nil {
+		t.Fatal(err)
+	}
+	if len(manager.Snapshot().Routes) != 0 {
+		t.Fatal("last provider retained")
+	}
+}

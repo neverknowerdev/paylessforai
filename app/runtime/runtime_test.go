@@ -2,8 +2,13 @@ package runtime
 
 import (
 	"context"
+	"github.com/neverknowerdev/paylessforai/internal/catalog"
+	"net/http"
+	"net/http/httptest"
 	"path/filepath"
+	"sync/atomic"
 	"testing"
+	"time"
 
 	dbpkg "github.com/neverknowerdev/paylessforai/internal/db"
 	"github.com/neverknowerdev/paylessforai/internal/db/models"
@@ -74,5 +79,40 @@ func TestLoadProviderClientsSupportsCustomProviderEndpoint(t *testing.T) {
 	clients := loadProviderClients(providers.Builtin(nil), db, box)
 	if len(clients) != 1 || clients[0].Name() != "local-llm" {
 		t.Fatalf("expected custom provider client, got %#v", clients)
+	}
+}
+
+func TestCatalogRefreshStartsWithoutCredentialsAndDiscoversLaterModels(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	var expanded atomic.Bool
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		if expanded.Load() {
+			w.Write([]byte(`{"data":[{"id":"old"},{"id":"new"}]}`))
+		} else {
+			w.Write([]byte(`{"data":[{"id":"old"}]}`))
+		}
+	}))
+	defer upstream.Close()
+	manager := catalog.New(nil)
+	startCatalogRefresh(ctx, manager, 10*time.Millisecond)
+	manager.SetClients([]providers.Client{providers.NewHTTPClient("custom", upstream.URL, "key")})
+	waitFor := func(count int) {
+		t.Helper()
+		deadline := time.Now().Add(3 * time.Second)
+		for time.Now().Before(deadline) {
+			if len(manager.Snapshot().Models) == count {
+				return
+			}
+			time.Sleep(5 * time.Millisecond)
+		}
+		t.Fatalf("expected %d models, got %#v", count, manager.Snapshot())
+	}
+	waitFor(1)
+	expanded.Store(true)
+	waitFor(2)
+	if got := manager.Snapshot().Additions; len(got) != 1 || got[0].ID != "new" {
+		t.Fatalf("new model not recorded: %#v", got)
 	}
 }

@@ -1,9 +1,11 @@
 package controlplane
 
 import (
+	"github.com/neverknowerdev/paylessforai/internal/catalog"
 	"net/http"
 	"sort"
 	"strings"
+	"time"
 
 	"github.com/neverknowerdev/paylessforai/internal/matcher"
 )
@@ -115,6 +117,12 @@ func (s *Server) handleCatalogModels(w http.ResponseWriter, r *http.Request) {
 	}
 	snapshot := s.catalog.Snapshot()
 	routes := snapshot.Routes
+	newModels := make(map[string]time.Time)
+	for _, addition := range snapshot.Additions {
+		if time.Since(addition.AddedAt) < catalog.NewModelWindow {
+			newModels[addition.ID] = addition.AddedAt
+		}
+	}
 	modelNames := make(map[string]string, len(snapshot.Models))
 	for _, model := range snapshot.Models {
 		modelNames[model.ID] = model.Name
@@ -141,6 +149,10 @@ func (s *Server) handleCatalogModels(w http.ResponseWriter, r *http.Request) {
 				"reasoning": route.Price.ReasoningPicoUSDPerToken, "fixed": route.Price.FixedPicoUSD,
 			},
 		}
+		if addedAt, ok := newModels[route.LogicalModel]; ok {
+			item["is_new"] = true
+			item["added_at"] = addedAt
+		}
 		if route.OfficialPriceAvailable {
 			item["official_pricing"] = map[string]any{"input": route.OfficialPrice.InputPicoUSDPerToken, "output": route.OfficialPrice.OutputPicoUSDPerToken}
 		}
@@ -153,5 +165,5 @@ func (s *Server) handleCatalogModels(w http.ResponseWriter, r *http.Request) {
 		}
 		data = append(data, item)
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"data": data})
+	writeJSON(w, http.StatusOK, map[string]any{"data": data, "updated_at": snapshot.UpdatedAt, "refresh_error": snapshot.LastError})
 }

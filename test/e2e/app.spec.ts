@@ -80,7 +80,7 @@ test('configures providers, creates a client key, and routes an OpenAI request',
   const surplusRequests = await (await request.get('http://127.0.0.1:19476/__mock/requests')).json();
   expect(openRouterRequests.data.some((item: { path: string; body: string }) => item.path.endsWith('/chat/completions') && item.body.includes('model-a:free'))).toBeTruthy();
   expect(surplusRequests.data.some((item: { path: string; body: string }) => item.path.endsWith('/chat/completions') && item.body.includes('model-a'))).toBeTruthy();
-  await page.getByRole('link', { name: 'Models' }).click();
+  await page.locator('#sidebar').getByRole('link', { name: 'Models' }).click();
   await expect(page.locator('[data-view-panel="models"] table')).toContainText('Modalities');
   await expect(page.locator('[data-view-panel="models"] table')).toContainText('free-tier');
   await expect(page.locator('#models-table-body .modality-icon[aria-label="Text"]')).toHaveCount(2);

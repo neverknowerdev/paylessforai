@@ -583,3 +583,9 @@ code { display: inline-block; max-width: 100%; overflow: hidden; padding: 10px 1
 @media (max-width: 700px) { .access-mode-selector { grid-template-columns: 1fr; } }
 @media (max-width: 620px) { .remote-access-form { grid-template-columns:1fr; } .remote-access-form small { grid-column:auto; } .remote-access-links > div { grid-template-columns:1fr auto; } .remote-access-links code { grid-column:1 / -1; } }
 .secret p { margin: 0 0 9px; }.secret-value-row { display: flex; align-items: center; gap: 8px; }.secret-value-row code { flex: 1; min-width: 0; color: #efffc7; font-size: 11px; word-break: break-all; }.secret-value-row .quiet-button { flex: 0 0 auto; color: #dafa9a; border-color: #c7f36a55; }
+ .models-link { text-decoration: none; cursor: pointer; gap: 8px; }
+ .models-link:focus-visible { outline: 2px solid var(--blue); outline-offset: 3px; }
+ .badge.new-model { color: var(--blue-bright); background: #8ea9ff20; border: 1px solid #8ea9ff55; }
+ .badge.new-model[hidden] { display: none; }
+ .new-model-row td:first-child { box-shadow: inset 2px 0 var(--blue); }
+ .catalog-refresh-status { color: var(--faint); font-size: 12px; margin: 14px 0; }

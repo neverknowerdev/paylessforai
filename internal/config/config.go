@@ -11,6 +11,9 @@ import (
 	"time"
 )
 
+// DefaultCatalogRefreshInterval controls automatic provider model discovery.
+const DefaultCatalogRefreshInterval = 15 * time.Minute
+
 type Config struct {
 	DataDir           string
 	ListenAddr        string
@@ -27,7 +30,7 @@ func Default() Config {
 	if err != nil || base == "" {
 		base = "."
 	}
-	return Config{DataDir: filepath.Join(base, "paylessforai"), ListenAddr: "127.0.0.1:9472", ReadHeaderTimeout: 10 * time.Second, IdleTimeout: 2 * time.Minute, ShutdownTimeout: 10 * time.Second, RefreshInterval: 5 * time.Minute, ProviderBaseURLs: map[string]string{}}
+	return Config{DataDir: filepath.Join(base, "paylessforai"), ListenAddr: "127.0.0.1:9472", ReadHeaderTimeout: 10 * time.Second, IdleTimeout: 2 * time.Minute, ShutdownTimeout: 10 * time.Second, RefreshInterval: DefaultCatalogRefreshInterval, ProviderBaseURLs: map[string]string{}}
 }
 
 func Parse(args []string) (Config, error) {

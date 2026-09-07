@@ -83,6 +83,9 @@ func Run(parent context.Context, args []string) error {
 	registry := providers.Builtin(c.ProviderBaseURLs)
 	clients := loadProviderClients(registry, db, secretBox)
 	catalogManager := catalog.New(clients)
+	if err := catalogManager.Restore(parent, db.Settings); err != nil {
+		return fmt.Errorf("restore catalog: %w", err)
+	}
 	groupManager := groups.NewManager(db.Groups)
 	if err := groupManager.Reload(parent); err != nil {
 		slog.Warn("group load failed", "error", err)
@@ -114,12 +117,8 @@ func Run(parent context.Context, args []string) error {
 	}
 	defer updates.Close()
 	updates.Start(appContext)
-	if len(clients) > 0 {
-		if refreshErr := catalogManager.Refresh(appContext); refreshErr != nil {
-			slog.Warn("provider catalog refresh failed", "error", refreshErr)
-		}
-		go refreshCatalogPeriodically(appContext, catalogManager, c.RefreshInterval)
-	}
+	startCatalogRefresh(appContext, catalogManager, c.RefreshInterval)
+
 	reloadProviders := func() error {
 		catalogManager.SetClients(loadProviderClients(registry, db, secretBox))
 		return catalogManager.Refresh(appContext)
@@ -213,6 +212,16 @@ func Preflight(args []string) error {
 		return err
 	}
 	return store.Close()
+}
+
+// Start the worker even when credentials will be configured later through the UI.
+func startCatalogRefresh(ctx context.Context, manager *catalog.Manager, interval time.Duration) {
+	if len(manager.Clients()) > 0 {
+		if err := manager.Refresh(ctx); err != nil {
+			slog.Warn("provider catalog refresh failed", "error", err)
+		}
+	}
+	go refreshCatalogPeriodically(ctx, manager, interval)
 }
 
 func refreshCatalogPeriodically(ctx context.Context, manager *catalog.Manager, interval time.Duration) {

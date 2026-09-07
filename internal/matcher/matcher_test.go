@@ -41,6 +41,46 @@ func TestMatchPrefersFreeRouteAndAcceptsFreeVariantRequests(t *testing.T) {
 	}
 }
 
+func TestMatchOrdersFreeSubscriptionThenCheapestMetered(t *testing.T) {
+	free := testRoute("free", "opencode", 100, 100)
+	free.Free = true
+	subscription := testRoute("subscription", "opencode-go", 100, 100)
+	subscription.BillingClass = BillingSubscription
+	metered := testRoute("metered", "openrouter", 1, 1)
+	metered.BillingClass = BillingMetered
+
+	result := New().Match(MatchInput{Request: MatchRequest{Protocol: ProtocolChatCompletions, LogicalModel: "model-a", InputTokens: 1, ExpectedOutput: 1}, Routes: []Route{metered, subscription, free}, Now: time.Unix(20, 0)})
+	if len(result.Ranked) != 3 {
+		t.Fatalf("expected all routes to be ranked, got %#v", result)
+	}
+	got := []string{result.Ranked[0].Route.ID, result.Ranked[1].Route.ID, result.Ranked[2].Route.ID}
+	want := []string{"free", "subscription", "metered"}
+	for index := range want {
+		if got[index] != want[index] {
+			t.Fatalf("unexpected billing-tier order: got %v want %v", got, want)
+		}
+	}
+}
+
+func TestBillingTierUsesOneBasedPriorityValues(t *testing.T) {
+	cases := []struct {
+		name  string
+		route Route
+		want  int
+	}{
+		{name: "free", route: Route{Free: true}, want: 1},
+		{name: "subscription", route: Route{BillingClass: BillingSubscription}, want: 2},
+		{name: "metered", route: Route{BillingClass: BillingMetered}, want: 3},
+	}
+	for _, test := range cases {
+		t.Run(test.name, func(t *testing.T) {
+			if got := billingTier(test.route); got != test.want {
+				t.Fatalf("billingTier() = %d, want %d", got, test.want)
+			}
+		})
+	}
+}
+
 func TestMatchAcceptsProviderQualifiedAndHyphenFreeAliases(t *testing.T) {
 	route := testRoute("route", "openrouter", 1, 1)
 	route.LogicalModel = "muse-spark-1.3-contributor"

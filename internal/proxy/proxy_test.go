@@ -28,6 +28,16 @@ type fakeProvider struct {
 	responses  []func(*http.Request) (*http.Response, error)
 }
 
+type metadataProvider struct {
+	*fakeProvider
+	executionKey string
+	billing      matcher.BillingClass
+}
+
+func (p metadataProvider) ExecutionKey() string               { return p.executionKey }
+func (p metadataProvider) CredentialID() string               { return p.executionKey }
+func (p metadataProvider) BillingClass() matcher.BillingClass { return p.billing }
+
 type failingReader struct {
 	data []byte
 	done bool
@@ -225,6 +235,61 @@ func TestProxyFailsOverImmediatelyFromFreeRoute(t *testing.T) {
 	items, err := db.Stats.ListRequestStats(context.Background(), 10)
 	if err != nil || len(items) != 1 || items[0].Provider != "surplus" || items[0].Attempts != 2 || len(items[0].AttemptDetails) != 2 || items[0].AttemptDetails[0].State != "failed" || items[0].AttemptDetails[1].Provider != "surplus" {
 		t.Fatalf("expected durable failover metadata, got %#v, %v", items, err)
+	}
+}
+
+func TestProxyUsesBillingTierOrderAndContinuesAfterProviderFailure(t *testing.T) {
+	free := &fakeProvider{name: "opencode", models: []providers.Model{model("model-a:free", 0, 0)}, responses: []func(*http.Request) (*http.Response, error){
+		func(*http.Request) (*http.Response, error) {
+			return nil, &providers.UpstreamError{Provider: "opencode", StatusCode: http.StatusServiceUnavailable, Class: retry.ErrorServer, Message: "free capacity exhausted"}
+		},
+	}}
+	subscription := &fakeProvider{name: "opencode-go", models: []providers.Model{model("model-a", 100, 100)}, responses: []func(*http.Request) (*http.Response, error){
+		func(*http.Request) (*http.Response, error) {
+			return nil, &providers.UpstreamError{Provider: "opencode-go", StatusCode: http.StatusBadGateway, Class: retry.ErrorUnknown, Message: "subscription provider failed"}
+		},
+	}}
+	openRouter := &fakeProvider{name: "openrouter", models: []providers.Model{model("meta/model-a", 1, 1)}, responses: []func(*http.Request) (*http.Response, error){
+		func(*http.Request) (*http.Response, error) {
+			return nil, &providers.UpstreamError{Provider: "openrouter", StatusCode: http.StatusNotFound, Class: retry.ErrorModelNotFound, Message: "model not found"}
+		},
+	}}
+	surplus := &fakeProvider{name: "surplus", models: []providers.Model{model("model-a", 2, 2)}}
+
+	proxy, db, secret := testProxy(t,
+		metadataProvider{fakeProvider: free, executionKey: "free-credential", billing: matcher.BillingFree},
+		metadataProvider{fakeProvider: subscription, executionKey: "subscription-credential", billing: matcher.BillingSubscription},
+		openRouter,
+		surplus,
+	)
+	defer db.Close()
+	request := httptest.NewRequest(http.MethodPost, "/v1/chat/completions", strings.NewReader(`{"model":"model-a","messages":[]}`))
+	request.Header.Set("Authorization", "Bearer "+secret)
+	response := httptest.NewRecorder()
+	proxy.ServeHTTP(response, request, matcher.ProtocolChatCompletions)
+	if response.Code != http.StatusOK {
+		t.Fatalf("unexpected response: %d %s", response.Code, response.Body.String())
+	}
+
+	rows, err := db.DB().Query(`SELECT provider FROM proxy_attempts ORDER BY attempt_number`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer rows.Close()
+	var order []string
+	for rows.Next() {
+		var provider string
+		if err := rows.Scan(&provider); err != nil {
+			t.Fatal(err)
+		}
+		order = append(order, provider)
+	}
+	if err := rows.Err(); err != nil {
+		t.Fatal(err)
+	}
+	want := []string{"opencode", "opencode-go", "openrouter", "surplus"}
+	if strings.Join(order, ",") != strings.Join(want, ",") {
+		t.Fatalf("unexpected provider execution order: got %v want %v", order, want)
 	}
 }
 

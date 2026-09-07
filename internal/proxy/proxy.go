@@ -316,10 +316,13 @@ func (p *Proxy) execute(ctx context.Context, writer http.ResponseWriter, request
 		}
 		client := p.Catalog.ClientForRoute(route)
 		if client == nil {
+			totalAttempts++
 			if p.Repositories != nil {
-				_ = recordProxyAttemptRoute(ctx, p.Repositories, requestID, totalAttempts+1, route.ID, route.CredentialID, entry.StageID, strings.Join(entry.StagePath, " / "), route.Provider, route.UpstreamModel, "failed", "provider_not_configured", "Selected provider is not configured.", "selected provider is not configured")
+				_ = recordProxyAttemptRoute(ctx, p.Repositories, requestID, totalAttempts, route.ID, route.CredentialID, entry.StageID, strings.Join(entry.StagePath, " / "), route.Provider, route.UpstreamModel, "failed", "provider_not_configured", "Selected provider is not configured.", "selected provider is not configured")
 			}
-			return &proxyError{status: http.StatusBadGateway, code: "provider_not_configured", message: "selected provider is not configured"}
+			current++
+			retriesRemaining = -1
+			continue
 		}
 		totalAttempts++
 		if p.Repositories != nil {
@@ -369,6 +372,14 @@ func (p *Proxy) execute(ctx context.Context, writer http.ResponseWriter, request
 			_ = recordProxyAttemptRoute(ctx, p.Repositories, requestID, totalAttempts, route.ID, route.CredentialID, entry.StageID, strings.Join(entry.StagePath, " / "), route.Provider, route.UpstreamModel, "failed", errorCode(err), humanErrorMessage(err), rawErrorMessage(err))
 		}
 		decision := p.Retry.Decide(retry.Input{Policy: policy, AttemptNumber: totalAttempts, Now: time.Now(), Error: classified, Delivery: retry.NothingSent, SameRouteAvailable: !route.Free, FallbacksRemaining: len(plan.Entries) - current - 1, PlanMode: true, SameRouteRetriesRemaining: retriesRemaining, PlanEntriesRemaining: len(plan.Entries) - current - 1, TotalAttemptsRemaining: policy.MaximumAttempts - totalAttempts})
+		// A provider error must not hide healthy routes later in the plan. The
+		// retry engine still controls configured same-route retries, but if it
+		// would otherwise return a terminal decision, advance to the next
+		// provider while no response bytes have been sent.
+		if decision.Action != retry.RetrySameRoute && decision.Action != retry.FailOver && len(plan.Entries)-current-1 > 0 && classified.Class != retry.ErrorCancelled {
+			decision.Action = retry.FailOver
+			decision.Delay = 0
+		}
 		if decision.Action != retry.RetrySameRoute && decision.Action != retry.FailOver {
 			return err
 		}

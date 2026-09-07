@@ -215,10 +215,12 @@ protocol, capabilities, limits, health, and current price.
 For a model available through more than one route:
 
 1. Free routes are tried first, including OpenRouter `:free` variants.
-2. Paid routes are ranked by estimated request cost.
-3. A pre-response rate-limit, timeout, server, or transport failure can retry
-   or fail over to another eligible route.
-4. Once response bytes have been sent, PayLessForAI does not switch providers;
+2. Subscription routes are tried next, before any metered API route.
+3. Metered API routes are ranked by estimated request cost.
+4. A provider failure before response bytes are sent advances through the
+   remaining eligible routes; configured same-route retries may still run
+   first for retryable transient failures.
+5. Once response bytes have been sent, PayLessForAI does not switch providers;
    it records a partial stream/error instead.
 
 Estimated cost uses fixed-point USD arithmetic and catalog prices. After a

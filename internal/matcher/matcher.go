@@ -192,8 +192,8 @@ func (Engine) Match(input MatchInput) MatchResult {
 
 	sort.SliceStable(result.Ranked, func(i, j int) bool {
 		a, b := result.Ranked[i], result.Ranked[j]
-		if a.Route.Free != b.Route.Free {
-			return a.Route.Free
+		if aTier, bTier := billingTier(a.Route), billingTier(b.Route); aTier != bTier {
+			return aTier < bTier
 		}
 		if a.ExpectedCost != b.ExpectedCost {
 			return a.ExpectedCost < b.ExpectedCost
@@ -215,6 +215,20 @@ func (Engine) Match(input MatchInput) MatchResult {
 		result.Error = &MatchError{Code: "no_eligible_route", Message: "no healthy compatible route is available"}
 	}
 	return result
+}
+
+// billingTier keeps the cost comparison inside a billing class. A
+// subscription route is intentionally preferred to every metered API route,
+// even when its catalog price is higher: the subscription has already been
+// paid for and should be consumed before metered capacity.
+func billingTier(route Route) int {
+	if route.Free || route.BillingClass == BillingFree {
+		return 1
+	}
+	if route.BillingClass == BillingSubscription {
+		return 2
+	}
+	return 3
 }
 
 func rejectRoute(request MatchRequest, route Route, now time.Time, allowed, excluded map[string]struct{}) (RouteRejection, bool) {

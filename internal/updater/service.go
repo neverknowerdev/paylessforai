@@ -135,7 +135,14 @@ func (s *Service) Snapshot(ctx context.Context) (Snapshot, error) {
 func (s *Service) Start(ctx context.Context) {
 	go func() {
 		if os.Getenv("PAYLESSFORAI_CANDIDATE") == "1" {
-			return
+			// A candidate must not start another update while the supervisor is
+			// validating it. Once the supervisor opens the promotion gate, this
+			// same process becomes the promoted child and can safely run the
+			// regular scheduler. Returning permanently here leaves every
+			// self-updated process unable to perform its next automatic update.
+			if !s.waitForPromotionGate(ctx) {
+				return
+			}
 		}
 		settings, err := s.LoadSettings(ctx)
 		if err != nil {
@@ -158,6 +165,27 @@ func (s *Service) Start(ctx context.Context) {
 			}
 		}
 	}()
+}
+
+func (s *Service) waitForPromotionGate(ctx context.Context) bool {
+	gatePath := strings.TrimSpace(os.Getenv("PAYLESSFORAI_GATE_PATH"))
+	if gatePath == "" {
+		return false
+	}
+	ticker := time.NewTicker(100 * time.Millisecond)
+	defer ticker.Stop()
+	for {
+		if _, err := os.Stat(gatePath); err == nil {
+			return true
+		}
+		select {
+		case <-ticker.C:
+		case <-ctx.Done():
+			return false
+		case <-s.stop:
+			return false
+		}
+	}
 }
 
 func (s *Service) Close() {

@@ -39,9 +39,10 @@ type updateResponse struct {
 }
 
 type githubMock struct {
-	server        *httptest.Server
-	releases      []githubReleaseFixture
-	releaseChecks atomic.Int32
+	server             *httptest.Server
+	releases           []githubReleaseFixture
+	releasesAfterFirst []githubReleaseFixture
+	releaseChecks      atomic.Int32
 }
 
 type githubReleaseSpec struct {
@@ -83,9 +84,13 @@ func newGitHubMockWithSpecs(t *testing.T, specs []githubReleaseSpec) *githubMock
 		var body []byte
 		switch r.URL.Path {
 		case "/releases":
-			mock.releaseChecks.Add(1)
-			releases := make([]map[string]any, 0, len(mock.releases))
-			for index, release := range mock.releases {
+			check := mock.releaseChecks.Add(1)
+			releasesToServe := mock.releases
+			if check > 1 && len(mock.releasesAfterFirst) > 0 {
+				releasesToServe = mock.releasesAfterFirst
+			}
+			releases := make([]map[string]any, 0, len(releasesToServe))
+			for index, release := range releasesToServe {
 				prefix := fmt.Sprintf("%s/assets/%d", mock.server.URL, index)
 				releases = append(releases, map[string]any{
 					"tag_name": release.tagName, "prerelease": false, "draft": false, "published_at": release.publishedAt,
@@ -113,7 +118,15 @@ func newGitHubMockWithSpecs(t *testing.T, specs []githubReleaseSpec) *githubMock
 				http.NotFound(w, r)
 				return
 			}
-			release := mock.releases[index]
+			releasesToServe := mock.releases
+			if mock.releaseChecks.Load() > 1 && len(mock.releasesAfterFirst) > 0 {
+				releasesToServe = mock.releasesAfterFirst
+			}
+			if index >= len(releasesToServe) {
+				http.NotFound(w, r)
+				return
+			}
+			release := releasesToServe[index]
 			switch parts[1] {
 			case "manifest":
 				body = release.manifest
@@ -137,24 +150,29 @@ func newGitHubMockWithSpecs(t *testing.T, specs []githubReleaseSpec) *githubMock
 	mock.server.Listener = listener
 	mock.server.Start()
 	for index, spec := range specs {
-		artifactName := "paylessforai-app.tar.gz"
-		manifest := updater.Manifest{Schema: 1, Channel: "releases", Version: spec.version, Commit: spec.commit, PublishedAt: spec.publishedAt, MinSupervisorProtocol: 1}
-		manifest.SchemaCompatibility.Min = 1
-		manifest.SchemaCompatibility.Max = 999999
-		digest := sha256.Sum256(spec.artifact)
-		manifest.Artifacts = []updater.Artifact{{OS: runtime.GOOS, Arch: runtime.GOARCH, URL: fmt.Sprintf("%s/assets/%d/artifact", mock.server.URL, index), Size: int64(len(spec.artifact)), SHA256: hex.EncodeToString(digest[:]), Name: artifactName}}
-		contents, err := manifest.CanonicalBytes()
-		if err != nil {
-			t.Fatal(err)
-		}
-		published := contents
-		if spec.trailingNewline {
-			published = append(append([]byte(nil), contents...), '\n')
-		}
-		mock.releases = append(mock.releases, githubReleaseFixture{tagName: spec.tagName, publishedAt: spec.publishedAt, manifest: published, signature: ed25519.Sign(spec.privateKey, published), artifact: spec.artifact, artifactName: artifactName})
+		mock.releases = append(mock.releases, makeGitHubReleaseFixture(t, mock, index, spec))
 	}
 	t.Cleanup(mock.server.Close)
 	return mock
+}
+
+func makeGitHubReleaseFixture(t *testing.T, mock *githubMock, index int, spec githubReleaseSpec) githubReleaseFixture {
+	t.Helper()
+	artifactName := "paylessforai-app.tar.gz"
+	manifest := updater.Manifest{Schema: 1, Channel: "releases", Version: spec.version, Commit: spec.commit, PublishedAt: spec.publishedAt, MinSupervisorProtocol: 1}
+	manifest.SchemaCompatibility.Min = 1
+	manifest.SchemaCompatibility.Max = 999999
+	digest := sha256.Sum256(spec.artifact)
+	manifest.Artifacts = []updater.Artifact{{OS: runtime.GOOS, Arch: runtime.GOARCH, URL: fmt.Sprintf("%s/assets/%d/artifact", mock.server.URL, index), Size: int64(len(spec.artifact)), SHA256: hex.EncodeToString(digest[:]), Name: artifactName}}
+	contents, err := manifest.CanonicalBytes()
+	if err != nil {
+		t.Fatal(err)
+	}
+	published := contents
+	if spec.trailingNewline {
+		published = append(append([]byte(nil), contents...), '\n')
+	}
+	return githubReleaseFixture{tagName: spec.tagName, publishedAt: spec.publishedAt, manifest: published, signature: ed25519.Sign(spec.privateKey, published), artifact: spec.artifact, artifactName: artifactName}
 }
 
 func TestUpdaterBinaryE2E(t *testing.T) {
@@ -237,6 +255,61 @@ func TestUpdaterBinaryE2E(t *testing.T) {
 				t.Fatalf("rollback was not durable: state=%#v", after)
 			}
 		})
+	}
+}
+
+func TestUpdaterBinaryE2EContinuesAutomaticUpdatesAfterPromotion(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("the supervisor E2E harness uses Unix signals")
+	}
+	repoRoot := findRepoRoot(t)
+	root := t.TempDir()
+	public, private, err := ed25519.GenerateKey(rand.Reader)
+	if err != nil {
+		t.Fatal(err)
+	}
+	publicHex := hex.EncodeToString(public)
+	base := buildBinary(t, repoRoot, root, "v0.2.0-chain-e2e", "base-chain-e2e", publicHex)
+	second := buildBinary(t, repoRoot, root, "v0.2.1-chain-e2e", "second-chain-e2e", publicHex)
+	third := buildBinary(t, repoRoot, root, "v0.2.2-chain-e2e", "third-chain-e2e", publicHex)
+	secondArtifact := archiveBinary(t, second)
+	thirdArtifact := archiveBinary(t, third)
+	mock := newGitHubMockWithSpecs(t, []githubReleaseSpec{{
+		tagName:     "v0.2.1-chain-e2e",
+		publishedAt: "2026-09-01T00:00:00Z",
+		version:     "v0.2.1-chain-e2e",
+		commit:      "second-chain-e2e",
+		artifact:    secondArtifact,
+		privateKey:  private,
+	}})
+	mock.releasesAfterFirst = []githubReleaseFixture{makeGitHubReleaseFixture(t, mock, 0, githubReleaseSpec{
+		tagName:     "v0.2.2-chain-e2e",
+		publishedAt: "2026-09-02T00:00:00Z",
+		version:     "v0.2.2-chain-e2e",
+		commit:      "third-chain-e2e",
+		artifact:    thirdArtifact,
+		privateKey:  private,
+	})}
+
+	dataDir := filepath.Join(root, "continues-automatic-updates")
+	listenAddr := freeListenAddr(t)
+	cmd := exec.Command(base, "--data-dir", dataDir, "--listen", listenAddr)
+	cmd.Env = append(os.Environ(), "PAYLESSFORAI_UPDATE_BASE_URL="+mock.server.URL+"/releases")
+	cmd.Stdout = io.Discard
+	cmd.Stderr = io.Discard
+	if err := cmd.Start(); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { stopProcess(t, cmd) })
+	waitHTTP(t, "http://"+listenAddr+"/readyz", 20*time.Second)
+	result := waitForUpdate(t, "http://"+listenAddr+"/api/updates", func(payload updateResponse) bool {
+		return payload.Build.Version == "v0.2.2-chain-e2e" && payload.State.CurrentVersion == "v0.2.2-chain-e2e" && len(payload.History) == 2
+	}, 45*time.Second)
+	if mock.releaseChecks.Load() < 2 {
+		t.Fatalf("automatic scheduler did not perform a second release check: checks=%d", mock.releaseChecks.Load())
+	}
+	if result.State.Phase != updater.PhasePromoted || result.History[0].Version != "v0.2.2-chain-e2e" || result.History[1].Version != "v0.2.1-chain-e2e" {
+		t.Fatalf("chained automatic promotion = state=%#v history=%#v", result.State, result.History)
 	}
 }
 

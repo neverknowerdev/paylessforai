@@ -127,28 +127,66 @@
       const available = payload.available; const card = $('#update-available'); if (card) card.hidden = !available; if (available) setText('#update-available-version', `${available.version} · ${available.channel}`);
       const warning = $('#update-warning'); const failed = stateUpdate.phase === 'failed' || stateUpdate.phase === 'rolled_back' || stateUpdate.phase === 'needs_manual_recovery'; if (warning) { warning.hidden = !failed || Boolean(stateUpdate.warning_acknowledged_at); warning.textContent = failed ? `Update warning: ${stateUpdate.error || 'The new version could not start.'}` : ''; if (failed && !stateUpdate.warning_acknowledged_at) { const button = document.createElement('button'); button.className = 'quiet-button'; button.textContent = 'Dismiss'; button.onclick = async () => { await fetchJSON('/api/updates/warning/acknowledge', { method: 'POST' }); loadUpdates(); }; warning.append(button); } }
       const history = $('#update-history-body'); const empty = $('#update-history-empty'); if (history) { history.replaceChildren(); (payload.history || []).forEach((item) => { const row = document.createElement('tr'); appendTextCell(row, item.version || '—'); appendTextCell(row, item.channel || '—'); appendTextCell(row, item.outcome || '—'); appendTextCell(row, dateValue(item.at)); appendTextCell(row, item.error || '—'); history.append(row); }); if (empty) empty.hidden = (payload.history || []).length > 0; }
+      renderUpdateActivity(payload);
+      resumeRememberedUpdateModal(payload);
     } catch (_) { setUpdatesFeedback('Update information is unavailable.', 'error'); }
   }
 
   function setUpdatesFeedback(message, kind = 'info') { const feedback = $('#updates-feedback'); if (!feedback) return; feedback.className = kind === 'error' ? 'provider-feedback error' : 'card-note'; feedback.textContent = message || ''; }
-  const updatePhaseLabels = { checking: 'Checking for updates…', available: 'Update ready to install', downloading: 'Downloading update…', verified: 'Verifying downloaded update…', preflighting: 'Preflighting candidate…', staged: 'Candidate staged; preparing restart…', draining: 'Draining current server…', snapshotting: 'Saving a rollback snapshot…', migrating: 'Running database migrations…', starting: 'Starting the new version…', stabilizing: 'Waiting for the new version to stabilize…', promoted: 'Update complete', failed: 'Update failed', rolled_back: 'Update failed and was rolled back', needs_manual_recovery: 'Manual recovery is required' };
-  const updateOverallProgress = (stateUpdate) => {
-    const explicit = Number(stateUpdate?.overall_progress);
-    if (stateUpdate?.overall_progress != null && Number.isFinite(explicit)) return Math.min(100, Math.max(0, Math.round(explicit)));
+  const updateModalStorageKey = 'paylessforai.update-progress-modal';
+  const updatePhaseLabels = { checking: 'Checking for updates…', available: 'Update ready to install', downloading: 'Downloading update…', verified: 'Verifying downloaded update…', preflighting: 'Preflighting candidate…', staged: 'Candidate staged; preparing restart…', draining: 'Draining current server…', snapshotting: 'Saving a rollback snapshot…', migrating: 'Running database migrations…', starting: 'Starting the new version…', stabilizing: 'Waiting for the new version to stabilize…', rolling_back: 'Restoring the previous version…', promoted: 'Update complete', failed: 'Update failed', rolled_back: 'Update failed and was rolled back', needs_manual_recovery: 'Manual recovery is required' };
+  const updateSteps = { downloading: [1, 'Download the release'], verified: [2, 'Verify the release'], preflighting: [3, 'Preflight the candidate'], staged: [4, 'Stage the candidate'], draining: [4, 'Prepare the current server'], snapshotting: [5, 'Create a rollback snapshot'], migrating: [6, 'Apply database migrations'], starting: [7, 'Start the new version'], stabilizing: [8, 'Stabilize the new version'], rolling_back: [9, 'Restore the previous version'], promoted: [9, 'Finish the update'], rolled_back: [9, 'Restore the previous version'], needs_manual_recovery: [9, 'Finish recovery'], failed: [9, 'Finish the update'] };
+  const updateStepTotal = 9;
+  const updateActive = (phase) => ['downloading', 'verified', 'staged', 'draining', 'snapshotting', 'preflighting', 'migrating', 'starting', 'stabilizing', 'rolling_back'].includes(String(phase));
+  const updateStep = (stateUpdate) => {
     const phase = String(stateUpdate?.phase || 'downloading');
-    if (phase === 'downloading') {
-      const total = Number(stateUpdate.download_total_bytes || 0); const downloaded = Number(stateUpdate.download_bytes || 0);
-      return total > 0 ? Math.min(50, Math.max(0, Math.round(downloaded * 50 / total))) : 10;
-    }
-    return ({ checking: 0, available: 0, verified: 55, preflighting: 60, staged: 65, draining: 70, snapshotting: 75, migrating: 82, starting: 88, stabilizing: 95, promoted: 100, failed: 100, rolled_back: 100, needs_manual_recovery: 100 }[phase] ?? 10);
+    const fallback = updateSteps[phase] || [1, 'Prepare the update'];
+    if (phase === 'failed') return [updateSteps[String(stateUpdate?.failed_phase || '')]?.[0] || fallback[0], `Stopped during ${updatePhaseLabels[String(stateUpdate?.failed_phase || '')] || 'the update'}`];
+    return fallback;
+  };
+  const updateTarget = (payload) => payload?.state?.candidate_version || payload?.available?.version || 'the new release';
+  const rememberUpdateModal = (operationID = '') => { try { sessionStorage.setItem(updateModalStorageKey, JSON.stringify({ operationID: String(operationID || ''), openedAt: Date.now() })); } catch (_) {} };
+  const forgetUpdateModal = () => { try { sessionStorage.removeItem(updateModalStorageKey); } catch (_) {} };
+  const rememberedUpdateModal = () => { try { return Boolean(sessionStorage.getItem(updateModalStorageKey)); } catch (_) { return false; } };
+  const versionJumpLabel = (current, target) => {
+    const parse = (value) => String(value || '').match(/^v?(\d+)\.(\d+)\.(\d+)(?:[-+].*)?$/)?.slice(1).map(Number);
+    const from = parse(current); const to = parse(target);
+    if (!from || !to) return current && target && current !== target ? '1 snapshot update' : 'Target release';
+    if (from[0] !== to[0]) return 'Major version update';
+    if (from[1] !== to[1]) { const count = Math.abs(to[1] - from[1]); return `${count} minor version${count === 1 ? '' : 's'} ahead`; }
+    if (from[2] !== to[2]) { const count = Math.abs(to[2] - from[2]); return `${count} patch version${count === 1 ? '' : 's'} ahead`; }
+    return 'Target release';
   };
   const formatBytes = (value) => { const bytes = Number(value || 0); if (!Number.isFinite(bytes) || bytes <= 0) return '0 B'; if (bytes < 1024) return `${Math.round(bytes)} B`; const units = ['KB', 'MB', 'GB']; let amount = bytes / 1024; let index = 0; while (amount >= 1024 && index < units.length - 1) { amount /= 1024; index += 1; } return `${amount.toFixed(amount >= 10 ? 0 : 1)} ${units[index]}`; };
   const updateTerminal = (phase) => ['promoted', 'failed', 'rolled_back', 'needs_manual_recovery'].includes(String(phase));
+  function renderUpdateActivity(payload) {
+    const stateUpdate = payload?.state || {}; const active = updateActive(stateUpdate.phase); const [stepNumber, stepDescription] = updateStep(stateUpdate); const target = updateTarget(payload);
+    const detail = `Updating to ${target} · Step ${stepNumber} of ${updateStepTotal}: ${stepDescription}`;
+    const banner = $('#active-update-banner'); if (banner) { banner.hidden = !active || rememberedUpdateModal(); setText('#active-update-banner-title', `Updating to ${target}`); setText('#active-update-banner-detail', detail); }
+    const inline = $('#update-status-card'); if (inline) { inline.hidden = !active; setText('#update-status-title', `Updating to ${target}`); setText('#update-status-detail', detail); }
+  }
+  function showUpdateProgressModal(payload, remember = true) {
+    const modal = $('#update-progress-modal'); if (!modal) return;
+    if (remember) rememberUpdateModal(payload?.state?.operation_id);
+    modal.hidden = false; document.body.classList.add('modal-open'); renderUpdateProgress(payload);
+    const stateUpdate = payload?.state || {};
+    if (updateActive(stateUpdate.phase) && !state.updateOperation?.active) {
+      state.updateOperation = { active: true, polling: false, observedStart: true, initialOperationID: String(stateUpdate.operation_id || '') };
+      pollUpdateProgress();
+    }
+  }
+  function resumeRememberedUpdateModal(payload) {
+    if (!rememberedUpdateModal()) return;
+    const stateUpdate = payload?.state || {};
+    if (!updateActive(stateUpdate.phase) && !updateTerminal(stateUpdate.phase)) return;
+    showUpdateProgressModal(payload, false);
+  }
   function renderUpdateProgress(payload) {
     const stateUpdate = payload?.state || {}; const build = payload?.build || {}; const available = payload?.available || {};
-    setText('#update-progress-current', build.version || '—'); setText('#update-progress-target', stateUpdate.candidate_version || available.version || '—'); setText('#update-progress-channel', stateUpdate.candidate_channel || available.channel || '—'); setText('#update-progress-commit', stateUpdate.candidate_commit || available.commit || '—'); setText('#update-progress-phase', updatePhaseLabels[stateUpdate.phase] || stateUpdate.phase || 'Preparing update…'); setText('#update-operation-id', stateUpdate.operation_id ? `Operation ${stateUpdate.operation_id.slice(0, 12)}` : 'Operation pending');
+    const target = updateTarget(payload); const [stepNumber, stepDescription] = updateStep(stateUpdate);
+    setText('#update-progress-current', build.version || '—'); setText('#update-progress-target', target); setText('#update-progress-target-meta', `Updating from ${build.version || 'the current version'}`); setText('#update-version-jump-value', versionJumpLabel(build.version, target)); setText('#update-progress-channel', `Channel ${stateUpdate.candidate_channel || available.channel || '—'}`); setText('#update-progress-commit', `Commit ${stateUpdate.candidate_commit || available.commit || '—'}`); setText('#update-progress-phase', updatePhaseLabels[stateUpdate.phase] || stateUpdate.phase || 'Preparing update…'); setText('#update-progress-step-current', String(stepNumber)); setText('#update-progress-step-total', String(updateStepTotal)); setText('#update-progress-description', stepDescription); setText('#update-operation-id', stateUpdate.operation_id ? `Operation ${stateUpdate.operation_id.slice(0, 12)}` : 'Operation pending');
+    $$('#update-step-list [data-update-step]').forEach((item, index) => { const number = index + 1; item.toggleAttribute('aria-current', number === stepNumber); item.dataset.complete = String(number < stepNumber || (stateUpdate.phase === 'promoted' && number === stepNumber)); });
     const total = Number(stateUpdate.download_total_bytes || 0); const downloaded = Number(stateUpdate.download_bytes || 0); const downloadPercent = total > 0 ? Math.min(100, Math.max(0, Math.round(downloaded * 100 / total))) : 0; const downloadBar = $('#update-download-progress'); if (downloadBar) { downloadBar.value = downloadPercent; downloadBar.setAttribute('aria-valuenow', String(downloadPercent)); } setText('#update-download-label', total > 0 ? `${formatBytes(downloaded)} / ${formatBytes(total)} · ${downloadPercent}%` : stateUpdate.phase === 'downloading' ? 'Downloading…' : 'Not started');
-    const overall = updateOverallProgress(stateUpdate); const overallBar = $('#update-overall-progress'); if (overallBar) { overallBar.value = overall; overallBar.setAttribute('aria-valuenow', String(overall)); } setText('#update-overall-label', `${overall}%`);
     const log = $('#update-live-log'); if (log && Array.isArray(payload?.logs)) { const lines = payload.logs.map((entry) => { const at = entry.at ? dateValue(entry.at) : ''; const phase = entry.phase ? `[${entry.phase}] ` : ''; return `${at ? `${at} ` : ''}${phase}${entry.message || ''}`; }); log.textContent = lines.length ? lines.join('\n') : 'Waiting for updater logs…'; log.scrollTop = log.scrollHeight; }
     const result = $('#update-result'); const success = stateUpdate.phase === 'promoted'; const terminal = updateTerminal(stateUpdate.phase); if (result) { result.hidden = !terminal; result.classList.toggle('failure', terminal && !success); setText('#update-result-title', success ? 'Update successful' : stateUpdate.phase === 'rolled_back' ? 'Update failed and rolled back' : stateUpdate.phase === 'needs_manual_recovery' ? 'Update needs manual recovery' : 'Update failed'); setText('#update-result-message', success ? 'PayLessForAI is ready on the new version. Reload the page to continue.' : (stateUpdate.error || 'The update could not be completed. Your current version is still available.')); }
     const reload = $('#update-reload'); if (reload) reload.hidden = !success; const close = $('#update-progress-close'); if (close) { close.disabled = !terminal; close.setAttribute('aria-disabled', String(!terminal)); } const resultClose = $('#update-result-close'); if (resultClose) resultClose.hidden = !terminal;
@@ -163,7 +201,7 @@
           payload = await fetchJSONWithTimeout('/api/updates', undefined, 4_000); state.updateSnapshot = payload;
           const operationID = String(payload?.state?.operation_id || ''); const phase = String(payload?.state?.phase || '');
           state.updateOperation.observedStart = state.updateOperation.observedStart || (operationID && operationID !== state.updateOperation.initialOperationID) || ['downloading', 'verified', 'staged', 'draining', 'snapshotting', 'preflighting', 'migrating', 'starting', 'stabilizing', 'rolling_back'].includes(phase);
-          if (state.updateOperation.observedStart) { setText('#update-progress-phase', updatePhaseLabels[phase] || phase || 'Updating…'); renderUpdateProgress(payload); }
+          if (state.updateOperation.observedStart) { rememberUpdateModal(operationID); setText('#update-progress-phase', updatePhaseLabels[phase] || phase || 'Updating…'); renderUpdateProgress(payload); renderUpdateActivity(payload); }
         }
         catch (_) { setText('#update-progress-phase', 'PayLessForAI is restarting… reconnecting to the updater'); }
         if (payload && state.updateOperation.observedStart && updateTerminal(payload.state?.phase)) { state.updateOperation.active = false; renderUpdateProgress(payload); await loadUpdates(); break; }
@@ -173,7 +211,7 @@
   }
   async function startUpdateInstall(payload) {
     const available = payload?.available; if (!available || state.updateOperation?.active) return;
-    state.updateOperation = { active: true, polling: false, observedStart: false, initialOperationID: String(payload?.state?.operation_id || '') }; const modal = $('#update-progress-modal'); if (modal) { modal.hidden = false; document.body.classList.add('modal-open'); }
+    state.updateOperation = { active: true, polling: false, observedStart: false, initialOperationID: String(payload?.state?.operation_id || '') }; rememberUpdateModal(); const modal = $('#update-progress-modal'); if (modal) { modal.hidden = false; document.body.classList.add('modal-open'); }
     renderUpdateProgress({ ...payload, state: { ...(payload.state || {}), candidate_version: available.version, candidate_channel: available.channel, candidate_commit: available.commit, phase: 'downloading' } });
     pollUpdateProgress();
     try { await fetchJSON('/api/updates/install', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ version: available.version }) }); }
@@ -1582,7 +1620,7 @@
   function clearNewKey() { const secret = $('#new-key'); if (secret) { secret.hidden = true; } const value = $('#new-key-value'); if (value) value.textContent = ''; const form = $('#key-form'); if (form) form.hidden = false; const note = $('#key-modal-note'); if (note) note.hidden = false; setText('#key-modal-title', 'Create API key'); const feedback = $('#key-feedback'); if (feedback) { feedback.hidden = true; feedback.textContent = ''; } }
   function showNewKey(secretValue) { const form = $('#key-form'); if (form) form.hidden = true; const note = $('#key-modal-note'); if (note) note.hidden = true; setText('#key-modal-title', 'API key created'); setText('#new-key-value', secretValue); const secret = $('#new-key'); if (secret) secret.hidden = false; }
   function openModal(id) { const modal = $(`#${id}`); if (!modal) return; modal.hidden = false; document.body.classList.add('modal-open'); setTimeout(() => modal.querySelector('input, select')?.focus(), 0); }
-  function closeModal(modal) { const element = typeof modal === 'string' ? $(`#${modal}`) : modal; if (element?.id === 'update-progress-modal' && state.updateOperation?.active) return; if (element?.id === 'key-modal') clearNewKey(); if (element) element.hidden = true; if (!$$('.modal-backdrop:not([hidden])').length) document.body.classList.remove('modal-open'); }
+  function closeModal(modal) { const element = typeof modal === 'string' ? $(`#${modal}`) : modal; if (element?.id === 'update-progress-modal' && state.updateOperation?.active) return; if (element?.id === 'update-progress-modal') forgetUpdateModal(); if (element?.id === 'key-modal') clearNewKey(); if (element) element.hidden = true; if (!$$('.modal-backdrop:not([hidden])').length) document.body.classList.remove('modal-open'); }
   function navigate(view) { const valid = ['overview', 'models', 'groups', 'stats', 'requests', 'access', 'settings']; state.view = valid.includes(view) ? view : 'overview'; $$('.view-panel').forEach((panel) => panel.classList.toggle('active', panel.dataset.viewPanel === state.view)); $$('.nav-item').forEach((item) => item.classList.toggle('active', item.dataset.view === state.view)); const meta = { overview: ['Overview', 'Your local routing desk at a glance.'], models: ['Models', 'Search provider routes and compare live pricing.'], groups: ['Groups', 'Callable aliases with ordered routing rules and fallbacks.'], stats: ['Statistics', 'Reliability, retries, response time, and cost by group, provider, and model.'], requests: ['Requests', 'Detailed usage, cost, and request outcomes.'], access: ['Access & keys', 'Manage the keys and providers behind your proxy.'], settings: ['Settings', 'Configure self-updating and inspect version history.'] }[state.view]; setText('#page-title', meta[0]); setText('#page-kicker', meta[0].toUpperCase()); setText('#page-description', meta[1]); $('#sidebar').classList.remove('open'); if (window.location.hash !== `#${state.view}`) history.replaceState(null, '', `#${state.view}`); }
   function showGroupInstructions(group) {
     const baseURL = `${window.location.origin}/v1`;
@@ -1613,8 +1651,10 @@
   $('#updates-channel')?.addEventListener('change', () => { const note = $('#main-channel-note'); if (note) note.hidden = $('#updates-channel').value !== 'main'; });
   $('#updates-check')?.addEventListener('click', async () => { const button = $('#updates-check'); if (!button || button.disabled) return; const previousCheckAt = state.updateSnapshot?.state?.last_check_at || ''; button.disabled = true; button.textContent = 'Checking for updates…'; setUpdatesFeedback('Checking for updates…'); try { await fetchJSONWithTimeout('/api/updates/check', { method: 'POST' }, 10_000); const payload = await waitForUpdateCheck(previousCheckAt); await loadUpdates(); if (payload.state?.error) throw new Error(`Update check failed: ${payload.state.error}`); setUpdatesFeedback(payload.available ? `Update ${payload.available.version} is available.` : 'No updates available.'); } catch (error) { setUpdatesFeedback(error.message || 'Update check failed.', 'error'); } finally { button.disabled = false; button.textContent = 'Check for updates'; } });
   $('#updates-install')?.addEventListener('click', async () => { try { const payload = await fetchJSON('/api/updates'); if (!payload.available) return; await startUpdateInstall(payload); } catch (error) { setUpdatesFeedback(error.message || 'Unable to start update.', 'error'); } });
-  $('#update-reload')?.addEventListener('click', () => window.location.reload());
+  $('#update-reload')?.addEventListener('click', () => { forgetUpdateModal(); window.location.reload(); });
   $('#update-result-close')?.addEventListener('click', () => closeModal('update-progress-modal'));
+  $('#active-update-view')?.addEventListener('click', () => navigate('settings'));
+  $('#update-status-view')?.addEventListener('click', () => { if (state.updateSnapshot) showUpdateProgressModal(state.updateSnapshot); });
   $('#open-version-history')?.addEventListener('click', () => openModal('version-history-modal'));
   $('#refresh-button')?.addEventListener('click', loadUpdates);
   navigate = function(view) { const valid = ['overview', 'models', 'groups', 'stats', 'requests', 'access', 'settings']; state.view = valid.includes(view) ? view : 'overview'; $$('.view-panel').forEach((panel) => panel.classList.toggle('active', panel.dataset.viewPanel === state.view)); $$('.nav-item').forEach((item) => item.classList.toggle('active', item.dataset.view === state.view)); const meta = { overview: ['Overview', 'Your local routing desk at a glance.'], models: ['Models', 'Search provider routes and compare live pricing.'], groups: ['Groups', 'Callable aliases with ordered routing rules and fallbacks.'], stats: ['Statistics', 'Reliability, retries, response time, and cost by group, provider, and model.'], requests: ['Requests', 'Detailed usage, cost, and request outcomes.'], access: ['Access & keys', 'Manage the keys and providers behind your proxy.'], settings: ['Settings', 'Configure self-updating and inspect version history.'] }[state.view]; setText('#page-title', meta[0]); setText('#page-kicker', meta[0].toUpperCase()); setText('#page-description', meta[1]); $('#sidebar').classList.remove('open'); if (window.location.hash !== `#${state.view}`) history.replaceState(null, '', `#${state.view}`); };

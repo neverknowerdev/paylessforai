@@ -603,11 +603,15 @@ test('shows live update progress, logs, and a reload action through completion',
   const modal = page.locator('#update-progress-modal');
   await expect(modal).toBeVisible();
   await expect(modal).toContainText('main-new');
-  await expect(page.locator('#update-progress-channel')).toHaveText('main');
-  await expect(page.locator('#update-progress-commit')).toHaveText('new-commit');
+  await expect(page.locator('#update-progress-channel')).toHaveText('Channel main');
+  await expect(page.locator('#update-progress-commit')).toHaveText('Commit new-commit');
   await expect(page.locator('#update-live-log')).toContainText('Downloading release archive');
   await expect(page.locator('#update-download-progress')).toHaveAttribute('aria-valuenow', '25');
-  await expect(page.locator('#update-overall-progress')).toHaveAttribute('aria-valuenow', '17');
+  await expect(modal.locator('progress')).toHaveCount(1);
+  await expect(page.locator('#update-overall-progress')).toHaveCount(0);
+  await expect(modal.locator('.update-target-primary')).toContainText('main-new');
+  await expect(modal.locator('.update-step-count')).toContainText('Current step');
+  await expect(page.locator('#update-progress-step-total')).toHaveText('9');
   await expect(page.locator('#update-result-title')).toHaveText('Update successful', { timeout: 8_000 });
   await expect(page.locator('#update-result-message')).toContainText('Reload the page');
   await expect(page.locator('#update-reload')).toBeVisible();
@@ -615,6 +619,50 @@ test('shows live update progress, logs, and a reload action through completion',
   await Promise.all([page.waitForLoadState('domcontentloaded'), page.locator('#update-reload').click()]);
   await expect(page).toHaveURL(/#settings$/);
   await expect(page.locator('#update-progress-modal')).toBeHidden();
+});
+
+test('shows active update status outside Settings and restores open details after reload', async ({ page }) => {
+  const payload = {
+    build: { version: 'main-old', channel: 'main', commit: 'old-commit', os: 'darwin', arch: 'arm64' },
+    settings: { enabled: true, channel: 'main', interval_seconds: 900 },
+    available: null,
+    state: {
+      operation_id: 'active-operation-e2e',
+      phase: 'migrating',
+      candidate_version: 'main-new',
+      candidate_channel: 'main',
+      candidate_commit: 'new-commit',
+      download_bytes: 750,
+      download_total_bytes: 1000,
+      overall_progress: 82,
+    },
+    logs: [{ phase: 'migrating', message: 'Applying database migrations' }],
+    history: [],
+  };
+  await page.route('**/api/updates', async (route) => {
+    await route.fulfill({ contentType: 'application/json', body: JSON.stringify(payload) });
+  });
+  await page.goto('/#overview');
+
+  const banner = page.locator('#active-update-banner');
+  await expect(banner).toBeVisible();
+  await expect(banner).toContainText('Updating to main-new');
+  await expect(banner).toContainText('main-new');
+  await expect(banner).toContainText('Step 6 of 9');
+
+  await banner.locator('#active-update-view').click();
+  await expect(page).toHaveURL(/#settings$/);
+  await expect(page.locator('#update-status-card')).toBeVisible();
+  await expect(page.locator('#update-status-card')).toContainText('main-new');
+  await page.locator('#update-status-view').click();
+  await expect(page.locator('#update-progress-modal')).toBeVisible();
+  await expect(page.locator('#update-progress-target')).toHaveText('main-new');
+
+  await page.reload();
+  await expect(page).toHaveURL(/#settings$/);
+  await expect(page.locator('#update-progress-modal')).toBeVisible();
+  await expect(page.locator('#update-progress-target')).toHaveText('main-new');
+  await expect(page.locator('#update-live-log')).toContainText('Applying database migrations');
 });
 
 test('keeps update failure details visible and allows closing the terminal modal', async ({ page }) => {

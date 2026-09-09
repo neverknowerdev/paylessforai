@@ -137,6 +137,52 @@ func TestJournalLogsAreDurableOperationScopedAndChronological(t *testing.T) {
 	}
 }
 
+func TestSnapshotRehydratesActiveOperationAfterServiceRestart(t *testing.T) {
+	root := t.TempDir()
+	settings := &memorySettings{values: map[string]string{}}
+	first, err := NewService(root, settings, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	state := State{
+		OperationID:        "op-reload",
+		Phase:              PhaseStabilizing,
+		CurrentVersion:     "v1.0.0",
+		CandidateVersion:   "v1.1.0",
+		CandidateCommit:    "candidate-commit",
+		CandidateChannel:   "releases",
+		DownloadBytes:      1024,
+		DownloadTotalBytes: 2048,
+		PhaseProgress:      60,
+		OverallProgress:    96,
+	}
+	if err := first.journal.Transition(state); err != nil {
+		t.Fatal(err)
+	}
+	state = first.journal.Snapshot()
+	if err := first.journal.AppendLog(state.OperationID, state.Phase, "candidate is ready"); err != nil {
+		t.Fatal(err)
+	}
+
+	second, err := NewService(root, settings, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	snapshot, err := second.Snapshot(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if snapshot.Available != nil {
+		t.Fatalf("available manifest should not be required after restart: %#v", snapshot.Available)
+	}
+	if snapshot.State != state {
+		t.Fatalf("state after restart = %#v, want %#v", snapshot.State, state)
+	}
+	if len(snapshot.Logs) != 1 || snapshot.Logs[0].OperationID != state.OperationID || snapshot.Logs[0].Message != "candidate is ready" {
+		t.Fatalf("logs after restart = %#v", snapshot.Logs)
+	}
+}
+
 func TestDownloadProgressReaderReportsBytes(t *testing.T) {
 	var total int64
 	reader := &downloadProgressReader{reader: bytes.NewReader([]byte("candidate artifact")), onRead: func(count int64) { total += count }}

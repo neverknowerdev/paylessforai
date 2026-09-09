@@ -309,7 +309,12 @@ func rejectRoute(request MatchRequest, route Route, now time.Time, allowed, excl
 		return reject("stale_price", "route price snapshot is stale")
 	}
 	if !route.PriceAvailable {
-		return reject("missing_price", "route does not expose usable pricing")
+		// A subscription has no marginal token price to compare. It remains a
+		// valid fallback when the request does not impose a price constraint;
+		// otherwise we cannot safely prove that it satisfies that constraint.
+		if route.BillingClass != BillingSubscription || requestNeedsPrice(request) {
+			return reject("missing_price", "route does not expose usable pricing")
+		}
 	}
 	if route.Price.InputPicoUSDPerToken < 0 || route.Price.OutputPicoUSDPerToken < 0 || route.Price.FixedPicoUSD < 0 {
 		return reject("missing_price", "route has invalid negative pricing")
@@ -335,6 +340,13 @@ func rejectRoute(request MatchRequest, route Route, now time.Time, allowed, excl
 		return reject("over_output_price_limit", "route output price exceeds the stage limit")
 	}
 	return RouteRejection{}, false
+}
+
+func requestNeedsPrice(request MatchRequest) bool {
+	return request.MaximumCostPicoUSD != nil ||
+		request.MaximumInputPicoUSDPerToken != nil ||
+		request.MaximumOutputPicoUSDPerToken != nil ||
+		request.MaximumOfficialPricePercent != nil
 }
 
 const maxInt64 = int64(^uint64(0) >> 1)

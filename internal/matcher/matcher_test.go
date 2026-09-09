@@ -127,11 +127,26 @@ func TestMatchAcceptsProviderQualifiedAndHyphenFreeAliases(t *testing.T) {
 	}
 }
 
+func TestMatchDoesNotGateRoutesOnToolMetadata(t *testing.T) {
+	route := testRoute("opencode-go", "opencode-go", 1, 1)
+	route.Capabilities.Tools = false
+	route.Capabilities.Parameters = map[string]bool{}
+
+	result := New().Match(MatchInput{Request: MatchRequest{
+		Protocol:           ProtocolChatCompletions,
+		LogicalModel:       "model-a",
+		RequiredParameters: []string{"tools"},
+	}, Routes: []Route{route}, Now: time.Unix(20, 0)})
+	if result.Selected == nil || result.Selected.Route.ID != "opencode-go" || len(result.Rejections) != 0 {
+		t.Fatalf("tool metadata must not exclude a route, got %#v", result)
+	}
+}
+
 func TestMatchRejectsIncompatibleRoutesWithReasons(t *testing.T) {
 	route := testRoute("r1", "openrouter", 1, 1)
 	route.Capabilities.Protocols = map[Protocol]bool{ProtocolChatCompletions: true}
 	route.Health = HealthBackoff
-	result := New().Match(MatchInput{Request: MatchRequest{Protocol: ProtocolResponses, LogicalModel: "model-a", RequireTools: true}, Routes: []Route{route}, Now: time.Unix(20, 0)})
+	result := New().Match(MatchInput{Request: MatchRequest{Protocol: ProtocolResponses, LogicalModel: "model-a"}, Routes: []Route{route}, Now: time.Unix(20, 0)})
 	if result.Selected != nil || result.Error == nil || result.Error.Code != "no_eligible_route" {
 		t.Fatalf("expected no route, got %#v", result)
 	}

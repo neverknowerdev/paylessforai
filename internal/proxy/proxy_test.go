@@ -246,6 +246,7 @@ func TestProxyUsesUnpricedSubscriptionBeforeMeteredRoutes(t *testing.T) {
 	}}
 	unpricedSubscriptionModel := model("model-a", 0, 0)
 	unpricedSubscriptionModel.PriceAvailable = false
+	unpricedSubscriptionModel.SupportedParameters = nil
 	subscription := &fakeProvider{name: "opencode-go", models: []providers.Model{unpricedSubscriptionModel}, responses: []func(*http.Request) (*http.Response, error){
 		func(*http.Request) (*http.Response, error) {
 			return nil, &providers.UpstreamError{Provider: "opencode-go", StatusCode: http.StatusBadGateway, Class: retry.ErrorUnknown, Message: "subscription provider failed"}
@@ -265,7 +266,7 @@ func TestProxyUsesUnpricedSubscriptionBeforeMeteredRoutes(t *testing.T) {
 		surplus,
 	)
 	defer db.Close()
-	request := httptest.NewRequest(http.MethodPost, "/v1/chat/completions", strings.NewReader(`{"model":"model-a","messages":[]}`))
+	request := httptest.NewRequest(http.MethodPost, "/v1/chat/completions", strings.NewReader(`{"model":"model-a","messages":[],"tools":[{"type":"function","function":{"name":"lookup","parameters":{"type":"object"}}}]}`))
 	request.Header.Set("Authorization", "Bearer "+secret)
 	response := httptest.NewRecorder()
 	proxy.ServeHTTP(response, request, matcher.ProtocolChatCompletions)

@@ -203,6 +203,14 @@ func TestProxyRetriesThenFailsOver(t *testing.T) {
 	if firstCalls != 2 || secondCalls != 1 {
 		t.Fatalf("unexpected call counts: first=%d second=%d", firstCalls, secondCalls)
 	}
+	items, err := db.Stats.ListRequestStats(context.Background(), 10)
+	if err != nil || len(items) != 1 || len(items[0].AttemptDetails) != 3 {
+		t.Fatalf("expected persisted attempts, got %#v, %v", items, err)
+	}
+	statuses := items[0].AttemptDetails
+	if statuses[0].HTTPStatus == nil || *statuses[0].HTTPStatus != 500 || statuses[1].HTTPStatus == nil || *statuses[1].HTTPStatus != 500 || statuses[2].HTTPStatus == nil || *statuses[2].HTTPStatus != 200 {
+		t.Fatalf("unexpected persisted upstream statuses: %#v", statuses)
+	}
 }
 
 func TestProxyFailsOverImmediatelyFromFreeRoute(t *testing.T) {

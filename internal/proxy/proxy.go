@@ -156,7 +156,6 @@ type parsedRequest struct {
 	MaxContext               int64
 	MaxOutput                int64
 	RequiredParams           []string
-	RequireTools             bool
 	RequireStructured        bool
 	Stream                   bool
 	RequiredInputModalities  []string
@@ -164,7 +163,7 @@ type parsedRequest struct {
 }
 
 func (p parsedRequest) MatchRequest(protocol matcher.Protocol) matcher.MatchRequest {
-	return matcher.MatchRequest{Protocol: protocol, LogicalModel: p.Model, RequiredParameters: p.RequiredParams, RequireTools: p.RequireTools, RequireStructured: p.RequireStructured, InputTokens: p.InputTokens, ExpectedOutput: p.ExpectedOutput, MaxContext: p.MaxContext, MaxOutput: p.MaxOutput, RequiredInputModalities: p.RequiredInputModalities, RequiredOutputModalities: p.RequiredOutputModalities}
+	return matcher.MatchRequest{Protocol: protocol, LogicalModel: p.Model, RequiredParameters: p.RequiredParams, RequireStructured: p.RequireStructured, InputTokens: p.InputTokens, ExpectedOutput: p.ExpectedOutput, MaxContext: p.MaxContext, MaxOutput: p.MaxOutput, RequiredInputModalities: p.RequiredInputModalities, RequiredOutputModalities: p.RequiredOutputModalities}
 }
 
 func parseRequest(body []byte, protocol matcher.Protocol) (parsedRequest, error) {
@@ -189,10 +188,6 @@ func parseRequest(body []byte, protocol matcher.Protocol) (parsedRequest, error)
 	request.InputTokens = int64(len(body) / 4)
 	if request.InputTokens == 0 {
 		request.InputTokens = 1
-	}
-	if _, ok := payload["tools"]; ok {
-		request.RequireTools = true
-		request.RequiredParams = append(request.RequiredParams, "tools")
 	}
 	if _, ok := payload["response_format"]; ok {
 		request.RequireStructured = true

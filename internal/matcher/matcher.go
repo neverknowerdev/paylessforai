@@ -99,7 +99,6 @@ type MatchRequest struct {
 	LogicalModel                 string
 	LogicalModels                []string
 	RequiredParameters           []string
-	RequireTools                 bool
 	RequireStructured            bool
 	InputTokens                  int64
 	ExpectedOutput               int64
@@ -269,13 +268,16 @@ func rejectRoute(request MatchRequest, route Route, now time.Time, allowed, excl
 			return reject("wrong_billing_class", "route billing class is outside the stage policy")
 		}
 	}
-	if request.RequireTools && !route.Capabilities.Tools {
-		return reject("missing_capability", "route does not support tools")
-	}
 	if request.RequireStructured && !route.Capabilities.StructuredOutput {
 		return reject("missing_capability", "route does not support structured output")
 	}
 	for _, parameter := range request.RequiredParameters {
+		// Tool invocation is provider-normalized at execution time. Catalog
+		// metadata is not authoritative enough to exclude a route: providers
+		// that support tools frequently omit it from their model discovery data.
+		if strings.EqualFold(strings.TrimSpace(parameter), "tools") {
+			continue
+		}
 		if !route.Capabilities.Parameters[parameter] {
 			return reject("missing_capability", "route does not support parameter "+parameter)
 		}

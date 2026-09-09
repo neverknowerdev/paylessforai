@@ -62,6 +62,43 @@ func TestMatchOrdersFreeSubscriptionThenCheapestMetered(t *testing.T) {
 	}
 }
 
+func TestMatchAllowsUnpricedSubscriptionUnlessPriceIsConstrained(t *testing.T) {
+	subscription := testRoute("subscription", "opencode-go", 0, 0)
+	subscription.BillingClass = BillingSubscription
+	subscription.PriceAvailable = false
+	metered := testRoute("metered", "openrouter", 1, 1)
+	metered.BillingClass = BillingMetered
+	base := MatchRequest{Protocol: ProtocolChatCompletions, LogicalModel: "model-a", InputTokens: 1, ExpectedOutput: 1}
+
+	result := New().Match(MatchInput{Request: base, Routes: []Route{metered, subscription}, Now: time.Unix(20, 0)})
+	if result.Selected == nil || result.Selected.Route.ID != "subscription" {
+		t.Fatalf("unpriced subscription should be eligible before metered routes, got %#v", result)
+	}
+
+	cost := int64(1)
+	input := int64(1)
+	output := int64(1)
+	percent := 100
+	for _, constrained := range []struct {
+		name  string
+		apply func(*MatchRequest)
+	}{
+		{"maximum total cost", func(request *MatchRequest) { request.MaximumCostPicoUSD = &cost }},
+		{"maximum input price", func(request *MatchRequest) { request.MaximumInputPicoUSDPerToken = &input }},
+		{"maximum output price", func(request *MatchRequest) { request.MaximumOutputPicoUSDPerToken = &output }},
+		{"maximum official price percentage", func(request *MatchRequest) { request.MaximumOfficialPricePercent = &percent }},
+	} {
+		t.Run(constrained.name, func(t *testing.T) {
+			request := base
+			constrained.apply(&request)
+			result := New().Match(MatchInput{Request: request, Routes: []Route{subscription}, Now: time.Unix(20, 0)})
+			if result.Selected != nil || len(result.Rejections) != 1 || result.Rejections[0].Code != "missing_price" {
+				t.Fatalf("price-constrained request must reject unpriced subscription, got %#v", result)
+			}
+		})
+	}
+}
+
 func TestBillingTierUsesOneBasedPriorityValues(t *testing.T) {
 	cases := []struct {
 		name  string

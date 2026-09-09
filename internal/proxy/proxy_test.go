@@ -238,13 +238,15 @@ func TestProxyFailsOverImmediatelyFromFreeRoute(t *testing.T) {
 	}
 }
 
-func TestProxyUsesBillingTierOrderAndContinuesAfterProviderFailure(t *testing.T) {
+func TestProxyUsesUnpricedSubscriptionBeforeMeteredRoutes(t *testing.T) {
 	free := &fakeProvider{name: "opencode", models: []providers.Model{model("model-a:free", 0, 0)}, responses: []func(*http.Request) (*http.Response, error){
 		func(*http.Request) (*http.Response, error) {
 			return nil, &providers.UpstreamError{Provider: "opencode", StatusCode: http.StatusServiceUnavailable, Class: retry.ErrorServer, Message: "free capacity exhausted"}
 		},
 	}}
-	subscription := &fakeProvider{name: "opencode-go", models: []providers.Model{model("model-a", 100, 100)}, responses: []func(*http.Request) (*http.Response, error){
+	unpricedSubscriptionModel := model("model-a", 0, 0)
+	unpricedSubscriptionModel.PriceAvailable = false
+	subscription := &fakeProvider{name: "opencode-go", models: []providers.Model{unpricedSubscriptionModel}, responses: []func(*http.Request) (*http.Response, error){
 		func(*http.Request) (*http.Response, error) {
 			return nil, &providers.UpstreamError{Provider: "opencode-go", StatusCode: http.StatusBadGateway, Class: retry.ErrorUnknown, Message: "subscription provider failed"}
 		},

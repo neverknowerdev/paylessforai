@@ -362,16 +362,51 @@ func (p *Proxy) execute(ctx context.Context, writer http.ResponseWriter, request
 			if completed {
 				return lastErr
 			}
-			// Format discovery is deliberately not retried by the outer
-			// same-route policy. Every candidate already consumed an attempt.
+			// Format discovery already consumed the route's available candidate
+			// attempts. Feed the terminal error back through the same provider
+			// bookkeeping and fallback policy as the legacy execution path.
 			if lastErr != nil && p.Repositories != nil {
 				_ = p.Repositories.ProxyRequests.RecordAttemptRoute(ctx, requestID, totalAttempts, route.Provider, route.UpstreamModel)
 			}
-			if lastErr != nil && !safeFormatFailure(lastErr) && current == len(plan.Entries)-1 {
-				return lastErr
+			if lastErr == nil {
+				current++
+				retriesRemaining = -1
+				continue
 			}
-			current++
-			retriesRemaining = -1
+			classified := classify(lastErr)
+			if classified.Class == retry.ErrorQuotaExhausted {
+				blocked = true
+				var upstream *providers.UpstreamError
+				if errors.As(lastErr, &upstream) {
+					p.Catalog.SetProviderBlocked(blockKey, upstream.NextAvailableAt)
+					if p.Repositories != nil {
+						if route.CredentialID != "" {
+							_ = p.Repositories.ProviderCredentials.MarkLimitedByID(ctx, route.CredentialID, upstream.NextAvailableAt, upstream.Message)
+						} else {
+							_ = p.Repositories.ProviderCredentials.MarkLimited(ctx, route.Provider, upstream.NextAvailableAt, upstream.Message)
+						}
+					}
+				}
+			}
+			lastAttemptErrorCode = errorCode(lastErr)
+			providerErrors = append(providerErrors, providerError{Provider: route.Provider, Account: route.Account, Error: humanErrorMessage(lastErr)})
+			decision := p.Retry.Decide(retry.Input{Policy: policy, AttemptNumber: totalAttempts, Now: time.Now(), Error: classified, Delivery: retry.NothingSent, SameRouteAvailable: !route.Free, FallbacksRemaining: len(plan.Entries) - current - 1, PlanMode: true, SameRouteRetriesRemaining: retriesRemaining, PlanEntriesRemaining: len(plan.Entries) - current - 1, TotalAttemptsRemaining: policy.MaximumAttempts - totalAttempts})
+			if decision.Action != retry.RetrySameRoute && decision.Action != retry.FailOver && len(plan.Entries)-current-1 > 0 && classified.Class != retry.ErrorCancelled {
+				decision.Action = retry.FailOver
+				decision.Delay = 0
+			}
+			if decision.Action != retry.RetrySameRoute && decision.Action != retry.FailOver {
+				return allProviderAttemptsFailed(statusFor(lastErr), totalAttempts, providerErrors, lastAttemptErrorCode)
+			}
+			if decision.Action == retry.FailOver {
+				current++
+				retriesRemaining = -1
+			} else if retriesRemaining > 0 {
+				retriesRemaining--
+			}
+			if err := wait(ctx, decision.Delay); err != nil {
+				return err
+			}
 			continue
 		}
 		response, err := client.Do(ctx, request.Protocol, route.UpstreamModel, body)
@@ -471,6 +506,7 @@ func (p *Proxy) executeTranslatedRoute(ctx context.Context, writer http.Response
 		candidates = candidates[:remainingBudget+1]
 	}
 	lastErr := error(nil)
+	formatFailure := false
 	used := 0
 	for index, candidate := range candidates {
 		attempt := firstAttempt + index
@@ -505,6 +541,7 @@ func (p *Proxy) executeTranslatedRoute(ctx context.Context, writer http.Response
 			if !safeFormatFailure(err) {
 				break
 			}
+			formatFailure = true
 			continue
 		}
 		events, decodeErr := wire.DecodeResponse(candidate, response)
@@ -523,6 +560,7 @@ func (p *Proxy) executeTranslatedRoute(ctx context.Context, writer http.Response
 			if !safeFormatFailure(decodeErr) {
 				break
 			}
+			formatFailure = true
 			continue
 		}
 		if p.Repositories != nil {
@@ -546,11 +584,13 @@ func (p *Proxy) executeTranslatedRoute(ctx context.Context, writer http.Response
 	if lastErr == nil {
 		lastErr = &proxyError{status: http.StatusBadGateway, code: "no_supported_provider_format", message: "no supported provider format could be used"}
 	}
-	if p.Repositories != nil {
-		_ = p.Repositories.ModelRoutes.ClearFormat(ctx, route.ID)
-	}
-	if p.Catalog != nil {
-		p.Catalog.ClearFormat(route.ID)
+	if formatFailure {
+		if p.Repositories != nil {
+			_ = p.Repositories.ModelRoutes.ClearFormat(ctx, route.ID)
+		}
+		if p.Catalog != nil {
+			p.Catalog.ClearFormat(route.ID)
+		}
 	}
 	return lastErr, false, used
 }
@@ -595,7 +635,11 @@ func (p *Proxy) recordTranslatedAttempt(ctx context.Context, requestID string, a
 	if err != nil {
 		message, raw = humanErrorMessage(err), sanitize(err.Error())
 	}
-	_ = recordProxyAttemptRouteFormats(ctx, p.Repositories, requestID, attempt, route.ID, route.CredentialID, entry.StageID, strings.Join(entry.StagePath, " / "), route.Provider, route.UpstreamModel, state, code, message, clientFormat, providerFormat, nil, raw)
+	status := upstreamHTTPStatus(err)
+	if status == nil && (state == "succeeded" || state == "partial") {
+		status = httpStatusPointer(http.StatusOK)
+	}
+	_ = recordProxyAttemptRouteFormats(ctx, p.Repositories, requestID, attempt, route.ID, route.CredentialID, entry.StageID, strings.Join(entry.StagePath, " / "), route.Provider, route.UpstreamModel, state, code, message, clientFormat, providerFormat, status, raw)
 }
 
 func safeFormatFailure(err error) bool {
@@ -614,7 +658,7 @@ func safeFormatFailure(err error) bool {
 	case http.StatusBadRequest, http.StatusNotFound, http.StatusMethodNotAllowed, http.StatusUnsupportedMediaType, http.StatusUnprocessableEntity:
 		return true
 	default:
-		return upstream.StatusCode >= 500 && upstream.StatusCode <= 599
+		return false
 	}
 }
 

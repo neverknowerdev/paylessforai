@@ -1,0 +1,4 @@
+{
+  "status": 503,
+  "body": {"error": {"message": "free provider unavailable for retry", "type": "mock_error"}}
+}

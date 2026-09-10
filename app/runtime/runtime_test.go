@@ -15,6 +15,7 @@ import (
 	"github.com/neverknowerdev/paylessforai/internal/ids"
 	"github.com/neverknowerdev/paylessforai/internal/providers"
 	"github.com/neverknowerdev/paylessforai/internal/secrets"
+	"github.com/neverknowerdev/paylessforai/internal/wire"
 )
 
 func TestLoadProviderClientsPrefersOneStoredCredentialPerProvider(t *testing.T) {
@@ -79,6 +80,24 @@ func TestLoadProviderClientsSupportsCustomProviderEndpoint(t *testing.T) {
 	clients := loadProviderClients(providers.Builtin(nil), db, box)
 	if len(clients) != 1 || clients[0].Name() != "local-llm" {
 		t.Fatalf("expected custom provider client, got %#v", clients)
+	}
+}
+
+func TestCredentialClientPreservesTranslationClient(t *testing.T) {
+	underlying := providers.NewHTTPClient("opencode-go", "https://opencode.ai/zen/go/v1", "key")
+	client := credentialClient{Client: underlying, id: "credential-1", account: "Main"}
+
+	translated, ok := providers.Client(client).(providers.TranslationClient)
+	if !ok {
+		t.Fatal("credential client must preserve the translation-capable provider interface")
+	}
+	prepared, err := translated.Prepare(wire.FormatResponses, "muse-spark-1.3-contributor", []byte(`{"model":"old","input":"hello"}`))
+	if err != nil {
+		t.Fatalf("prepare through credential client: %v", err)
+	}
+	defer prepared.Body.Close()
+	if prepared.Format != wire.FormatResponses || prepared.URL.Path != "/zen/go/v1/responses" {
+		t.Fatalf("unexpected prepared request: %#v", prepared)
 	}
 }
 

@@ -148,7 +148,7 @@ func (m *Manager) Refresh(ctx context.Context) (refreshErr error) {
 	modelMap := map[string]Model{}
 	routes := make([]matcher.Route, 0)
 	for _, batch := range all {
-		executionKey, credentialID := batch.provider, ""
+		executionKey, credentialID, account := batch.provider, "", ""
 		billingClass := matcher.BillingMetered
 		if metadata, ok := batch.client.(providers.ClientMetadata); ok {
 			if value := metadata.ExecutionKey(); value != "" {
@@ -158,6 +158,9 @@ func (m *Manager) Refresh(ctx context.Context) (refreshErr error) {
 			if value := metadata.BillingClass(); value != "" {
 				billingClass = value
 			}
+		}
+		if metadata, ok := batch.client.(providers.ClientAccountMetadata); ok {
+			account = metadata.AccountLabel()
 		}
 		for _, model := range batch.models {
 			// A logical model is derived from the upstream ID itself, rather
@@ -192,7 +195,7 @@ func (m *Manager) Refresh(ctx context.Context) (refreshErr error) {
 			if free {
 				routeBilling = matcher.BillingFree
 			}
-			routes = append(routes, matcher.Route{ID: executionKey + ":" + model.ID, Provider: batch.provider, LogicalModel: logical, UpstreamModel: model.ID, Free: free, Price: model.Pricing, PriceAvailable: model.PriceAvailable, OfficialPrice: model.OfficialPricing, OfficialPriceAvailable: model.OfficialPriceAvailable, CredentialID: credentialID, ExecutionKey: executionKey, BillingClass: routeBilling, Capabilities: matcher.Capabilities{Protocols: protocols, Parameters: parameters, Tools: parameters["tools"], StructuredOutput: parameters["response_format"] || parameters["structured_outputs"], MaxContext: model.ContextLength, MaxOutput: model.MaxCompletionTokens, InputModalities: inputModalities, OutputModalities: outputModalities, Tags: append([]string(nil), model.Tags...)}, Health: matcher.HealthHealthy, Trusted: true})
+			routes = append(routes, matcher.Route{ID: executionKey + ":" + model.ID, Provider: batch.provider, LogicalModel: logical, UpstreamModel: model.ID, Free: free, Price: model.Pricing, PriceAvailable: model.PriceAvailable, OfficialPrice: model.OfficialPricing, OfficialPriceAvailable: model.OfficialPriceAvailable, CredentialID: credentialID, Account: account, ExecutionKey: executionKey, BillingClass: routeBilling, Capabilities: matcher.Capabilities{Protocols: protocols, Parameters: parameters, Tools: parameters["tools"], StructuredOutput: parameters["response_format"] || parameters["structured_outputs"], MaxContext: model.ContextLength, MaxOutput: model.MaxCompletionTokens, InputModalities: inputModalities, OutputModalities: outputModalities, Tags: append([]string(nil), model.Tags...)}, Health: matcher.HealthHealthy, Trusted: true})
 		}
 	}
 	// Preserve routes for configured providers during transient discovery failures.

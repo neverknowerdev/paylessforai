@@ -326,7 +326,7 @@ func (p *Proxy) execute(ctx context.Context, writer http.ResponseWriter, request
 		if client == nil {
 			totalAttempts++
 			lastAttemptErrorCode = "provider_not_configured"
-			providerErrors = append(providerErrors, providerError{Provider: route.Provider, Error: "selected provider is not configured"})
+			providerErrors = append(providerErrors, providerError{Provider: route.Provider, Account: route.Account, Error: "selected provider is not configured"})
 			if p.Repositories != nil {
 				_ = recordProxyAttemptRoute(ctx, p.Repositories, requestID, totalAttempts, route.ID, route.CredentialID, entry.StageID, strings.Join(entry.StagePath, " / "), route.Provider, route.UpstreamModel, "failed", "provider_not_configured", "Selected provider is not configured.", "selected provider is not configured")
 			}
@@ -382,7 +382,7 @@ func (p *Proxy) execute(ctx context.Context, writer http.ResponseWriter, request
 			_ = recordProxyAttemptRoute(ctx, p.Repositories, requestID, totalAttempts, route.ID, route.CredentialID, entry.StageID, strings.Join(entry.StagePath, " / "), route.Provider, route.UpstreamModel, "failed", errorCode(err), humanErrorMessage(err), rawErrorMessage(err))
 		}
 		lastAttemptErrorCode = errorCode(err)
-		providerErrors = append(providerErrors, providerError{Provider: route.Provider, Error: humanErrorMessage(err)})
+		providerErrors = append(providerErrors, providerError{Provider: route.Provider, Account: route.Account, Error: humanErrorMessage(err)})
 		decision := p.Retry.Decide(retry.Input{Policy: policy, AttemptNumber: totalAttempts, Now: time.Now(), Error: classified, Delivery: retry.NothingSent, SameRouteAvailable: !route.Free, FallbacksRemaining: len(plan.Entries) - current - 1, PlanMode: true, SameRouteRetriesRemaining: retriesRemaining, PlanEntriesRemaining: len(plan.Entries) - current - 1, TotalAttemptsRemaining: policy.MaximumAttempts - totalAttempts})
 		// A provider error must not hide healthy routes later in the plan. The
 		// retry engine still controls configured same-route retries, but if it
@@ -695,6 +695,7 @@ type proxyError struct {
 
 type providerError struct {
 	Provider string `json:"provider"`
+	Account  string `json:"account"`
 	Error    string `json:"error"`
 }
 

@@ -487,7 +487,7 @@ test('configures a subscription, records quota blocking, and shows dynamic prici
       type: 'payless_error',
       code: 'all_provider_attempts_failed',
       message: 'all provider attempts failed',
-      errors: [{ provider: 'subscription-mock', error: 'monthly usage quota exceeded' }],
+      errors: [{ provider: 'subscription-mock', account: 'Pro plan', error: 'monthly usage quota exceeded' }],
     },
   });
   const credentials = await (await request.get('/api/providers/credentials')).json();

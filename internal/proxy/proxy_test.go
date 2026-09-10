@@ -32,11 +32,13 @@ type fakeProvider struct {
 type metadataProvider struct {
 	*fakeProvider
 	executionKey string
+	account      string
 	billing      matcher.BillingClass
 }
 
 func (p metadataProvider) ExecutionKey() string               { return p.executionKey }
 func (p metadataProvider) CredentialID() string               { return p.executionKey }
+func (p metadataProvider) AccountLabel() string               { return p.account }
 func (p metadataProvider) BillingClass() matcher.BillingClass { return p.billing }
 
 type failingReader struct {
@@ -222,7 +224,10 @@ func TestProxyReturnsProviderErrorsAfterAllAttemptsFail(t *testing.T) {
 			return nil, &providers.UpstreamError{Provider: "surplus", StatusCode: http.StatusBadGateway, Class: retry.ErrorServer, Message: "second paid attempt failed"}
 		},
 	}}
-	proxy, db, secret := testProxy(t, free, paid)
+	proxy, db, secret := testProxy(t,
+		metadataProvider{fakeProvider: free, executionKey: "opencode-free", account: "Free account", billing: matcher.BillingFree},
+		metadataProvider{fakeProvider: paid, executionKey: "surplus-paid", account: "Primary account", billing: matcher.BillingMetered},
+	)
 	defer db.Close()
 	request := httptest.NewRequest(http.MethodPost, "/v1/chat/completions", strings.NewReader(`{"model":"model-a","messages":[]}`))
 	request.Header.Set("Authorization", "Bearer "+secret)
@@ -247,9 +252,9 @@ func TestProxyReturnsProviderErrorsAfterAllAttemptsFail(t *testing.T) {
 		t.Fatalf("expected generic terminal error, got %#v", payload.Error)
 	}
 	want := []providerError{
-		{Provider: "opencode", Error: "free capacity exhausted"},
-		{Provider: "surplus", Error: "first paid attempt failed"},
-		{Provider: "surplus", Error: "second paid attempt failed"},
+		{Provider: "opencode", Account: "Free account", Error: "free capacity exhausted"},
+		{Provider: "surplus", Account: "Primary account", Error: "first paid attempt failed"},
+		{Provider: "surplus", Account: "Primary account", Error: "second paid attempt failed"},
 	}
 	if len(payload.Error.Errors) != len(want) {
 		t.Fatalf("provider errors: got %#v want %#v", payload.Error.Errors, want)

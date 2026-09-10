@@ -239,10 +239,11 @@ func TestProxyReturnsProviderErrorsAfterAllAttemptsFail(t *testing.T) {
 	}
 	var payload struct {
 		Error struct {
-			Type    string          `json:"type"`
-			Code    string          `json:"code"`
-			Message string          `json:"message"`
-			Errors  []providerError `json:"errors"`
+			Type     string          `json:"type"`
+			Code     string          `json:"code"`
+			Message  string          `json:"message"`
+			Attempts int             `json:"attempts"`
+			Errors   []providerError `json:"errors"`
 		} `json:"error"`
 	}
 	if err := json.Unmarshal(response.Body.Bytes(), &payload); err != nil {
@@ -250,6 +251,9 @@ func TestProxyReturnsProviderErrorsAfterAllAttemptsFail(t *testing.T) {
 	}
 	if payload.Error.Type != "payless_error" || payload.Error.Code != "all_provider_attempts_failed" || payload.Error.Message != "all provider attempts failed" {
 		t.Fatalf("expected generic terminal error, got %#v", payload.Error)
+	}
+	if payload.Error.Attempts != 3 {
+		t.Fatalf("expected 3 attempts, got %d", payload.Error.Attempts)
 	}
 	want := []providerError{
 		{Provider: "opencode", Account: "Free account", Error: "free capacity exhausted"},

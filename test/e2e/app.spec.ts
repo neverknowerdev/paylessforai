@@ -487,6 +487,7 @@ test('configures a subscription, records quota blocking, and shows dynamic prici
       type: 'payless_error',
       code: 'all_provider_attempts_failed',
       message: 'all provider attempts failed',
+      attempts: 1,
       errors: [{ provider: 'subscription-mock', account: 'Pro plan', error: 'monthly usage quota exceeded' }],
     },
   });

@@ -146,7 +146,7 @@ func (p *Proxy) ServeHTTP(w http.ResponseWriter, r *http.Request, protocol match
 		p.finishError(r.Context(), requestID, persistenceErrorCode(err), sanitize(err.Error()))
 		var proxyErr *proxyError
 		if errors.As(err, &proxyErr) && len(proxyErr.providerErrors) > 0 {
-			writeProviderErrors(w, statusFor(err), errorCode(err), sanitize(err.Error()), proxyErr.providerErrors)
+			writeProviderErrors(w, statusFor(err), errorCode(err), sanitize(err.Error()), proxyErr.attempts, proxyErr.providerErrors)
 			return
 		}
 		writeError(w, statusFor(err), errorCode(err), sanitize(err.Error()))
@@ -298,12 +298,12 @@ func (p *Proxy) execute(ctx context.Context, writer http.ResponseWriter, request
 		if current >= len(plan.Entries) {
 			if blocked {
 				if len(providerErrors) > 0 {
-					return allProviderAttemptsFailed(http.StatusTooManyRequests, providerErrors, lastAttemptErrorCode)
+					return allProviderAttemptsFailed(http.StatusTooManyRequests, totalAttempts, providerErrors, lastAttemptErrorCode)
 				}
 				return &proxyError{status: http.StatusTooManyRequests, code: "all_subscription_quotas_exhausted", message: "all eligible subscription provider accounts are temporarily limited"}
 			}
 			if len(providerErrors) > 0 {
-				return allProviderAttemptsFailed(http.StatusServiceUnavailable, providerErrors, lastAttemptErrorCode)
+				return allProviderAttemptsFailed(http.StatusServiceUnavailable, totalAttempts, providerErrors, lastAttemptErrorCode)
 			}
 			return &proxyError{status: http.StatusServiceUnavailable, code: "no_fallback_route", message: "all eligible routes were exhausted"}
 		}
@@ -393,7 +393,7 @@ func (p *Proxy) execute(ctx context.Context, writer http.ResponseWriter, request
 			decision.Delay = 0
 		}
 		if decision.Action != retry.RetrySameRoute && decision.Action != retry.FailOver {
-			return allProviderAttemptsFailed(statusFor(err), providerErrors, lastAttemptErrorCode)
+			return allProviderAttemptsFailed(statusFor(err), totalAttempts, providerErrors, lastAttemptErrorCode)
 		}
 		if decision.Action == retry.FailOver {
 			current++
@@ -405,7 +405,7 @@ func (p *Proxy) execute(ctx context.Context, writer http.ResponseWriter, request
 			return err
 		}
 	}
-	return allProviderAttemptsFailed(http.StatusBadGateway, providerErrors, lastAttemptErrorCode)
+	return allProviderAttemptsFailed(http.StatusBadGateway, totalAttempts, providerErrors, lastAttemptErrorCode)
 }
 
 func (p *Proxy) complete(ctx context.Context, writer http.ResponseWriter, requestID string, response *http.Response, expectedCost, officialExpectedCost int64, price, officialPrice matcher.Price) error {
@@ -689,6 +689,7 @@ type proxyError struct {
 	status         int
 	code           string
 	message        string
+	attempts       int
 	providerErrors []providerError
 	terminalCode   string
 }
@@ -699,11 +700,12 @@ type providerError struct {
 	Error    string `json:"error"`
 }
 
-func allProviderAttemptsFailed(status int, providerErrors []providerError, terminalCode string) *proxyError {
+func allProviderAttemptsFailed(status, attempts int, providerErrors []providerError, terminalCode string) *proxyError {
 	return &proxyError{
 		status:         status,
 		code:           "all_provider_attempts_failed",
 		message:        "all provider attempts failed",
+		attempts:       attempts,
 		providerErrors: providerErrors,
 		terminalCode:   terminalCode,
 	}
@@ -776,10 +778,10 @@ func writeError(w http.ResponseWriter, status int, code, message string) {
 	_ = json.NewEncoder(w).Encode(map[string]any{"error": map[string]any{"type": "payless_error", "code": code, "message": message}})
 }
 
-func writeProviderErrors(w http.ResponseWriter, status int, code, message string, providerErrors []providerError) {
+func writeProviderErrors(w http.ResponseWriter, status int, code, message string, attempts int, providerErrors []providerError) {
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(status)
-	_ = json.NewEncoder(w).Encode(map[string]any{"error": map[string]any{"type": "payless_error", "code": code, "message": message, "errors": providerErrors}})
+	_ = json.NewEncoder(w).Encode(map[string]any{"error": map[string]any{"type": "payless_error", "code": code, "message": message, "attempts": attempts, "errors": providerErrors}})
 }
 
 func sanitize(message string) string {

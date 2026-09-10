@@ -56,6 +56,14 @@ func (r *ProxyRequestsRepository) RecordResolution(ctx context.Context, requestI
 }
 
 func (r *ProxyRequestsRepository) Complete(ctx context.Context, id, state, code, message string) error {
+	return r.CompleteWithDisposition(ctx, id, state, code, message, code)
+}
+
+// CompleteWithDisposition keeps the client-facing error code separate from
+// the internal failure classification used for subscription accounting. A
+// request can therefore report all_provider_attempts_failed while still being
+// excluded from usage totals when its final failure was a quota/rate limit.
+func (r *ProxyRequestsRepository) CompleteWithDisposition(ctx context.Context, id, state, code, message, classification string) error {
 	row, err := bobmodels.FindProxyRequest(ctx, r.exec, id)
 	if err != nil {
 		return err
@@ -72,7 +80,7 @@ func (r *ProxyRequestsRepository) Complete(ctx context.Context, id, state, code,
 	errorMessage := nullableString(pointerIfNonEmpty(message))
 	durationValue := nullableInt64(&duration)
 	setter := &bobmodels.ProxyRequestSetter{State: &state, CompletedAt: nullableStringPointer(pointerString(now.Format(time.RFC3339Nano))), DurationMS: &durationValue, ErrorCode: &errorCode, ErrorMessage: &errorMessage}
-	if code == "provider_rate_limit" || code == "provider_quota_exhausted" || code == "all_subscription_quotas_exhausted" {
+	if classification == "provider_rate_limit" || classification == "provider_quota_exhausted" || classification == "all_subscription_quotas_exhausted" {
 		disposition := "excluded_limit"
 		setter.StatsDisposition = &disposition
 	}

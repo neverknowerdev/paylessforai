@@ -357,7 +357,7 @@ func TestProxyReturnsProviderErrorsAfterAllAttemptsFail(t *testing.T) {
 	if err := db.DB().QueryRow(`SELECT error_code, error_message FROM proxy_requests`).Scan(&code, &message); err != nil {
 		t.Fatal(err)
 	}
-	if code != "upstream_error" || message != "all provider attempts failed" {
+	if code != "all_provider_attempts_failed" || message != "all provider attempts failed" {
 		t.Fatalf("persisted terminal error: code=%q message=%q", code, message)
 	}
 }
@@ -584,6 +584,38 @@ func TestProxyLearnsUpstreamFormatAndTranslatesResponse(t *testing.T) {
 	provider.mu.Unlock()
 	if len(paths) != 3 || paths[2] != "/v1/responses" {
 		t.Fatalf("learned format was not reused: %v", paths)
+	}
+}
+
+func TestProxyUsesOpenCodeModelDialectAndForwardsSessionHeader(t *testing.T) {
+	var paths []string
+	var sessions []string
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		paths = append(paths, r.URL.Path)
+		sessions = append(sessions, r.Header.Get("x-opencode-session"))
+		if r.URL.Path != "/v1/responses" {
+			http.Error(w, `{"error":{"message":"wrong OpenCode endpoint"}}`, http.StatusInternalServerError)
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = io.WriteString(w, `{"id":"resp-1","model":"muse-spark-1.3-contributor","status":"completed","output":[{"type":"message","role":"assistant","content":[{"type":"output_text","text":"ok"}]}],"usage":{"input_tokens":2,"output_tokens":1,"total_tokens":3}}`)
+	}))
+	defer server.Close()
+
+	modelDefinition := model("muse-spark-1.3-contributor", 1, 1)
+	provider := &translatingProvider{HTTPClient: providers.NewHTTPClient("opencode-go", server.URL+"/v1", "secret"), models: []providers.Model{modelDefinition}}
+	proxy, db, secret := testProxy(t, provider)
+	defer db.Close()
+	request := httptest.NewRequest(http.MethodPost, "/v1/chat/completions", strings.NewReader(`{"model":"muse-spark-1.3-contributor","messages":[{"role":"user","content":"hello"}]}`))
+	request.Header.Set("Authorization", "Bearer "+secret)
+	request.Header.Set("x-opencode-session", "session-1")
+	response := httptest.NewRecorder()
+	proxy.ServeHTTP(response, request, matcher.ProtocolChatCompletions)
+	if response.Code != http.StatusOK || !strings.Contains(response.Body.String(), `"content":"ok"`) {
+		t.Fatalf("unexpected OpenCode response: %d %s", response.Code, response.Body.String())
+	}
+	if strings.Join(paths, ",") != "/v1/chat/completions,/v1/responses" || strings.Join(sessions, ",") != "session-1,session-1" {
+		t.Fatalf("OpenCode request was not dialect/session-safe: paths=%v sessions=%v", paths, sessions)
 	}
 }
 

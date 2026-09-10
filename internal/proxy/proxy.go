@@ -167,7 +167,7 @@ func (p *Proxy) ServeHTTP(w http.ResponseWriter, r *http.Request, protocol match
 		if errors.As(err, &partial) {
 			return
 		}
-		p.finishError(r.Context(), requestID, persistenceErrorCode(err), sanitize(err.Error()))
+		p.finishErrorWithClassification(r.Context(), requestID, errorCode(err), sanitize(err.Error()), persistenceErrorCode(err))
 		var proxyErr *proxyError
 		if errors.As(err, &proxyErr) && len(proxyErr.providerErrors) > 0 {
 			writeProviderErrors(w, statusFor(err), errorCode(err), sanitize(err.Error()), proxyErr.attempts, proxyErr.providerErrors)
@@ -1094,8 +1094,12 @@ func persistenceErrorCode(err error) string {
 }
 
 func (p *Proxy) finishError(ctx context.Context, requestID, code, message string) {
+	p.finishErrorWithClassification(ctx, requestID, code, message, code)
+}
+
+func (p *Proxy) finishErrorWithClassification(ctx context.Context, requestID, code, message, classification string) {
 	if p.Repositories != nil {
-		_ = p.Repositories.ProxyRequests.Complete(ctx, requestID, "failed", code, message)
+		_ = p.Repositories.ProxyRequests.CompleteWithDisposition(ctx, requestID, "failed", code, message, classification)
 	}
 }
 

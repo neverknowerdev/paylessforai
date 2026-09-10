@@ -59,7 +59,7 @@ func recordProxyAttemptRouteFormats(ctx context.Context, repos *repositories.Rep
 	if err := repos.ProxyRequests.RecordAttemptRoute(ctx, requestID, attempt, provider, upstream); err != nil {
 		return err
 	}
-	if err := repos.ProxyAttempts.RecordFormatsWithHTTPStatus(ctx, requestID, attempt, provider, upstream, state, errorClass, errorMessage, clientFormat, providerFormat, httpStatus, rawError...); err != nil {
+	if err := repos.ProxyAttempts.RecordWithHTTPStatus(ctx, requestID, attempt, provider, upstream, state, errorClass, errorMessage, clientFormat, providerFormat, httpStatus, rawError...); err != nil {
 		return err
 	}
 	return repos.ProxyAttempts.UpdateRoute(ctx, requestID, attempt, routeID, credentialID, stageID, stagePath)

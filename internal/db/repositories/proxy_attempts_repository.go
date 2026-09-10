@@ -31,22 +31,13 @@ func (r *ProxyAttemptsRepository) UpdateRoute(ctx context.Context, requestID str
 }
 
 func (r *ProxyAttemptsRepository) Record(ctx context.Context, requestID string, attempt int, provider, upstream, state, errorClass, errorMessage string, rawError ...string) error {
-	return r.RecordWithHTTPStatus(ctx, requestID, attempt, provider, upstream, state, errorClass, errorMessage, nil, rawError...)
+	return r.RecordWithHTTPStatus(ctx, requestID, attempt, provider, upstream, state, errorClass, errorMessage, wire.FormatUnknown, wire.FormatUnknown, nil, rawError...)
 }
 
-func (r *ProxyAttemptsRepository) RecordFormats(ctx context.Context, requestID string, attempt int, provider, upstream, state, errorClass, errorMessage string, clientFormat, providerFormat wire.Format, rawError ...string) error {
-	return r.RecordFormatsWithHTTPStatus(ctx, requestID, attempt, provider, upstream, state, errorClass, errorMessage, clientFormat, providerFormat, nil, rawError...)
-}
-
-// RecordWithHTTPStatus persists the status returned by an upstream when one
-// exists. Transport and local routing failures intentionally keep it nil.
-func (r *ProxyAttemptsRepository) RecordWithHTTPStatus(ctx context.Context, requestID string, attempt int, provider, upstream, state, errorClass, errorMessage string, httpStatus *int, rawError ...string) error {
-	return r.RecordFormatsWithHTTPStatus(ctx, requestID, attempt, provider, upstream, state, errorClass, errorMessage, wire.FormatUnknown, wire.FormatUnknown, httpStatus, rawError...)
-}
-
-// RecordFormatsWithHTTPStatus records both the protocol translation path and
-// the upstream HTTP status for a single attempt.
-func (r *ProxyAttemptsRepository) RecordFormatsWithHTTPStatus(ctx context.Context, requestID string, attempt int, provider, upstream, state, errorClass, errorMessage string, clientFormat, providerFormat wire.Format, httpStatus *int, rawError ...string) error {
+// RecordWithHTTPStatus persists the status and wire formats returned by an
+// upstream when they exist. Transport and local routing failures intentionally
+// keep the status nil.
+func (r *ProxyAttemptsRepository) RecordWithHTTPStatus(ctx context.Context, requestID string, attempt int, provider, upstream, state, errorClass, errorMessage string, clientFormat, providerFormat wire.Format, httpStatus *int, rawError ...string) error {
 	if attempt < 1 {
 		return fmt.Errorf("attempt number must be positive")
 	}

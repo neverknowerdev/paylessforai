@@ -1,0 +1,4 @@
+{
+  "status": 503,
+  "body": {"error": {"message": "metered provider exhausted on retry", "type": "mock_error"}}
+}

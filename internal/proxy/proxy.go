@@ -506,6 +506,7 @@ func (p *Proxy) executeTranslatedRoute(ctx context.Context, writer http.Response
 		candidates = candidates[:remainingBudget+1]
 	}
 	lastErr := error(nil)
+	formatFailure := false
 	used := 0
 	for index, candidate := range candidates {
 		attempt := firstAttempt + index
@@ -540,6 +541,7 @@ func (p *Proxy) executeTranslatedRoute(ctx context.Context, writer http.Response
 			if !safeFormatFailure(err) {
 				break
 			}
+			formatFailure = true
 			continue
 		}
 		events, decodeErr := wire.DecodeResponse(candidate, response)
@@ -558,6 +560,7 @@ func (p *Proxy) executeTranslatedRoute(ctx context.Context, writer http.Response
 			if !safeFormatFailure(decodeErr) {
 				break
 			}
+			formatFailure = true
 			continue
 		}
 		if p.Repositories != nil {
@@ -581,11 +584,13 @@ func (p *Proxy) executeTranslatedRoute(ctx context.Context, writer http.Response
 	if lastErr == nil {
 		lastErr = &proxyError{status: http.StatusBadGateway, code: "no_supported_provider_format", message: "no supported provider format could be used"}
 	}
-	if p.Repositories != nil {
-		_ = p.Repositories.ModelRoutes.ClearFormat(ctx, route.ID)
-	}
-	if p.Catalog != nil {
-		p.Catalog.ClearFormat(route.ID)
+	if formatFailure {
+		if p.Repositories != nil {
+			_ = p.Repositories.ModelRoutes.ClearFormat(ctx, route.ID)
+		}
+		if p.Catalog != nil {
+			p.Catalog.ClearFormat(route.ID)
+		}
 	}
 	return lastErr, false, used
 }

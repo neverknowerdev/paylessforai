@@ -7,6 +7,8 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"os"
+	"path/filepath"
 	"strings"
 	"sync"
 )
@@ -14,6 +16,7 @@ import (
 type Model struct {
 	ID                  string   `json:"id"`
 	Name                string   `json:"name"`
+	Free                bool     `json:"free"`
 	ContextLength       int64    `json:"context_length"`
 	MaxCompletionTokens int64    `json:"max_completion_tokens"`
 	PromptPrice         string   `json:"prompt_price"`
@@ -47,14 +50,32 @@ type Request struct {
 	Body   string `json:"body"`
 }
 
+// Fixture is a complete response for one inference request. Fixture files
+// keep browser E2E scenarios reviewable and make each upstream response
+// explicit instead of hiding it in a mutable test scenario.
+type Fixture struct {
+	Status  int               `json:"status"`
+	Headers map[string]string `json:"headers"`
+	Body    json.RawMessage   `json:"body"`
+}
+
 type Server struct {
-	mu       sync.Mutex
-	scenario Scenario
-	requests []Request
+	mu            sync.Mutex
+	scenario      Scenario
+	requests      []Request
+	fixtureDir    string
+	fixtureNames  []string
+	fixtureOffset int
 }
 
 func New(scenario Scenario) *Server {
 	return &Server{scenario: normalizeScenario(scenario)}
+}
+
+func NewWithFixtureDir(scenario Scenario, fixtureDir string) *Server {
+	server := New(scenario)
+	server.fixtureDir = strings.TrimSpace(fixtureDir)
+	return server
 }
 
 func normalizeScenario(scenario Scenario) Scenario {
@@ -104,6 +125,14 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusNotFound)
 		return
 	}
+	if fixture, ok, err := s.nextFixture(); err != nil {
+		w.WriteHeader(http.StatusInternalServerError)
+		_, _ = io.WriteString(w, `{"error":{"message":"mock fixture failed: `+jsonEscape(err.Error())+`"}}`)
+		return
+	} else if ok {
+		s.writeFixture(w, fixture)
+		return
+	}
 	if failed {
 		w.WriteHeader(scenario.FailureStatus)
 		_, _ = io.WriteString(w, `{"error":{"message":"`+scenario.FailureMessage+`","type":"mock_error"}}`)
@@ -135,6 +164,26 @@ func (s *Server) handleControl(w http.ResponseWriter, r *http.Request, body []by
 		s.requests = nil
 		s.mu.Unlock()
 		s.writeGeneric(w, r.URL.Path, map[string]any{"reset": true})
+	case "/__mock/fixtures":
+		var input struct {
+			Files []string `json:"files"`
+		}
+		if err := json.Unmarshal(body, &input); err != nil {
+			w.WriteHeader(http.StatusBadRequest)
+			return
+		}
+		for _, name := range input.Files {
+			if err := validateFixtureName(name); err != nil {
+				w.WriteHeader(http.StatusBadRequest)
+				_, _ = io.WriteString(w, err.Error())
+				return
+			}
+		}
+		s.mu.Lock()
+		s.fixtureNames = append([]string(nil), input.Files...)
+		s.fixtureOffset = 0
+		s.mu.Unlock()
+		s.writeGeneric(w, r.URL.Path, map[string]any{"updated": true, "files": len(input.Files)})
 	case "/__mock/scenario":
 		var scenario Scenario
 		if err := json.Unmarshal(body, &scenario); err != nil {
@@ -165,7 +214,7 @@ func (s *Server) handleControl(w http.ResponseWriter, r *http.Request, body []by
 func (s *Server) writeModels(w http.ResponseWriter, scenario Scenario) {
 	data := make([]map[string]any, 0, len(scenario.Models))
 	for _, model := range scenario.Models {
-		data = append(data, map[string]any{"id": model.ID, "name": model.Name, "context_length": model.ContextLength, "max_completion_tokens": model.MaxCompletionTokens, "pricing": map[string]string{"prompt": model.PromptPrice, "completion": model.CompletionPrice}, "supported_parameters": model.SupportedParameters, "architecture": map[string]any{"input_modalities": model.InputModalities, "output_modalities": model.OutputModalities}, "supported_features": model.SupportedFeatures, "tags": model.Tags})
+		data = append(data, map[string]any{"id": model.ID, "name": model.Name, "free": model.Free, "context_length": model.ContextLength, "max_completion_tokens": model.MaxCompletionTokens, "pricing": map[string]string{"prompt": model.PromptPrice, "completion": model.CompletionPrice}, "architecture": map[string]any{"input_modalities": model.InputModalities, "output_modalities": model.OutputModalities}, "supported_features": model.SupportedFeatures, "tags": model.Tags})
 	}
 	s.writeGeneric(w, "/models", map[string]any{"data": data})
 }
@@ -215,6 +264,61 @@ func (s *Server) writeJSONResponse(w http.ResponseWriter, path string, scenario 
 
 func (s *Server) writeInference(w http.ResponseWriter, path string, scenario Scenario) {
 	s.writeJSONResponse(w, path, scenario)
+}
+
+func (s *Server) nextFixture() (Fixture, bool, error) {
+	s.mu.Lock()
+	if s.fixtureDir == "" || s.fixtureOffset >= len(s.fixtureNames) {
+		s.mu.Unlock()
+		return Fixture{}, false, nil
+	}
+	name := s.fixtureNames[s.fixtureOffset]
+	s.fixtureOffset++
+	dir := s.fixtureDir
+	s.mu.Unlock()
+
+	data, err := os.ReadFile(filepath.Join(dir, name))
+	if err != nil {
+		return Fixture{}, true, err
+	}
+	var fixture Fixture
+	if err := json.Unmarshal(data, &fixture); err != nil {
+		return Fixture{}, true, fmt.Errorf("decode %s: %w", name, err)
+	}
+	return fixture, true, nil
+}
+
+func (s *Server) writeFixture(w http.ResponseWriter, fixture Fixture) {
+	status := fixture.Status
+	if status == 0 {
+		status = http.StatusOK
+	}
+	for key, value := range fixture.Headers {
+		w.Header().Set(key, value)
+	}
+	if w.Header().Get("Content-Type") == "" {
+		w.Header().Set("Content-Type", "application/json")
+	}
+	w.WriteHeader(status)
+	if len(fixture.Body) > 0 {
+		_, _ = w.Write(fixture.Body)
+	}
+}
+
+func validateFixtureName(name string) error {
+	clean := filepath.Clean(strings.TrimSpace(name))
+	if clean == "." || filepath.IsAbs(clean) || clean == ".." || strings.HasPrefix(clean, ".."+string(filepath.Separator)) {
+		return fmt.Errorf("invalid mock fixture name %q", name)
+	}
+	return nil
+}
+
+func jsonEscape(value string) string {
+	encoded, _ := json.Marshal(value)
+	if len(encoded) >= 2 {
+		return string(encoded[1 : len(encoded)-1])
+	}
+	return ""
 }
 
 func isInference(path string) bool {

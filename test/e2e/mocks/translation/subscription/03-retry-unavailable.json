@@ -1,0 +1,4 @@
+{
+  "status": 503,
+  "body": {"error": {"message": "subscription provider unexpectedly retried", "type": "mock_error"}}
+}

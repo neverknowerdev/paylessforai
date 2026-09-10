@@ -481,7 +481,7 @@ func TestProxyLearnsUpstreamFormatAndTranslatesResponse(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path == "/v1/chat/completions" {
 			w.Header().Set("Content-Type", "application/json")
-			w.WriteHeader(http.StatusNotFound)
+			w.WriteHeader(http.StatusInternalServerError)
 			_, _ = io.WriteString(w, `{"error":{"message":"wrong endpoint"}}`)
 			return
 		}
@@ -526,6 +526,47 @@ func TestProxyLearnsUpstreamFormatAndTranslatesResponse(t *testing.T) {
 	provider.mu.Unlock()
 	if len(paths) != 3 || paths[2] != "/v1/responses" {
 		t.Fatalf("learned format was not reused: %v", paths)
+	}
+}
+
+func TestShouldTryNextFormatUsesEndpointAndServerStatusesOnlyForUnknownFormats(t *testing.T) {
+	for _, status := range []int{
+		http.StatusBadRequest,
+		http.StatusNotFound,
+		http.StatusMethodNotAllowed,
+		http.StatusNotAcceptable,
+		http.StatusUnsupportedMediaType,
+		http.StatusUnprocessableEntity,
+		http.StatusInternalServerError,
+		http.StatusNotImplemented,
+		http.StatusBadGateway,
+		http.StatusServiceUnavailable,
+		http.StatusGatewayTimeout,
+	} {
+		err := &providers.UpstreamError{StatusCode: status}
+		if !shouldTryNextFormat(err, true) {
+			t.Errorf("status %d should be format-probeable when format is unknown", status)
+		}
+		if shouldTryNextFormat(err, false) {
+			t.Errorf("status %d should not probe another format when format is known", status)
+		}
+	}
+	for _, status := range []int{
+		http.StatusMultipleChoices,
+		http.StatusUnauthorized,
+		http.StatusPaymentRequired,
+		http.StatusForbidden,
+		http.StatusRequestTimeout,
+		http.StatusConflict,
+		http.StatusRequestEntityTooLarge,
+		http.StatusTooManyRequests,
+	} {
+		if shouldTryNextFormat(&providers.UpstreamError{StatusCode: status}, true) {
+			t.Errorf("status %d must not trigger format probing", status)
+		}
+	}
+	if shouldTryNextFormat(errors.New("transport failed"), true) {
+		t.Error("transport failures must not trigger another format request")
 	}
 }
 

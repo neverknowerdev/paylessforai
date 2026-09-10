@@ -1,0 +1,4 @@
+{
+  "status": 500,
+  "body": {"error": {"message": "this model requires the Responses API", "type": "mock_format_error"}}
+}

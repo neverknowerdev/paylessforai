@@ -4,6 +4,7 @@ import { expect, test, type APIRequestContext } from '@playwright/test';
 const model = 'translation-matrix-model';
 const databasePath = '/tmp/paylessforai-e2e/paylessforai.db';
 const formats = {
+  chat: 'openai_chat_completions',
   free: 'openai_responses',
   subscription: 'anthropic_messages',
   metered: 'openai_chat_completions',
@@ -22,7 +23,7 @@ const providerDefinitions: Record<ProviderName, { name: string; label: string; k
     name: 'translation-free',
     label: 'Free route',
     key: 'translation-free-key',
-    baseURL: 'http://127.0.0.1:19474/translation/free/v1/responses',
+    baseURL: 'http://127.0.0.1:19474/translation/free/v1',
     accessMode: 'api',
   },
   subscription: {
@@ -43,6 +44,11 @@ const providerDefinitions: Record<ProviderName, { name: string; label: string; k
 };
 
 const fixtureCases = {
+  unknownFormatFallback: {
+    free: ['05-chat-format-error.json', '06-responses-success.json'],
+    subscription: [],
+    metered: [],
+  },
   twoFailedThenMeteredSucceeds: {
     free: ['01-unavailable.json'],
     subscription: ['01-unavailable.json', '01-retry-unavailable.json'],
@@ -147,16 +153,31 @@ test('routes one model across free, subscription, and metered formats with durab
   expect(keyResponse.status()).toBe(201);
   const secret = (await keyResponse.json()).secret as string;
 
+  await setFixtures(request, fixtureCases.unknownFormatFallback);
+  const formatFallback = await request.post('/v1/chat/completions', { headers: { Authorization: `Bearer ${secret}` }, data: { model, messages: [{ role: 'user', content: 'discover the provider format' }] } });
+  expect(formatFallback.status()).toBe(200);
+  expect((await formatFallback.json()).choices[0].message.content).toBe('responses format success');
+  const freeRequests = await (await request.get(`http://127.0.0.1:${providerPorts.free}/__mock/requests`)).json();
+  const inferencePaths = (freeRequests.data as Array<{ path: string }>).map((item) => item.path).filter((path) => path.endsWith('/chat/completions') || path.endsWith('/responses') || path.endsWith('/messages'));
+  expect(inferencePaths).toEqual(['/translation/free/v1/chat/completions', '/translation/free/v1/responses']);
+  let stats = await latestRequest(request);
+  expect(stats.attempts).toBe(2);
+  expect(stats.attempt_details.map((attempt: { provider_format: string; http_status: number }) => [attempt.provider_format, attempt.http_status])).toEqual([[formats.chat, 500], [formats.free, 200]]);
+  expect(readModelRouteFormats()).toEqual([{ provider: 'translation-free', format: formats.free }]);
+
   await setFixtures(request, fixtureCases.twoFailedThenMeteredSucceeds);
   const first = await request.post('/v1/chat/completions', { headers: { Authorization: `Bearer ${secret}` }, data: { model, messages: [{ role: 'user', content: 'two providers fail' }] } });
   expect(first.status()).toBe(200);
   expect((await first.json()).choices[0].message.content).toBe('metered provider success');
-  let stats = await latestRequest(request);
+  stats = await latestRequest(request);
   expect(stats.attempts).toBe(4);
   expect(stats.attempt_details.map((attempt: { provider: string }) => attempt.provider)).toEqual(['translation-free', 'translation-subscription', 'translation-subscription', 'translation-metered']);
   expect(stats.attempt_details.map((attempt: { provider_format: string }) => attempt.provider_format)).toEqual([formats.free, formats.subscription, formats.subscription, formats.metered]);
   expect(stats.attempt_details.map((attempt: { http_status: number }) => attempt.http_status)).toEqual([503, 503, 503, 200]);
-  expect(readModelRouteFormats()).toEqual([{ provider: 'translation-metered', format: formats.metered }]);
+  expect(readModelRouteFormats()).toEqual([
+    { provider: 'translation-free', format: formats.free },
+    { provider: 'translation-metered', format: formats.metered },
+  ]);
 
   await setFixtures(request, fixtureCases.freeFailsThenSubscriptionSucceeds);
   const second = await request.post('/v1/chat/completions', { headers: { Authorization: `Bearer ${secret}` }, data: { model, messages: [{ role: 'user', content: 'subscription fallback' }] } });

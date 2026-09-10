@@ -40,6 +40,8 @@ type ProxyAttempt struct {
 	GroupStageID     sql.Null[string] `db:"group_stage_id" `
 	GroupStagePath   sql.Null[string] `db:"group_stage_path" `
 	CredentialID     sql.Null[string] `db:"credential_id" `
+	ClientFormat     sql.Null[string] `db:"client_format" `
+	ProviderFormat   sql.Null[string] `db:"provider_format" `
 
 	R proxyAttemptR `db:"-" `
 }
@@ -70,7 +72,7 @@ type proxyAttemptRLoaded struct {
 
 func buildProxyAttemptColumns(tableName string) proxyAttemptColumns {
 	columnsExpr := expr.NewColumnsExpr(
-		"id", "request_id", "attempt_number", "route_id", "provider", "upstream_model", "state", "started_at", "completed_at", "http_status", "error_class", "error_message", "error_raw", "duration_ms", "delivery_state", "stats_disposition", "group_stage_id", "group_stage_path", "credential_id",
+		"id", "request_id", "attempt_number", "route_id", "provider", "upstream_model", "state", "started_at", "completed_at", "http_status", "error_class", "error_message", "error_raw", "duration_ms", "delivery_state", "stats_disposition", "group_stage_id", "group_stage_path", "credential_id", "client_format", "provider_format",
 	)
 
 	if tableName != "" {
@@ -99,6 +101,8 @@ func buildProxyAttemptColumns(tableName string) proxyAttemptColumns {
 		GroupStageID:     buildProxyAttemptColumn(tableName, "group_stage_id"),
 		GroupStagePath:   buildProxyAttemptColumn(tableName, "group_stage_path"),
 		CredentialID:     buildProxyAttemptColumn(tableName, "credential_id"),
+		ClientFormat:     buildProxyAttemptColumn(tableName, "client_format"),
+		ProviderFormat:   buildProxyAttemptColumn(tableName, "provider_format"),
 	}
 }
 
@@ -124,6 +128,8 @@ type proxyAttemptColumns struct {
 	GroupStageID     proxyAttemptColumn
 	GroupStagePath   proxyAttemptColumn
 	CredentialID     proxyAttemptColumn
+	ClientFormat     proxyAttemptColumn
+	ProviderFormat   proxyAttemptColumn
 }
 
 // Alias returns the current table alias for the columns set.
@@ -188,10 +194,12 @@ type ProxyAttemptSetter struct {
 	GroupStageID     *sql.Null[string] `db:"group_stage_id" `
 	GroupStagePath   *sql.Null[string] `db:"group_stage_path" `
 	CredentialID     *sql.Null[string] `db:"credential_id" `
+	ClientFormat     *sql.Null[string] `db:"client_format" `
+	ProviderFormat   *sql.Null[string] `db:"provider_format" `
 }
 
 func (s ProxyAttemptSetter) SetColumns() []string {
-	vals := make([]string, 0, 19)
+	vals := make([]string, 0, 21)
 	if s.ID != nil {
 		vals = append(vals, "id")
 	}
@@ -248,6 +256,12 @@ func (s ProxyAttemptSetter) SetColumns() []string {
 	}
 	if s.CredentialID != nil {
 		vals = append(vals, "credential_id")
+	}
+	if s.ClientFormat != nil {
+		vals = append(vals, "client_format")
+	}
+	if s.ProviderFormat != nil {
+		vals = append(vals, "provider_format")
 	}
 	return vals
 }
@@ -414,6 +428,24 @@ func (s ProxyAttemptSetter) Overwrite(t *ProxyAttempt) {
 				return *new(sql.Null[string])
 			}
 			v := s.CredentialID
+			return *v
+		}()
+	}
+	if s.ClientFormat != nil {
+		t.ClientFormat = func() sql.Null[string] {
+			if s.ClientFormat == nil {
+				return *new(sql.Null[string])
+			}
+			v := s.ClientFormat
+			return *v
+		}()
+	}
+	if s.ProviderFormat != nil {
+		t.ProviderFormat = func() sql.Null[string] {
+			if s.ProviderFormat == nil {
+				return *new(sql.Null[string])
+			}
+			v := s.ProviderFormat
 			return *v
 		}()
 	}
@@ -675,6 +707,32 @@ func (s *ProxyAttemptSetter) Apply(q *dialect.InsertQuery) {
 					return *v
 				}()).WriteSQL(ctx, w, d, start)
 			}))
+		case "client_format":
+			vals = append(vals, bob.ExpressionFunc(func(ctx context.Context, w io.StringWriter, d bob.Dialect, start int) ([]any, error) {
+				if s.ClientFormat == nil {
+					return sqlite.Arg(nil).WriteSQL(ctx, w, d, start)
+				}
+				return sqlite.Arg(func() sql.Null[string] {
+					if s.ClientFormat == nil {
+						return *new(sql.Null[string])
+					}
+					v := s.ClientFormat
+					return *v
+				}()).WriteSQL(ctx, w, d, start)
+			}))
+		case "provider_format":
+			vals = append(vals, bob.ExpressionFunc(func(ctx context.Context, w io.StringWriter, d bob.Dialect, start int) ([]any, error) {
+				if s.ProviderFormat == nil {
+					return sqlite.Arg(nil).WriteSQL(ctx, w, d, start)
+				}
+				return sqlite.Arg(func() sql.Null[string] {
+					if s.ProviderFormat == nil {
+						return *new(sql.Null[string])
+					}
+					v := s.ProviderFormat
+					return *v
+				}()).WriteSQL(ctx, w, d, start)
+			}))
 		}
 	}
 
@@ -686,7 +744,7 @@ func (s ProxyAttemptSetter) UpdateMod() bob.Mod[*dialect.UpdateQuery] {
 }
 
 func (s ProxyAttemptSetter) Expressions(prefix ...string) []bob.Expression {
-	exprs := make([]bob.Expression, 0, 19)
+	exprs := make([]bob.Expression, 0, 21)
 
 	if s.ID != nil {
 		exprs = append(exprs, expr.Join{Sep: " = ", Exprs: []bob.Expression{
@@ -821,6 +879,20 @@ func (s ProxyAttemptSetter) Expressions(prefix ...string) []bob.Expression {
 		}})
 	}
 
+	if s.ClientFormat != nil {
+		exprs = append(exprs, expr.Join{Sep: " = ", Exprs: []bob.Expression{
+			sqlite.Quote(append(prefix, "client_format")...),
+			sqlite.Arg(s.ClientFormat),
+		}})
+	}
+
+	if s.ProviderFormat != nil {
+		exprs = append(exprs, expr.Join{Sep: " = ", Exprs: []bob.Expression{
+			sqlite.Quote(append(prefix, "provider_format")...),
+			sqlite.Arg(s.ProviderFormat),
+		}})
+	}
+
 	return exprs
 }
 
@@ -831,7 +903,7 @@ func proxyAttemptScanMapper(ctx context.Context, cols []string) (scan.BeforeFunc
 		idx int
 		dst func(o *ProxyAttempt) any
 	}
-	targets := make([]target, 0, 19)
+	targets := make([]target, 0, 21)
 	for i, col := range cols {
 		switch col {
 		case "id":
@@ -872,6 +944,10 @@ func proxyAttemptScanMapper(ctx context.Context, cols []string) (scan.BeforeFunc
 			targets = append(targets, target{i, func(o *ProxyAttempt) any { return &o.GroupStagePath }})
 		case "credential_id":
 			targets = append(targets, target{i, func(o *ProxyAttempt) any { return &o.CredentialID }})
+		case "client_format":
+			targets = append(targets, target{i, func(o *ProxyAttempt) any { return &o.ClientFormat }})
+		case "provider_format":
+			targets = append(targets, target{i, func(o *ProxyAttempt) any { return &o.ProviderFormat }})
 		}
 	}
 

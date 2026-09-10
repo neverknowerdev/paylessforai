@@ -6,6 +6,7 @@ import (
 	"net/http"
 
 	"github.com/neverknowerdev/paylessforai/internal/matcher"
+	"github.com/neverknowerdev/paylessforai/internal/wire"
 )
 
 // WithManualModels keeps user-verified model definitions available when an
@@ -16,10 +17,38 @@ type WithManualModels struct {
 	Models []ManualModel
 }
 
+func (c WithManualModels) TranslationEnabled() bool {
+	_, ok := c.Client.(TranslationClient)
+	return ok
+}
+
 func (c WithManualModels) Name() string { return c.Client.Name() }
 
 func (c WithManualModels) Do(ctx context.Context, protocol matcher.Protocol, model string, body []byte) (*http.Response, error) {
 	return c.Client.Do(ctx, protocol, model, body)
+}
+
+func (c WithManualModels) Endpoint() Endpoint {
+	if client, ok := c.Client.(TranslationClient); ok {
+		return client.Endpoint()
+	}
+	return Endpoint{}
+}
+
+func (c WithManualModels) Prepare(format wire.Format, model string, body []byte) (PreparedRequest, error) {
+	client, ok := c.Client.(TranslationClient)
+	if !ok {
+		return PreparedRequest{}, fmt.Errorf("provider client does not support prepared requests")
+	}
+	return client.Prepare(format, model, body)
+}
+
+func (c WithManualModels) DoPrepared(ctx context.Context, request PreparedRequest) (*http.Response, error) {
+	client, ok := c.Client.(TranslationClient)
+	if !ok {
+		return nil, fmt.Errorf("provider client does not support prepared requests")
+	}
+	return client.DoPrepared(ctx, request)
 }
 
 func (c WithManualModels) Discover(ctx context.Context) ([]Model, error) {

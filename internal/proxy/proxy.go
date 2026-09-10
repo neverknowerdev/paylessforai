@@ -9,6 +9,7 @@ import (
 	"io"
 	"net/http"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/neverknowerdev/paylessforai/internal/catalog"
@@ -22,6 +23,7 @@ import (
 	"github.com/neverknowerdev/paylessforai/internal/retry"
 	"github.com/neverknowerdev/paylessforai/internal/routing"
 	"github.com/neverknowerdev/paylessforai/internal/usage"
+	"github.com/neverknowerdev/paylessforai/internal/wire"
 )
 
 const defaultMaximumBody = 32 << 20
@@ -33,6 +35,8 @@ type Proxy struct {
 	MaximumBody      int64
 	RequireClientKey bool
 	Groups           *groups.Manager
+	formatMu         sync.Mutex
+	formatLocks      map[string]*sync.Mutex
 }
 
 func recordResolution(ctx context.Context, repos *repositories.Repositories, requestID string, plan routing.Plan) error {
@@ -48,17 +52,21 @@ func recordResolution(ctx context.Context, repos *repositories.Repositories, req
 }
 
 func recordProxyAttemptRoute(ctx context.Context, repos *repositories.Repositories, requestID string, attempt int, routeID, credentialID, stageID, stagePath, provider, upstream, state, errorClass, errorMessage string, rawError ...string) error {
+	return recordProxyAttemptRouteFormats(ctx, repos, requestID, attempt, routeID, credentialID, stageID, stagePath, provider, upstream, state, errorClass, errorMessage, wire.FormatUnknown, wire.FormatUnknown, rawError...)
+}
+
+func recordProxyAttemptRouteFormats(ctx context.Context, repos *repositories.Repositories, requestID string, attempt int, routeID, credentialID, stageID, stagePath, provider, upstream, state, errorClass, errorMessage string, clientFormat, providerFormat wire.Format, rawError ...string) error {
 	if err := repos.ProxyRequests.RecordAttemptRoute(ctx, requestID, attempt, provider, upstream); err != nil {
 		return err
 	}
-	if err := repos.ProxyAttempts.Record(ctx, requestID, attempt, provider, upstream, state, errorClass, errorMessage, rawError...); err != nil {
+	if err := repos.ProxyAttempts.RecordFormats(ctx, requestID, attempt, provider, upstream, state, errorClass, errorMessage, clientFormat, providerFormat, rawError...); err != nil {
 		return err
 	}
 	return repos.ProxyAttempts.UpdateRoute(ctx, requestID, attempt, routeID, credentialID, stageID, stagePath)
 }
 
 func New(catalogManager *catalog.Manager, repos *repositories.Repositories) *Proxy {
-	return &Proxy{Catalog: catalogManager, Repositories: repos, Retry: retry.New(), MaximumBody: defaultMaximumBody, RequireClientKey: true}
+	return &Proxy{Catalog: catalogManager, Repositories: repos, Retry: retry.New(), MaximumBody: defaultMaximumBody, RequireClientKey: true, formatLocks: make(map[string]*sync.Mutex)}
 }
 
 func (p *Proxy) SetGroups(manager *groups.Manager) { p.Groups = manager }
@@ -105,6 +113,12 @@ func (p *Proxy) ServeHTTP(w http.ResponseWriter, r *http.Request, protocol match
 		writeError(w, http.StatusBadRequest, "invalid_request", err.Error())
 		return
 	}
+	clientFormat := wire.FormatForProtocol(string(protocol))
+	canonical, err := wire.DecodeRequest(clientFormat, body)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, "invalid_request", err.Error())
+		return
+	}
 	if p.Repositories != nil {
 		_ = p.Repositories.ProxyRequests.Create(r.Context(), requestID, clientKeyID, string(protocol), request.Model)
 	}
@@ -138,7 +152,7 @@ func (p *Proxy) ServeHTTP(w http.ResponseWriter, r *http.Request, protocol match
 		_ = recordResolution(r.Context(), p.Repositories, requestID, plan)
 	}
 	officialPrice, officialExpectedCost := officialPricing(planRanked(plan))
-	if err := p.execute(r.Context(), w, requestID, body, request, plan, officialPrice, officialExpectedCost); err != nil {
+	if err := p.execute(r.Context(), w, requestID, body, request, canonical, clientFormat, plan, officialPrice, officialExpectedCost); err != nil {
 		var partial *partialStreamError
 		if errors.As(err, &partial) {
 			return
@@ -280,7 +294,7 @@ func planRanked(plan routing.Plan) []matcher.RankedRoute {
 	return result
 }
 
-func (p *Proxy) execute(ctx context.Context, writer http.ResponseWriter, requestID string, body []byte, request parsedRequest, plan routing.Plan, officialPrice matcher.Price, officialExpectedCost int64) error {
+func (p *Proxy) execute(ctx context.Context, writer http.ResponseWriter, requestID string, body []byte, request parsedRequest, canonical *wire.Request, clientFormat wire.Format, plan routing.Plan, officialPrice matcher.Price, officialExpectedCost int64) error {
 	current := 0
 	blocked := false
 	policy := retry.DefaultPolicy()
@@ -322,6 +336,28 @@ func (p *Proxy) execute(ctx context.Context, writer http.ResponseWriter, request
 		totalAttempts++
 		if p.Repositories != nil {
 			_ = recordProxyAttemptRoute(ctx, p.Repositories, requestID, totalAttempts, route.ID, route.CredentialID, entry.StageID, strings.Join(entry.StagePath, " / "), route.Provider, route.UpstreamModel, "started", "", "")
+		}
+		translated, translatedOK := client.(providers.TranslationClient)
+		if gate, hasGate := client.(interface{ TranslationEnabled() bool }); hasGate && !gate.TranslationEnabled() {
+			translatedOK = false
+		}
+		if translatedOK && canonical != nil {
+			lastErr, completed, attemptsUsed := p.executeTranslatedRoute(ctx, writer, requestID, request, canonical, clientFormat, translated, route, entry, totalAttempts, policy.MaximumAttempts-totalAttempts, officialPrice, officialExpectedCost)
+			totalAttempts += attemptsUsed - 1
+			if completed {
+				return lastErr
+			}
+			// Format discovery is deliberately not retried by the outer
+			// same-route policy. Every candidate already consumed an attempt.
+			if lastErr != nil && p.Repositories != nil {
+				_ = p.Repositories.ProxyRequests.RecordAttemptRoute(ctx, requestID, totalAttempts, route.Provider, route.UpstreamModel)
+			}
+			if lastErr != nil && !safeFormatFailure(lastErr) && current == len(plan.Entries)-1 {
+				return lastErr
+			}
+			current++
+			retriesRemaining = -1
+			continue
 		}
 		response, err := client.Do(ctx, request.Protocol, route.UpstreamModel, body)
 		if err == nil {
@@ -389,6 +425,210 @@ func (p *Proxy) execute(ctx context.Context, writer http.ResponseWriter, request
 		}
 	}
 	return &proxyError{status: http.StatusBadGateway, code: "attempt_budget_exhausted", message: "provider attempt budget exhausted"}
+}
+
+func (p *Proxy) executeTranslatedRoute(ctx context.Context, writer http.ResponseWriter, requestID string, request parsedRequest, canonical *wire.Request, clientFormat wire.Format, client providers.TranslationClient, route matcher.Route, entry routing.Entry, firstAttempt, remainingBudget int, officialPrice matcher.Price, officialExpectedCost int64) (error, bool, int) {
+	lock := p.routeFormatLock(route.ID)
+	lock.Lock()
+	defer lock.Unlock()
+	if p.Catalog != nil {
+		for _, current := range p.Catalog.Snapshot().Routes {
+			if current.ID == route.ID {
+				route.Format = current.Format
+				break
+			}
+		}
+	}
+	saved := route.Format
+	if p.Repositories != nil {
+		if format, ok, err := p.Repositories.ModelRoutes.GetFormat(ctx, route.ID); err == nil && ok {
+			saved = format
+		}
+	}
+	hinted := client.Endpoint().HintedFormat
+	candidates := providers.CandidateFormats(saved, hinted, clientFormat)
+	if remainingBudget < 0 {
+		remainingBudget = 0
+	}
+	if len(candidates) > remainingBudget+1 {
+		candidates = candidates[:remainingBudget+1]
+	}
+	lastErr := error(nil)
+	used := 0
+	for index, candidate := range candidates {
+		attempt := firstAttempt + index
+		if index > 0 {
+			used++
+		}
+		if index == 0 {
+			used = 1
+		}
+		if err := candidate.Validate(); err != nil {
+			lastErr = err
+			p.recordTranslatedAttempt(ctx, requestID, attempt, route, entry, clientFormat, candidate, "failed", "local", err)
+			continue
+		}
+		encoded, err := wire.EncodeRequest(candidate, canonical)
+		if err != nil {
+			lastErr = err
+			p.recordTranslatedAttempt(ctx, requestID, attempt, route, entry, clientFormat, candidate, "failed", "local", err)
+			continue
+		}
+		prepared, err := client.Prepare(candidate, route.UpstreamModel, encoded)
+		if err != nil {
+			lastErr = err
+			p.recordTranslatedAttempt(ctx, requestID, attempt, route, entry, clientFormat, candidate, "failed", "local", err)
+			continue
+		}
+		p.recordTranslatedAttempt(ctx, requestID, attempt, route, entry, clientFormat, candidate, "started", "", nil)
+		response, err := client.DoPrepared(ctx, prepared)
+		if err != nil {
+			lastErr = err
+			p.recordTranslatedAttempt(ctx, requestID, attempt, route, entry, clientFormat, candidate, "failed", errorCode(err), err)
+			if !safeFormatFailure(err) {
+				break
+			}
+			continue
+		}
+		events, decodeErr := wire.DecodeResponse(candidate, response)
+		if decodeErr != nil {
+			var partial *wire.PartialResponseError
+			if errors.As(decodeErr, &partial) && len(events.Events) > 0 {
+				_ = wire.EncodeResponse(clientFormat, events, writer)
+				if p.Repositories != nil {
+					_ = p.Repositories.ProxyRequests.Complete(ctx, requestID, "partial", "stream_error", sanitize(decodeErr.Error()))
+				}
+				p.recordTranslatedAttempt(ctx, requestID, attempt, route, entry, clientFormat, candidate, "partial", "stream_error", decodeErr)
+				return &partialStreamError{err: decodeErr}, true, used
+			}
+			lastErr = decodeErr
+			p.recordTranslatedAttempt(ctx, requestID, attempt, route, entry, clientFormat, candidate, "failed", "malformed_response", decodeErr)
+			if !safeFormatFailure(decodeErr) {
+				break
+			}
+			continue
+		}
+		if p.Repositories != nil {
+			if err := persistLearnedFormat(ctx, p.Repositories, route, candidate); err != nil {
+				// A valid upstream response is still useful. Persistence errors
+				// are intentionally observable but do not discard that response.
+				lastErr = err
+			}
+		}
+		if p.Catalog != nil {
+			p.Catalog.LearnFormat(route.ID, candidate)
+		}
+		completeErr := p.completeTranslated(ctx, writer, requestID, events, entry.ExpectedCost, officialExpectedCost, route.Price, officialPrice, clientFormat)
+		if completeErr != nil {
+			p.recordTranslatedAttempt(ctx, requestID, attempt, route, entry, clientFormat, candidate, "failed", errorCode(completeErr), completeErr)
+			return completeErr, true, used
+		}
+		p.recordTranslatedAttempt(ctx, requestID, attempt, route, entry, clientFormat, candidate, "succeeded", "", nil)
+		return nil, true, used
+	}
+	if lastErr == nil {
+		lastErr = &proxyError{status: http.StatusBadGateway, code: "no_supported_provider_format", message: "no supported provider format could be used"}
+	}
+	if p.Repositories != nil {
+		_ = p.Repositories.ModelRoutes.ClearFormat(ctx, route.ID)
+	}
+	if p.Catalog != nil {
+		p.Catalog.ClearFormat(route.ID)
+	}
+	return lastErr, false, used
+}
+
+func (p *Proxy) routeFormatLock(routeID string) *sync.Mutex {
+	p.formatMu.Lock()
+	defer p.formatMu.Unlock()
+	if p.formatLocks == nil {
+		p.formatLocks = make(map[string]*sync.Mutex)
+	}
+	lock := p.formatLocks[routeID]
+	if lock == nil {
+		lock = &sync.Mutex{}
+		p.formatLocks[routeID] = lock
+	}
+	return lock
+}
+
+func persistLearnedFormat(ctx context.Context, repos *repositories.Repositories, route matcher.Route, format wire.Format) error {
+	if err := repos.ModelRoutes.SetFormat(ctx, route.ID, format); err == nil {
+		return nil
+	}
+	price, err := json.Marshal(route.Price)
+	if err != nil {
+		return err
+	}
+	capabilities, err := json.Marshal(route.Capabilities)
+	if err != nil {
+		return err
+	}
+	if err := repos.Models.Upsert(ctx, models.ModelRecord{ID: route.LogicalModel, DisplayName: route.LogicalModel, ContextLength: route.Capabilities.MaxContext, MaxOutputTokens: route.Capabilities.MaxOutput, MetadataJSON: "{}", ObservedAt: time.Now().UTC().Format(time.RFC3339Nano)}); err != nil {
+		return err
+	}
+	return repos.ModelRoutes.Upsert(ctx, models.ModelRouteRecord{ID: route.ID, ModelID: route.LogicalModel, Provider: route.Provider, UpstreamModel: route.UpstreamModel, Format: string(format), PriceJSON: string(price), CapabilitiesJSON: string(capabilities), Health: string(route.Health), ObservedAt: time.Now().UTC().Format(time.RFC3339Nano), Trusted: route.Trusted})
+}
+
+func (p *Proxy) recordTranslatedAttempt(ctx context.Context, requestID string, attempt int, route matcher.Route, entry routing.Entry, clientFormat, providerFormat wire.Format, state, code string, err error) {
+	if p.Repositories == nil {
+		return
+	}
+	message, raw := "", ""
+	if err != nil {
+		message, raw = humanErrorMessage(err), sanitize(err.Error())
+	}
+	_ = recordProxyAttemptRouteFormats(ctx, p.Repositories, requestID, attempt, route.ID, route.CredentialID, entry.StageID, strings.Join(entry.StagePath, " / "), route.Provider, route.UpstreamModel, state, code, message, clientFormat, providerFormat, raw)
+}
+
+func safeFormatFailure(err error) bool {
+	if wire.IsIncompatibility(err) {
+		return true
+	}
+	var malformed *wire.MalformedResponseError
+	if errors.As(err, &malformed) {
+		return true
+	}
+	var upstream *providers.UpstreamError
+	if !errors.As(err, &upstream) {
+		return false
+	}
+	switch upstream.StatusCode {
+	case http.StatusBadRequest, http.StatusNotFound, http.StatusMethodNotAllowed, http.StatusUnsupportedMediaType, http.StatusUnprocessableEntity:
+		return true
+	default:
+		return upstream.StatusCode >= 500 && upstream.StatusCode <= 599
+	}
+}
+
+func (p *Proxy) completeTranslated(ctx context.Context, writer http.ResponseWriter, requestID string, events wire.EventStream, expectedCost, officialExpectedCost int64, price, officialPrice matcher.Price, clientFormat wire.Format) error {
+	if err := wire.EncodeResponse(clientFormat, events, writer); err != nil {
+		return err
+	}
+	stats := usage.Stats{}
+	for _, event := range events.Events {
+		if event.Usage != nil {
+			stats.InputTokens = event.Usage.InputTokens
+			stats.OutputTokens = event.Usage.OutputTokens
+			stats.TotalTokens = event.Usage.TotalTokens
+			stats.CachedReadTokens = event.Usage.CachedReadTokens
+			stats.CacheWriteTokens = event.Usage.CacheWriteTokens
+			stats.ReasoningTokens = event.Usage.ReasoningTokens
+		}
+		if event.Response != nil {
+			stats.InputTokens = event.Response.Usage.InputTokens
+			stats.OutputTokens = event.Response.Usage.OutputTokens
+			stats.TotalTokens = event.Response.Usage.TotalTokens
+			stats.CachedReadTokens = event.Response.Usage.CachedReadTokens
+			stats.CacheWriteTokens = event.Response.Usage.CacheWriteTokens
+			stats.ReasoningTokens = event.Response.Usage.ReasoningTokens
+		}
+	}
+	persistUsage(ctx, p.Repositories, requestID, stats, expectedCost, officialExpectedCost, price, officialPrice)
+	if p.Repositories != nil {
+		_ = p.Repositories.ProxyRequests.Complete(ctx, requestID, "succeeded", "", "")
+	}
+	return nil
 }
 
 func (p *Proxy) complete(ctx context.Context, writer http.ResponseWriter, requestID string, response *http.Response, expectedCost, officialExpectedCost int64, price, officialPrice matcher.Price) error {

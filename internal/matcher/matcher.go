@@ -6,6 +6,8 @@ import (
 	"sort"
 	"strings"
 	"time"
+
+	"github.com/neverknowerdev/paylessforai/internal/wire"
 )
 
 // Protocol identifies the wire protocol required by a request.
@@ -91,6 +93,9 @@ type Route struct {
 	CredentialID           string
 	ExecutionKey           string
 	BillingClass           BillingClass
+	// Format is the learned upstream format and is independent from the
+	// caller protocol used by MatchRequest.
+	Format wire.Format
 }
 
 // MatchRequest contains only facts needed by the matcher.

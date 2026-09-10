@@ -5,7 +5,7 @@ type ModelRouteRecord struct {
 	ModelID          string
 	Provider         string
 	UpstreamModel    string
-	Protocol         string
+	Format           string
 	PriceJSON        string
 	CapabilitiesJSON string
 	Health           string

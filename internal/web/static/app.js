@@ -40,7 +40,7 @@
   const discountAmount = (request) => request.discount_pico_usd == null ? null : Math.max(0, Number(request.discount_pico_usd));
   const discountLabel = (request) => { const amount = discountAmount(request); return amount == null ? `— · ${discountUnavailableLabel(request)}` : amount === 0 ? '$0' : `${formatUSD(amount)} · ${discountPercent(request.discount_percent_bps)} saved`; };
   const shortID = (value) => value ? `${value.slice(0, 8)}…${value.slice(-4)}` : '—';
-  const protocolName = (value) => ({ chat_completions: 'Chat Completions', responses: 'Responses', anthropic_messages: 'Anthropic Messages' }[value] || value || '—');
+  const protocolName = (value) => ({ chat_completions: 'Chat Completions', responses: 'Responses', anthropic_messages: 'Anthropic Messages', openai_chat_completions: 'Chat Completions', openai_responses: 'Responses' }[value] || value || '—');
   const providerName = (value) => ({ openrouter: 'OpenRouter', surplus: 'Surplus Intelligence', 'opencode-zen': 'OpenCode Zen', 'opencode-go': 'OpenCode Go' }[value] || value || 'Unknown provider');
   const dateValue = (value) => value ? new Date(value).toLocaleString([], { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' }) : '—';
   const formatDuration = (ms) => { if (ms == null || !Number.isFinite(Number(ms))) return '—'; const value = Number(ms); if (value < 1000) return `${Math.max(0, Math.round(value))} ms`; const seconds = value / 1000; return `${seconds.toFixed(seconds < 10 ? 1 : 0)} s`; };
@@ -303,7 +303,8 @@
       const main = document.createElement('span'); main.className = 'attempt-main';
       const title = document.createElement('strong'); title.textContent = `${providerName(attempt.provider)} · ${attempt.upstream_model || '—'}`;
       const attemptDuration = formatDuration(attempt.duration_ms);
-      const detail = document.createElement('small'); detail.textContent = attempt.error_class ? `${attempt.state} · ${attemptDuration} · ${attempt.error_class}: ${attempt.error_message || 'Provider error'}` : `${attempt.state} · ${attemptDuration} · ${dateValue(attempt.completed_at || attempt.started_at)}`;
+      const formats = attempt.client_format && attempt.provider_format ? `${protocolName(attempt.client_format)} → ${protocolName(attempt.provider_format)}` : '';
+      const detail = document.createElement('small'); detail.textContent = attempt.error_class ? `${formats ? formats + ' · ' : ''}${attempt.state} · ${attemptDuration} · ${attempt.error_class}: ${attempt.error_message || 'Provider error'}` : `${formats ? formats + ' · ' : ''}${attempt.state} · ${attemptDuration} · ${dateValue(attempt.completed_at || attempt.started_at)}`;
       main.append(title, detail);
       row.append(number, main, stateBadge(attempt.state));
       if (attempt.raw_error) {

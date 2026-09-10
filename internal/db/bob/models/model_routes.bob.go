@@ -25,7 +25,7 @@ type ModelRoute struct {
 	ModelID          string           `db:"model_id" `
 	Provider         string           `db:"provider" `
 	UpstreamModel    string           `db:"upstream_model" `
-	Protocol         string           `db:"protocol" `
+	Format           sql.Null[string] `db:"format" `
 	PriceJSON        string           `db:"price_json" `
 	CapabilitiesJSON string           `db:"capabilities_json" `
 	Health           string           `db:"health" `
@@ -62,7 +62,7 @@ type modelRouteRLoaded struct {
 
 func buildModelRouteColumns(tableName string) modelRouteColumns {
 	columnsExpr := expr.NewColumnsExpr(
-		"id", "model_id", "provider", "upstream_model", "protocol", "price_json", "capabilities_json", "health", "trusted", "observed_at", "stale_at",
+		"id", "model_id", "provider", "upstream_model", "format", "price_json", "capabilities_json", "health", "trusted", "observed_at", "stale_at",
 	)
 
 	if tableName != "" {
@@ -76,7 +76,7 @@ func buildModelRouteColumns(tableName string) modelRouteColumns {
 		ModelID:          buildModelRouteColumn(tableName, "model_id"),
 		Provider:         buildModelRouteColumn(tableName, "provider"),
 		UpstreamModel:    buildModelRouteColumn(tableName, "upstream_model"),
-		Protocol:         buildModelRouteColumn(tableName, "protocol"),
+		Format:           buildModelRouteColumn(tableName, "format"),
 		PriceJSON:        buildModelRouteColumn(tableName, "price_json"),
 		CapabilitiesJSON: buildModelRouteColumn(tableName, "capabilities_json"),
 		Health:           buildModelRouteColumn(tableName, "health"),
@@ -93,7 +93,7 @@ type modelRouteColumns struct {
 	ModelID          modelRouteColumn
 	Provider         modelRouteColumn
 	UpstreamModel    modelRouteColumn
-	Protocol         modelRouteColumn
+	Format           modelRouteColumn
 	PriceJSON        modelRouteColumn
 	CapabilitiesJSON modelRouteColumn
 	Health           modelRouteColumn
@@ -149,7 +149,7 @@ type ModelRouteSetter struct {
 	ModelID          *string           `db:"model_id" `
 	Provider         *string           `db:"provider" `
 	UpstreamModel    *string           `db:"upstream_model" `
-	Protocol         *string           `db:"protocol" `
+	Format           *sql.Null[string] `db:"format" `
 	PriceJSON        *string           `db:"price_json" `
 	CapabilitiesJSON *string           `db:"capabilities_json" `
 	Health           *string           `db:"health" `
@@ -172,8 +172,8 @@ func (s ModelRouteSetter) SetColumns() []string {
 	if s.UpstreamModel != nil {
 		vals = append(vals, "upstream_model")
 	}
-	if s.Protocol != nil {
-		vals = append(vals, "protocol")
+	if s.Format != nil {
+		vals = append(vals, "format")
 	}
 	if s.PriceJSON != nil {
 		vals = append(vals, "price_json")
@@ -229,12 +229,13 @@ func (s ModelRouteSetter) Overwrite(t *ModelRoute) {
 			return *s.UpstreamModel
 		}()
 	}
-	if s.Protocol != nil {
-		t.Protocol = func() string {
-			if s.Protocol == nil {
-				return *new(string)
+	if s.Format != nil {
+		t.Format = func() sql.Null[string] {
+			if s.Format == nil {
+				return *new(sql.Null[string])
 			}
-			return *s.Protocol
+			v := s.Format
+			return *v
 		}()
 	}
 	if s.PriceJSON != nil {
@@ -352,16 +353,17 @@ func (s *ModelRouteSetter) Apply(q *dialect.InsertQuery) {
 					return *s.UpstreamModel
 				}()).WriteSQL(ctx, w, d, start)
 			}))
-		case "protocol":
+		case "format":
 			vals = append(vals, bob.ExpressionFunc(func(ctx context.Context, w io.StringWriter, d bob.Dialect, start int) ([]any, error) {
-				if s.Protocol == nil {
+				if s.Format == nil {
 					return sqlite.Arg(nil).WriteSQL(ctx, w, d, start)
 				}
-				return sqlite.Arg(func() string {
-					if s.Protocol == nil {
-						return *new(string)
+				return sqlite.Arg(func() sql.Null[string] {
+					if s.Format == nil {
+						return *new(sql.Null[string])
 					}
-					return *s.Protocol
+					v := s.Format
+					return *v
 				}()).WriteSQL(ctx, w, d, start)
 			}))
 		case "price_json":
@@ -478,10 +480,10 @@ func (s ModelRouteSetter) Expressions(prefix ...string) []bob.Expression {
 		}})
 	}
 
-	if s.Protocol != nil {
+	if s.Format != nil {
 		exprs = append(exprs, expr.Join{Sep: " = ", Exprs: []bob.Expression{
-			sqlite.Quote(append(prefix, "protocol")...),
-			sqlite.Arg(s.Protocol),
+			sqlite.Quote(append(prefix, "format")...),
+			sqlite.Arg(s.Format),
 		}})
 	}
 
@@ -548,8 +550,8 @@ func modelRouteScanMapper(ctx context.Context, cols []string) (scan.BeforeFunc, 
 			targets = append(targets, target{i, func(o *ModelRoute) any { return &o.Provider }})
 		case "upstream_model":
 			targets = append(targets, target{i, func(o *ModelRoute) any { return &o.UpstreamModel }})
-		case "protocol":
-			targets = append(targets, target{i, func(o *ModelRoute) any { return &o.Protocol }})
+		case "format":
+			targets = append(targets, target{i, func(o *ModelRoute) any { return &o.Format }})
 		case "price_json":
 			targets = append(targets, target{i, func(o *ModelRoute) any { return &o.PriceJSON }})
 		case "capabilities_json":

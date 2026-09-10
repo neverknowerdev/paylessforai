@@ -51,12 +51,12 @@ var ModelRoutes = Table[
 			Generated: false,
 			AutoIncr:  false,
 		},
-		Protocol: column{
-			Name:      "protocol",
+		Format: column{
+			Name:      "format",
 			DBType:    "TEXT",
-			Default:   "",
+			Default:   "NULL",
 			Comment:   "",
-			Nullable:  false,
+			Nullable:  true,
 			Generated: false,
 			AutoIncr:  false,
 		},
@@ -156,7 +156,7 @@ type modelRouteColumns struct {
 	ModelID          column
 	Provider         column
 	UpstreamModel    column
-	Protocol         column
+	Format           column
 	PriceJSON        column
 	CapabilitiesJSON column
 	Health           column
@@ -167,7 +167,7 @@ type modelRouteColumns struct {
 
 func (c modelRouteColumns) AsSlice() []column {
 	return []column{
-		c.ID, c.ModelID, c.Provider, c.UpstreamModel, c.Protocol, c.PriceJSON, c.CapabilitiesJSON, c.Health, c.Trusted, c.ObservedAt, c.StaleAt,
+		c.ID, c.ModelID, c.Provider, c.UpstreamModel, c.Format, c.PriceJSON, c.CapabilitiesJSON, c.Health, c.Trusted, c.ObservedAt, c.StaleAt,
 	}
 }
 

@@ -91,6 +91,7 @@ type Route struct {
 	SuccessRateBPS         int64
 	LatencyMillisP50       int64
 	CredentialID           string
+	Account                string
 	ExecutionKey           string
 	BillingClass           BillingClass
 	// Format is the learned upstream format and is independent from the

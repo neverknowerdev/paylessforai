@@ -31,10 +31,22 @@ func (r *ProxyAttemptsRepository) UpdateRoute(ctx context.Context, requestID str
 }
 
 func (r *ProxyAttemptsRepository) Record(ctx context.Context, requestID string, attempt int, provider, upstream, state, errorClass, errorMessage string, rawError ...string) error {
-	return r.RecordFormats(ctx, requestID, attempt, provider, upstream, state, errorClass, errorMessage, wire.FormatUnknown, wire.FormatUnknown, rawError...)
+	return r.RecordWithHTTPStatus(ctx, requestID, attempt, provider, upstream, state, errorClass, errorMessage, nil, rawError...)
 }
 
 func (r *ProxyAttemptsRepository) RecordFormats(ctx context.Context, requestID string, attempt int, provider, upstream, state, errorClass, errorMessage string, clientFormat, providerFormat wire.Format, rawError ...string) error {
+	return r.RecordFormatsWithHTTPStatus(ctx, requestID, attempt, provider, upstream, state, errorClass, errorMessage, clientFormat, providerFormat, nil, rawError...)
+}
+
+// RecordWithHTTPStatus persists the status returned by an upstream when one
+// exists. Transport and local routing failures intentionally keep it nil.
+func (r *ProxyAttemptsRepository) RecordWithHTTPStatus(ctx context.Context, requestID string, attempt int, provider, upstream, state, errorClass, errorMessage string, httpStatus *int, rawError ...string) error {
+	return r.RecordFormatsWithHTTPStatus(ctx, requestID, attempt, provider, upstream, state, errorClass, errorMessage, wire.FormatUnknown, wire.FormatUnknown, httpStatus, rawError...)
+}
+
+// RecordFormatsWithHTTPStatus records both the protocol translation path and
+// the upstream HTTP status for a single attempt.
+func (r *ProxyAttemptsRepository) RecordFormatsWithHTTPStatus(ctx context.Context, requestID string, attempt int, provider, upstream, state, errorClass, errorMessage string, clientFormat, providerFormat wire.Format, httpStatus *int, rawError ...string) error {
 	if attempt < 1 {
 		return fmt.Errorf("attempt number must be positive")
 	}
@@ -76,12 +88,18 @@ func (r *ProxyAttemptsRepository) RecordFormats(ctx context.Context, requestID s
 		disposition = "excluded_limit"
 	}
 	durationValue := nullableInt64(duration)
+	statusValue := (*int64)(nil)
+	if httpStatus != nil && *httpStatus >= 100 && *httpStatus <= 599 {
+		value := int64(*httpStatus)
+		statusValue = &value
+	}
+	httpStatusValue := nullableInt64(statusValue)
 	deliveryState := "nothing_sent"
-	setter := &bobmodels.ProxyAttemptSetter{ID: &id, RequestID: &requestID, AttemptNumber: pointerInt64(int64(attempt)), RouteID: nullableStringPointer(routeID), Provider: nullableStringPointer(providerValue), UpstreamModel: nullableStringPointer(upstreamValue), State: &state, StartedAt: &startedAt, CompletedAt: nullableStringPointer(completedAt), DurationMS: &durationValue, ErrorClass: nullableStringPointer(errorClassValue), ErrorMessage: nullableStringPointer(errorMessageValue), ErrorRaw: nullableStringPointer(rawValue), DeliveryState: &deliveryState, StatsDisposition: &disposition, ClientFormat: clientFormatValue, ProviderFormat: providerFormatValue}
+	setter := &bobmodels.ProxyAttemptSetter{ID: &id, RequestID: &requestID, AttemptNumber: pointerInt64(int64(attempt)), RouteID: nullableStringPointer(routeID), Provider: nullableStringPointer(providerValue), UpstreamModel: nullableStringPointer(upstreamValue), State: &state, StartedAt: &startedAt, CompletedAt: nullableStringPointer(completedAt), HTTPStatus: &httpStatusValue, DurationMS: &durationValue, ErrorClass: nullableStringPointer(errorClassValue), ErrorMessage: nullableStringPointer(errorMessageValue), ErrorRaw: nullableStringPointer(rawValue), DeliveryState: &deliveryState, StatsDisposition: &disposition, ClientFormat: clientFormatValue, ProviderFormat: providerFormatValue}
 	_, err = bobmodels.ProxyAttempts.Insert(setter, upsertAttemptFields()).One(ctx, r.exec)
 	return err
 }
 
 func upsertAttemptFields() bob.Mod[*dialect.InsertQuery] {
-	return im.OnConflict("id").DoUpdate(im.SetExcluded("provider", "upstream_model", "state", "completed_at", "duration_ms", "error_class", "error_message", "error_raw", "stats_disposition", "client_format", "provider_format"))
+	return im.OnConflict("id").DoUpdate(im.SetExcluded("provider", "upstream_model", "state", "completed_at", "http_status", "duration_ms", "error_class", "error_message", "error_raw", "stats_disposition", "client_format", "provider_format"))
 }

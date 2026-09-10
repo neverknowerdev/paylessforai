@@ -77,9 +77,8 @@ test('configures providers, creates a client key, and routes an OpenAI request',
   expect(response.ok()).toBeTruthy();
   expect((await response.json()).choices[0].message.content).toBe('mock response');
   const openRouterRequests = await (await request.get('http://127.0.0.1:19475/__mock/requests')).json();
-  const surplusRequests = await (await request.get('http://127.0.0.1:19476/__mock/requests')).json();
   expect(openRouterRequests.data.some((item: { path: string; body: string }) => item.path.endsWith('/chat/completions') && item.body.includes('model-a:free'))).toBeTruthy();
-  expect(surplusRequests.data.some((item: { path: string; body: string }) => item.path.endsWith('/chat/completions') && item.body.includes('model-a'))).toBeTruthy();
+  expect(openRouterRequests.data.some((item: { path: string; body: string }) => item.path.endsWith('/responses') && item.body.includes('model-a:free'))).toBeTruthy();
   await page.locator('#sidebar').getByRole('link', { name: 'Models' }).click();
   await expect(page.locator('[data-view-panel="models"] table')).toContainText('Modalities');
   await expect(page.locator('[data-view-panel="models"] table')).toContainText('free-tier');
@@ -92,7 +91,7 @@ test('configures providers, creates a client key, and routes an OpenAI request',
   await expect(requestsTable).toContainText('Attempts');
   await page.locator('#requests-table-body tr').first().click();
   await expect(page.locator('#request-detail')).toContainText('Terminal provider');
-  await expect(page.locator('#request-detail')).toContainText('Surplus Intelligence');
+  await expect(page.locator('#request-detail')).toContainText('OpenRouter');
   await expect(page.locator('#request-detail')).toContainText('Routing attempts (2)');
   await expect(page.locator('#request-detail')).toContainText('HTTP 503');
   await expect(page.locator('#request-detail')).toContainText('HTTP 200');

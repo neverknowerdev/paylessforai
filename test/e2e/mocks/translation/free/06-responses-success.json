@@ -1,0 +1,10 @@
+{
+  "status": 200,
+  "body": {
+    "id": "responses-format-success",
+    "object": "response",
+    "status": "completed",
+    "output": [{"type": "message", "role": "assistant", "content": [{"type": "output_text", "text": "responses format success"}]}],
+    "usage": {"input_tokens": 3, "output_tokens": 2, "total_tokens": 5}
+  }
+}

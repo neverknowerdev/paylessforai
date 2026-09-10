@@ -498,7 +498,15 @@ func (p *Proxy) executeTranslatedRoute(ctx context.Context, writer http.Response
 		}
 	}
 	hinted := client.Endpoint().HintedFormat
+	formatKnown := saved.Valid() || hinted.Valid()
 	candidates := providers.CandidateFormats(saved, hinted, clientFormat)
+	if formatKnown {
+		known := saved
+		if !known.Valid() {
+			known = hinted
+		}
+		candidates = []wire.Format{known}
+	}
 	if remainingBudget < 0 {
 		remainingBudget = 0
 	}
@@ -538,7 +546,7 @@ func (p *Proxy) executeTranslatedRoute(ctx context.Context, writer http.Response
 		if err != nil {
 			lastErr = err
 			p.recordTranslatedAttempt(ctx, requestID, attempt, route, entry, clientFormat, candidate, "failed", errorCode(err), err)
-			if !safeFormatFailure(err) {
+			if !shouldTryNextFormat(err, !formatKnown) {
 				break
 			}
 			formatFailure = true
@@ -557,7 +565,7 @@ func (p *Proxy) executeTranslatedRoute(ctx context.Context, writer http.Response
 			}
 			lastErr = decodeErr
 			p.recordTranslatedAttempt(ctx, requestID, attempt, route, entry, clientFormat, candidate, "failed", "malformed_response", decodeErr)
-			if !safeFormatFailure(decodeErr) {
+			if !shouldTryNextFormat(decodeErr, !formatKnown) {
 				break
 			}
 			formatFailure = true
@@ -642,7 +650,16 @@ func (p *Proxy) recordTranslatedAttempt(ctx context.Context, requestID string, a
 	_ = recordProxyAttemptRouteFormats(ctx, p.Repositories, requestID, attempt, route.ID, route.CredentialID, entry.StageID, strings.Join(entry.StagePath, " / "), route.Provider, route.UpstreamModel, state, code, message, clientFormat, providerFormat, status, raw)
 }
 
-func safeFormatFailure(err error) bool {
+// shouldTryNextFormat allows format discovery to use endpoint-related upstream
+// responses as evidence when the route has no known format. Some providers
+// report an unsupported endpoint as a generic 500, so server errors must be
+// probeable too. Authentication, billing, quota, timeout, conflict, and
+// payload-size errors are not format evidence and must not trigger extra
+// requests. Once a format is known, errors use normal retry/failover.
+func shouldTryNextFormat(err error, unknownFormat bool) bool {
+	if !unknownFormat {
+		return false
+	}
 	if wire.IsIncompatibility(err) {
 		return true
 	}
@@ -655,10 +672,15 @@ func safeFormatFailure(err error) bool {
 		return false
 	}
 	switch upstream.StatusCode {
-	case http.StatusBadRequest, http.StatusNotFound, http.StatusMethodNotAllowed, http.StatusUnsupportedMediaType, http.StatusUnprocessableEntity:
+	case http.StatusBadRequest,
+		http.StatusNotFound,
+		http.StatusMethodNotAllowed,
+		http.StatusNotAcceptable,
+		http.StatusUnsupportedMediaType,
+		http.StatusUnprocessableEntity:
 		return true
 	default:
-		return false
+		return upstream.StatusCode >= http.StatusInternalServerError && upstream.StatusCode <= 599
 	}
 }
 

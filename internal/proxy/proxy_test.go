@@ -263,7 +263,7 @@ func TestProxyReturnsProviderErrorsAfterAllAttemptsFail(t *testing.T) {
 	if err := db.DB().QueryRow(`SELECT error_code, error_message FROM proxy_requests`).Scan(&code, &message); err != nil {
 		t.Fatal(err)
 	}
-	if code != "all_provider_attempts_failed" || message != "all provider attempts failed" {
+	if code != "upstream_error" || message != "all provider attempts failed" {
 		t.Fatalf("persisted terminal error: code=%q message=%q", code, message)
 	}
 }

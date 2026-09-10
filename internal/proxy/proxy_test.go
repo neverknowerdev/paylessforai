@@ -2,6 +2,7 @@ package proxy
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"io"
 	"net/http"
@@ -31,11 +32,13 @@ type fakeProvider struct {
 type metadataProvider struct {
 	*fakeProvider
 	executionKey string
+	account      string
 	billing      matcher.BillingClass
 }
 
 func (p metadataProvider) ExecutionKey() string               { return p.executionKey }
 func (p metadataProvider) CredentialID() string               { return p.executionKey }
+func (p metadataProvider) AccountLabel() string               { return p.account }
 func (p metadataProvider) BillingClass() matcher.BillingClass { return p.billing }
 
 type failingReader struct {
@@ -210,6 +213,75 @@ func TestProxyRetriesThenFailsOver(t *testing.T) {
 	statuses := items[0].AttemptDetails
 	if statuses[0].HTTPStatus == nil || *statuses[0].HTTPStatus != 500 || statuses[1].HTTPStatus == nil || *statuses[1].HTTPStatus != 500 || statuses[2].HTTPStatus == nil || *statuses[2].HTTPStatus != 200 {
 		t.Fatalf("unexpected persisted upstream statuses: %#v", statuses)
+	}
+}
+
+func TestProxyReturnsProviderErrorsAfterAllAttemptsFail(t *testing.T) {
+	freeModel := model("model-a:free", 0, 0)
+	freeModel.Free = true
+	free := &fakeProvider{name: "opencode", models: []providers.Model{freeModel}, responses: []func(*http.Request) (*http.Response, error){
+		func(*http.Request) (*http.Response, error) {
+			return nil, &providers.UpstreamError{Provider: "opencode", StatusCode: http.StatusServiceUnavailable, Class: retry.ErrorServer, Message: "free capacity exhausted"}
+		},
+	}}
+	paid := &fakeProvider{name: "surplus", models: []providers.Model{model("model-a", 1, 1)}, responses: []func(*http.Request) (*http.Response, error){
+		func(*http.Request) (*http.Response, error) {
+			return nil, &providers.UpstreamError{Provider: "surplus", StatusCode: http.StatusBadGateway, Class: retry.ErrorServer, Message: "first paid attempt failed"}
+		},
+		func(*http.Request) (*http.Response, error) {
+			return nil, &providers.UpstreamError{Provider: "surplus", StatusCode: http.StatusBadGateway, Class: retry.ErrorServer, Message: "second paid attempt failed"}
+		},
+	}}
+	proxy, db, secret := testProxy(t,
+		metadataProvider{fakeProvider: free, executionKey: "opencode-free", account: "Free account", billing: matcher.BillingFree},
+		metadataProvider{fakeProvider: paid, executionKey: "surplus-paid", account: "Primary account", billing: matcher.BillingMetered},
+	)
+	defer db.Close()
+	request := httptest.NewRequest(http.MethodPost, "/v1/chat/completions", strings.NewReader(`{"model":"model-a","messages":[]}`))
+	request.Header.Set("Authorization", "Bearer "+secret)
+	response := httptest.NewRecorder()
+	proxy.ServeHTTP(response, request, matcher.ProtocolChatCompletions)
+
+	if response.Code != http.StatusBadGateway {
+		t.Fatalf("unexpected status: %d %s", response.Code, response.Body.String())
+	}
+	var payload struct {
+		Error struct {
+			Type     string          `json:"type"`
+			Code     string          `json:"code"`
+			Message  string          `json:"message"`
+			Attempts int             `json:"attempts"`
+			Errors   []providerError `json:"errors"`
+		} `json:"error"`
+	}
+	if err := json.Unmarshal(response.Body.Bytes(), &payload); err != nil {
+		t.Fatal(err)
+	}
+	if payload.Error.Type != "payless_error" || payload.Error.Code != "all_provider_attempts_failed" || payload.Error.Message != "all provider attempts failed" {
+		t.Fatalf("expected generic terminal error, got %#v", payload.Error)
+	}
+	if payload.Error.Attempts != 3 {
+		t.Fatalf("expected 3 attempts, got %d", payload.Error.Attempts)
+	}
+	want := []providerError{
+		{Provider: "opencode", Account: "Free account", Error: "free capacity exhausted"},
+		{Provider: "surplus", Account: "Primary account", Error: "first paid attempt failed"},
+		{Provider: "surplus", Account: "Primary account", Error: "second paid attempt failed"},
+	}
+	if len(payload.Error.Errors) != len(want) {
+		t.Fatalf("provider errors: got %#v want %#v", payload.Error.Errors, want)
+	}
+	for i := range want {
+		if payload.Error.Errors[i] != want[i] {
+			t.Fatalf("provider error %d: got %#v want %#v", i, payload.Error.Errors[i], want[i])
+		}
+	}
+	var code, message string
+	if err := db.DB().QueryRow(`SELECT error_code, error_message FROM proxy_requests`).Scan(&code, &message); err != nil {
+		t.Fatal(err)
+	}
+	if code != "upstream_error" || message != "all provider attempts failed" {
+		t.Fatalf("persisted terminal error: code=%q message=%q", code, message)
 	}
 }
 

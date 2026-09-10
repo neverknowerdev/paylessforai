@@ -269,7 +269,7 @@ func loadProviderClients(registry *providers.Registry, repos *repositories.Repos
 			if credential.AccessMode == "subscription" {
 				billing = matcher.BillingSubscription
 			}
-			clients = append(clients, credentialClient{Client: client, id: credential.ID, billing: billing})
+			clients = append(clients, credentialClient{Client: client, id: credential.ID, account: credential.Label, billing: billing})
 		}
 	}
 	return clients
@@ -278,9 +278,11 @@ func loadProviderClients(registry *providers.Registry, repos *repositories.Repos
 type credentialClient struct {
 	providers.Client
 	id      string
+	account string
 	billing matcher.BillingClass
 }
 
 func (c credentialClient) ExecutionKey() string               { return c.id }
 func (c credentialClient) CredentialID() string               { return c.id }
+func (c credentialClient) AccountLabel() string               { return c.account }
 func (c credentialClient) BillingClass() matcher.BillingClass { return c.billing }

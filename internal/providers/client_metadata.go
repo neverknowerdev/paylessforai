@@ -9,3 +9,10 @@ type ClientMetadata interface {
 	CredentialID() string
 	BillingClass() matcher.BillingClass
 }
+
+// ClientAccountMetadata is optional non-secret account display metadata. It is
+// attached to routes so terminal proxy errors can identify the configured
+// account as it appears in the UI.
+type ClientAccountMetadata interface {
+	AccountLabel() string
+}

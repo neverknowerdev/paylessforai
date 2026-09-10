@@ -143,7 +143,12 @@ func (p *Proxy) ServeHTTP(w http.ResponseWriter, r *http.Request, protocol match
 		if errors.As(err, &partial) {
 			return
 		}
-		p.finishError(r.Context(), requestID, errorCode(err), sanitize(err.Error()))
+		p.finishError(r.Context(), requestID, persistenceErrorCode(err), sanitize(err.Error()))
+		var proxyErr *proxyError
+		if errors.As(err, &proxyErr) && len(proxyErr.providerErrors) > 0 {
+			writeProviderErrors(w, statusFor(err), errorCode(err), sanitize(err.Error()), proxyErr.attempts, proxyErr.providerErrors)
+			return
+		}
 		writeError(w, statusFor(err), errorCode(err), sanitize(err.Error()))
 	}
 }
@@ -287,10 +292,18 @@ func (p *Proxy) execute(ctx context.Context, writer http.ResponseWriter, request
 	policy.MaximumAttempts = routing.DefaultLimits().MaximumAttempts
 	totalAttempts := 0
 	retriesRemaining := -1
+	providerErrors := []providerError{}
+	lastAttemptErrorCode := ""
 	for totalAttempts < policy.MaximumAttempts {
 		if current >= len(plan.Entries) {
 			if blocked {
+				if len(providerErrors) > 0 {
+					return allProviderAttemptsFailed(http.StatusTooManyRequests, totalAttempts, providerErrors, lastAttemptErrorCode)
+				}
 				return &proxyError{status: http.StatusTooManyRequests, code: "all_subscription_quotas_exhausted", message: "all eligible subscription provider accounts are temporarily limited"}
+			}
+			if len(providerErrors) > 0 {
+				return allProviderAttemptsFailed(http.StatusServiceUnavailable, totalAttempts, providerErrors, lastAttemptErrorCode)
 			}
 			return &proxyError{status: http.StatusServiceUnavailable, code: "no_fallback_route", message: "all eligible routes were exhausted"}
 		}
@@ -312,6 +325,8 @@ func (p *Proxy) execute(ctx context.Context, writer http.ResponseWriter, request
 		client := p.Catalog.ClientForRoute(route)
 		if client == nil {
 			totalAttempts++
+			lastAttemptErrorCode = "provider_not_configured"
+			providerErrors = append(providerErrors, providerError{Provider: route.Provider, Account: route.Account, Error: "selected provider is not configured"})
 			if p.Repositories != nil {
 				_ = recordProxyAttemptRoute(ctx, p.Repositories, requestID, totalAttempts, route.ID, route.CredentialID, entry.StageID, strings.Join(entry.StagePath, " / "), route.Provider, route.UpstreamModel, "failed", "provider_not_configured", "Selected provider is not configured.", nil, "selected provider is not configured")
 			}
@@ -366,6 +381,8 @@ func (p *Proxy) execute(ctx context.Context, writer http.ResponseWriter, request
 		if p.Repositories != nil {
 			_ = recordProxyAttemptRoute(ctx, p.Repositories, requestID, totalAttempts, route.ID, route.CredentialID, entry.StageID, strings.Join(entry.StagePath, " / "), route.Provider, route.UpstreamModel, "failed", errorCode(err), humanErrorMessage(err), upstreamHTTPStatus(err), rawErrorMessage(err))
 		}
+		lastAttemptErrorCode = errorCode(err)
+		providerErrors = append(providerErrors, providerError{Provider: route.Provider, Account: route.Account, Error: humanErrorMessage(err)})
 		decision := p.Retry.Decide(retry.Input{Policy: policy, AttemptNumber: totalAttempts, Now: time.Now(), Error: classified, Delivery: retry.NothingSent, SameRouteAvailable: !route.Free, FallbacksRemaining: len(plan.Entries) - current - 1, PlanMode: true, SameRouteRetriesRemaining: retriesRemaining, PlanEntriesRemaining: len(plan.Entries) - current - 1, TotalAttemptsRemaining: policy.MaximumAttempts - totalAttempts})
 		// A provider error must not hide healthy routes later in the plan. The
 		// retry engine still controls configured same-route retries, but if it
@@ -376,7 +393,7 @@ func (p *Proxy) execute(ctx context.Context, writer http.ResponseWriter, request
 			decision.Delay = 0
 		}
 		if decision.Action != retry.RetrySameRoute && decision.Action != retry.FailOver {
-			return err
+			return allProviderAttemptsFailed(statusFor(err), totalAttempts, providerErrors, lastAttemptErrorCode)
 		}
 		if decision.Action == retry.FailOver {
 			current++
@@ -388,7 +405,7 @@ func (p *Proxy) execute(ctx context.Context, writer http.ResponseWriter, request
 			return err
 		}
 	}
-	return &proxyError{status: http.StatusBadGateway, code: "attempt_budget_exhausted", message: "provider attempt budget exhausted"}
+	return allProviderAttemptsFailed(http.StatusBadGateway, totalAttempts, providerErrors, lastAttemptErrorCode)
 }
 
 func (p *Proxy) complete(ctx context.Context, writer http.ResponseWriter, requestID string, response *http.Response, expectedCost, officialExpectedCost int64, price, officialPrice matcher.Price) error {
@@ -680,9 +697,29 @@ func copyHeaders(destination, source http.Header) {
 }
 
 type proxyError struct {
-	status  int
-	code    string
-	message string
+	status         int
+	code           string
+	message        string
+	attempts       int
+	providerErrors []providerError
+	terminalCode   string
+}
+
+type providerError struct {
+	Provider string `json:"provider"`
+	Account  string `json:"account"`
+	Error    string `json:"error"`
+}
+
+func allProviderAttemptsFailed(status, attempts int, providerErrors []providerError, terminalCode string) *proxyError {
+	return &proxyError{
+		status:         status,
+		code:           "all_provider_attempts_failed",
+		message:        "all provider attempts failed",
+		attempts:       attempts,
+		providerErrors: providerErrors,
+		terminalCode:   terminalCode,
+	}
 }
 
 type partialStreamError struct{ err error }
@@ -732,6 +769,14 @@ func errorCode(err error) string {
 	return "upstream_error"
 }
 
+func persistenceErrorCode(err error) string {
+	var proxyErr *proxyError
+	if errors.As(err, &proxyErr) && proxyErr.terminalCode != "" {
+		return proxyErr.terminalCode
+	}
+	return errorCode(err)
+}
+
 func (p *Proxy) finishError(ctx context.Context, requestID, code, message string) {
 	if p.Repositories != nil {
 		_ = p.Repositories.ProxyRequests.Complete(ctx, requestID, "failed", code, message)
@@ -742,6 +787,12 @@ func writeError(w http.ResponseWriter, status int, code, message string) {
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(status)
 	_ = json.NewEncoder(w).Encode(map[string]any{"error": map[string]any{"type": "payless_error", "code": code, "message": message}})
+}
+
+func writeProviderErrors(w http.ResponseWriter, status int, code, message string, attempts int, providerErrors []providerError) {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(status)
+	_ = json.NewEncoder(w).Encode(map[string]any{"error": map[string]any{"type": "payless_error", "code": code, "message": message, "attempts": attempts, "errors": providerErrors}})
 }
 
 func sanitize(message string) string {

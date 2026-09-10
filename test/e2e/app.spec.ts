@@ -488,7 +488,15 @@ test('configures a subscription, records quota blocking, and shows dynamic prici
   await request.post('http://127.0.0.1:19474/__mock/scenario', { data: { models: [{ id: 'subscription-model', name: 'Subscription Model', prompt_price: '0.000001', completion_price: '0.000002' }], status: 429, failure_message: 'monthly usage quota exceeded' } });
   const limited = await request.post('/v1/chat/completions', { headers: { Authorization: `Bearer ${secret}` }, data: { model: 'subscription-model', messages: [{ role: 'user', content: 'again' }] } });
   expect(limited.status()).toBe(429);
-  expect((await limited.json()).error.code).toBe('provider_quota_exhausted');
+  expect(await limited.json()).toMatchObject({
+    error: {
+      type: 'payless_error',
+      code: 'all_provider_attempts_failed',
+      message: 'all provider attempts failed',
+      attempts: 1,
+      errors: [{ provider: 'subscription-mock', account: 'Pro plan', error: 'monthly usage quota exceeded' }],
+    },
+  });
   const credentials = await (await request.get('/api/providers/credentials')).json();
   expect(credentials.data.find((item: { provider: string }) => item.provider === 'subscription-mock')).toMatchObject({ access_mode: 'subscription', subscription_status: 'limited' });
   const summary = await (await request.get('/api/stats/summary')).json();

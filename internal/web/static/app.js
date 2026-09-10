@@ -258,7 +258,7 @@
 
   function filteredRequests() {
     const search = ($('#requests-search')?.value || '').trim().toLowerCase(); const filter = $('#requests-state')?.value || 'all';
-    return state.requests.filter((request) => (filter === 'all' || request.state === filter) && (!search || `${request.id} ${request.model} ${request.provider} ${request.protocol}`.toLowerCase().includes(search)));
+    return state.requests.filter((request) => (filter === 'all' || request.state === filter) && (!search || `${request.id} ${request.session_id || ''} ${request.model} ${request.provider} ${request.protocol}`.toLowerCase().includes(search)));
   }
   function renderRequestTable() {
     const body = $('#requests-table-body'); const empty = $('#requests-empty'); if (!body) return;
@@ -268,6 +268,7 @@
     filteredRequests().forEach((request) => {
       const row = document.createElement('tr'); row.className = 'data-row'; row.dataset.requestId = request.id; row.setAttribute('aria-expanded', 'false');
       const id = appendTextCell(row, ''); const idStrong = document.createElement('strong'); idStrong.textContent = shortID(request.id); const idSmall = document.createElement('small'); idSmall.textContent = dateValue(request.received_at); id.append(idStrong, idSmall);
+      const session = appendTextCell(row, ''); session.className = 'session-id-cell'; const sessionValue = document.createElement('strong'); sessionValue.textContent = request.session_id || '—'; sessionValue.title = request.session_id || 'No derived session ID'; session.append(sessionValue);
       const model = appendTextCell(row, ''); const modelStrong = document.createElement('strong'); modelStrong.textContent = request.model; const modelSmall = document.createElement('small'); modelSmall.textContent = protocolName(request.protocol); model.append(modelStrong, modelSmall);
       appendTextCell(row, `${formatNumber(request.attempts)} attempt${request.attempts === 1 ? '' : 's'}`);
       const tokens = appendTextCell(row, ''); tokens.append(tokenBreakdown(request.input_tokens, request.output_tokens, request.total_tokens, request.cached_read_tokens, request.reasoning_tokens));
@@ -292,7 +293,7 @@
     existingDetail?.remove();
     state.detailDrawer = drawer;
     drawer.hidden = false; drawer.replaceChildren(); const heading = document.createElement('h4'); heading.textContent = `Request ${shortID(request.id)}`; drawer.append(heading);
-    const grid = document.createElement('div'); grid.className = 'detail-grid'; const values = [['Model', request.model], ['Terminal provider', providerName(request.provider)], ['Terminal upstream model', request.upstream_model || '—'], ['Attempts', formatNumber(request.attempts)], ['Protocol', protocolName(request.protocol)], ['State', request.state], ['Input tokens', formatNumber(request.input_tokens)], ['Output tokens', formatNumber(request.output_tokens)], ['Cached read', formatNumber(request.cached_read_tokens)], ['Cache write', formatNumber(request.cache_write_tokens)], ['Reasoning', formatNumber(request.reasoning_tokens)], ['Response time', formatDuration(request.duration_ms)], ['Estimated route cost', formatUSD(request.estimated_cost_pico_usd)], ['Official cost', request.official_cost_pico_usd ? formatUSD(request.official_cost_pico_usd) : 'Not available'], ['Actual cost', request.actual_cost_pico_usd != null ? formatUSD(request.actual_cost_pico_usd) : 'Not reported'], ['Discount', discountLabel(request)], ['Received', dateValue(request.received_at)], ['Completed', dateValue(request.completed_at)]];
+    const grid = document.createElement('div'); grid.className = 'detail-grid'; const values = [['Session ID', request.session_id || '—'], ['Model', request.model], ['Terminal provider', providerName(request.provider)], ['Terminal upstream model', request.upstream_model || '—'], ['Attempts', formatNumber(request.attempts)], ['Protocol', protocolName(request.protocol)], ['State', request.state], ['Input tokens', formatNumber(request.input_tokens)], ['Output tokens', formatNumber(request.output_tokens)], ['Cached read', formatNumber(request.cached_read_tokens)], ['Cache write', formatNumber(request.cache_write_tokens)], ['Reasoning', formatNumber(request.reasoning_tokens)], ['Response time', formatDuration(request.duration_ms)], ['Estimated route cost', formatUSD(request.estimated_cost_pico_usd)], ['Official cost', request.official_cost_pico_usd ? formatUSD(request.official_cost_pico_usd) : 'Not available'], ['Actual cost', request.actual_cost_pico_usd != null ? formatUSD(request.actual_cost_pico_usd) : 'Not reported'], ['Discount', discountLabel(request)], ['Received', dateValue(request.received_at)], ['Completed', dateValue(request.completed_at)]];
     values.forEach(([label, value]) => { const cell = document.createElement('div'); const name = document.createElement('span'); name.textContent = label; const data = document.createElement('strong'); data.textContent = value; cell.append(name, data); grid.append(cell); });
     if (request.error_code) { const error = document.createElement('p'); error.className = 'modal-note'; error.textContent = `Terminal error: ${request.error_code}`; drawer.append(error); } drawer.append(grid);
     const attempts = document.createElement('div'); attempts.className = 'attempt-list'; const attemptsHeading = document.createElement('h5'); attemptsHeading.textContent = `Routing attempts (${formatNumber(request.attempts)})`; attempts.append(attemptsHeading);
@@ -319,7 +320,7 @@
     drawer.append(attempts);
     if (!selectedRow) { drawer.hidden = true; return; }
     selectedRow.setAttribute('aria-expanded', 'true');
-    const detailRow = document.createElement('tr'); detailRow.className = 'request-detail-row'; detailRow.dataset.requestDetailFor = id; const detailCell = document.createElement('td'); detailCell.colSpan = 10; detailCell.append(drawer); detailRow.append(detailCell); selectedRow.after(detailRow);
+    const detailRow = document.createElement('tr'); detailRow.className = 'request-detail-row'; detailRow.dataset.requestDetailFor = id; const detailCell = document.createElement('td'); detailCell.colSpan = 11; detailCell.append(drawer); detailRow.append(detailCell); selectedRow.after(detailRow);
   }
 
   async function loadModels() {

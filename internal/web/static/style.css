@@ -607,3 +607,5 @@ code { display: inline-block; max-width: 100%; overflow: hidden; padding: 10px 1
 .usage-filter-fields input { display: block; width: 100%; margin-top: 5px; padding: 8px 9px; border: 1px solid #344363; border-radius: 7px; outline: 0; color: var(--ink); background: #0a1122; font-size: 11px; }
  .new-model-row td:first-child { box-shadow: inset 2px 0 var(--blue); }
  .catalog-refresh-status { color: var(--faint); font-size: 12px; margin: 14px 0; }
+.session-id-cell { max-width: 220px; }
+.session-id-cell strong { overflow-wrap: anywhere; font-family: var(--mono); font-size: 10px; }

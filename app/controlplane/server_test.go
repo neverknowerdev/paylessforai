@@ -183,7 +183,7 @@ func TestRequestStatsAPI(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer db.Close()
-	if err := db.ProxyRequests.Create(context.Background(), "request-1", "", "chat_completions", "model-a"); err != nil {
+	if err := db.ProxyRequests.Create(context.Background(), "request-1", "", "chat_completions", "model-a", "session-123"); err != nil {
 		t.Fatal(err)
 	}
 	group, err := db.Groups.Save(context.Background(), groups.Definition{ID: "stats-group", Name: "Stats group", Slug: "stats-group", Enabled: true, Stages: []groups.Stage{{Name: "primary", Sources: []groups.Source{{Kind: groups.SourceModel, ModelID: "model-a"}}}}}, nil)
@@ -205,7 +205,7 @@ func TestRequestStatsAPI(t *testing.T) {
 	}
 	response := httptest.NewRecorder()
 	server.httpServer.Handler.ServeHTTP(response, httptest.NewRequest(http.MethodGet, "/api/requests?limit=10", nil))
-	if response.Code != http.StatusOK || !strings.Contains(response.Body.String(), `"total_tokens":5`) {
+	if response.Code != http.StatusOK || !strings.Contains(response.Body.String(), `"session_id":"session-123"`) || !strings.Contains(response.Body.String(), `"total_tokens":5`) {
 		t.Fatalf("unexpected request stats response: %d %s", response.Code, response.Body.String())
 	}
 	summary := httptest.NewRecorder()

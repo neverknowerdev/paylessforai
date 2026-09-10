@@ -87,9 +87,15 @@ test('configures providers, creates a client key, and routes an OpenAI request',
   await expect(page.locator('#models-table-body .modality-icon[aria-label="Image"]')).toHaveCount(2);
   await page.getByRole('link', { name: 'Requests' }).click();
   await page.locator('#refresh-button').click();
-  await expect(page.locator('[data-view-panel="requests"] table')).toContainText('Provider');
-  await expect(page.locator('[data-view-panel="requests"] table')).toContainText('Attempts');
-  await expect(page.locator('[data-view-panel="requests"] table')).toContainText('Surplus Intelligence');
+  const requestsTable = page.locator('[data-view-panel="requests"] table');
+  await expect(requestsTable).not.toContainText('Provider');
+  await expect(requestsTable).toContainText('Attempts');
+  await page.locator('#requests-table-body tr').first().click();
+  await expect(page.locator('#request-detail')).toContainText('Terminal provider');
+  await expect(page.locator('#request-detail')).toContainText('Surplus Intelligence');
+  await expect(page.locator('#request-detail')).toContainText('Routing attempts (2)');
+  await expect(page.locator('#request-detail')).toContainText('HTTP 503');
+  await expect(page.locator('#request-detail')).toContainText('HTTP 200');
   await expect(page.locator('#status')).toContainText('Ready');
 });
 

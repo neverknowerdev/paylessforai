@@ -481,7 +481,7 @@ func TestProxyLearnsUpstreamFormatAndTranslatesResponse(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path == "/v1/chat/completions" {
 			w.Header().Set("Content-Type", "application/json")
-			w.WriteHeader(http.StatusInternalServerError)
+			w.WriteHeader(http.StatusNotFound)
 			_, _ = io.WriteString(w, `{"error":{"message":"wrong endpoint"}}`)
 			return
 		}
@@ -526,6 +526,54 @@ func TestProxyLearnsUpstreamFormatAndTranslatesResponse(t *testing.T) {
 	provider.mu.Unlock()
 	if len(paths) != 3 || paths[2] != "/v1/responses" {
 		t.Fatalf("learned format was not reused: %v", paths)
+	}
+}
+
+func TestProxyAggregatesTerminalErrorsFromTranslatedRoute(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		if r.URL.Path == "/v1/models" {
+			_, _ = io.WriteString(w, `{"data":[{"id":"model-a","name":"Model A","context_length":10000,"max_completion_tokens":1000,"pricing":{"prompt":"0.000001","completion":"0.000001"}}]}`)
+			return
+		}
+		if r.URL.Path != "/v1/chat/completions" {
+			http.NotFound(w, r)
+			return
+		}
+		w.WriteHeader(http.StatusTooManyRequests)
+		_, _ = io.WriteString(w, `{"error":{"message":"monthly usage quota exceeded","type":"mock_error"}}`)
+	}))
+	defer server.Close()
+
+	provider := &translatingProvider{HTTPClient: providers.NewHTTPClient("subscription-mock", server.URL+"/v1", "secret"), models: []providers.Model{model("model-a", 1, 1)}}
+	proxy, db, secret := testProxy(t, provider)
+	defer db.Close()
+	request := httptest.NewRequest(http.MethodPost, "/v1/chat/completions", strings.NewReader(`{"model":"model-a","messages":[{"role":"user","content":"hello"}]}`))
+	request.Header.Set("Authorization", "Bearer "+secret)
+	response := httptest.NewRecorder()
+	proxy.ServeHTTP(response, request, matcher.ProtocolChatCompletions)
+
+	if response.Code != http.StatusTooManyRequests {
+		t.Fatalf("unexpected status: %d %s", response.Code, response.Body.String())
+	}
+	var payload struct {
+		Error struct {
+			Type     string          `json:"type"`
+			Code     string          `json:"code"`
+			Message  string          `json:"message"`
+			Attempts int             `json:"attempts"`
+			Errors   []providerError `json:"errors"`
+		} `json:"error"`
+	}
+	if err := json.Unmarshal(response.Body.Bytes(), &payload); err != nil {
+		t.Fatal(err)
+	}
+	if payload.Error.Type != "payless_error" || payload.Error.Code != "all_provider_attempts_failed" || payload.Error.Message != "all provider attempts failed" || payload.Error.Attempts != 1 {
+		t.Fatalf("unexpected terminal error: %#v", payload.Error)
+	}
+	want := []providerError{{Provider: "subscription-mock", Error: "monthly usage quota exceeded"}}
+	if len(payload.Error.Errors) != len(want) || payload.Error.Errors[0] != want[0] {
+		t.Fatalf("unexpected provider errors: got %#v want %#v", payload.Error.Errors, want)
 	}
 }
 

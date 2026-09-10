@@ -47,11 +47,11 @@ func recordResolution(ctx context.Context, repos *repositories.Repositories, req
 	return repos.ProxyRequests.RecordResolution(ctx, requestID, plan.GroupID, plan.GroupRevision, string(data), selected)
 }
 
-func recordProxyAttemptRoute(ctx context.Context, repos *repositories.Repositories, requestID string, attempt int, routeID, credentialID, stageID, stagePath, provider, upstream, state, errorClass, errorMessage string, rawError ...string) error {
+func recordProxyAttemptRoute(ctx context.Context, repos *repositories.Repositories, requestID string, attempt int, routeID, credentialID, stageID, stagePath, provider, upstream, state, errorClass, errorMessage string, httpStatus *int, rawError ...string) error {
 	if err := repos.ProxyRequests.RecordAttemptRoute(ctx, requestID, attempt, provider, upstream); err != nil {
 		return err
 	}
-	if err := repos.ProxyAttempts.Record(ctx, requestID, attempt, provider, upstream, state, errorClass, errorMessage, rawError...); err != nil {
+	if err := repos.ProxyAttempts.RecordWithHTTPStatus(ctx, requestID, attempt, provider, upstream, state, errorClass, errorMessage, httpStatus, rawError...); err != nil {
 		return err
 	}
 	return repos.ProxyAttempts.UpdateRoute(ctx, requestID, attempt, routeID, credentialID, stageID, stagePath)
@@ -313,7 +313,7 @@ func (p *Proxy) execute(ctx context.Context, writer http.ResponseWriter, request
 		if client == nil {
 			totalAttempts++
 			if p.Repositories != nil {
-				_ = recordProxyAttemptRoute(ctx, p.Repositories, requestID, totalAttempts, route.ID, route.CredentialID, entry.StageID, strings.Join(entry.StagePath, " / "), route.Provider, route.UpstreamModel, "failed", "provider_not_configured", "Selected provider is not configured.", "selected provider is not configured")
+				_ = recordProxyAttemptRoute(ctx, p.Repositories, requestID, totalAttempts, route.ID, route.CredentialID, entry.StageID, strings.Join(entry.StagePath, " / "), route.Provider, route.UpstreamModel, "failed", "provider_not_configured", "Selected provider is not configured.", nil, "selected provider is not configured")
 			}
 			current++
 			retriesRemaining = -1
@@ -321,7 +321,7 @@ func (p *Proxy) execute(ctx context.Context, writer http.ResponseWriter, request
 		}
 		totalAttempts++
 		if p.Repositories != nil {
-			_ = recordProxyAttemptRoute(ctx, p.Repositories, requestID, totalAttempts, route.ID, route.CredentialID, entry.StageID, strings.Join(entry.StagePath, " / "), route.Provider, route.UpstreamModel, "started", "", "")
+			_ = recordProxyAttemptRoute(ctx, p.Repositories, requestID, totalAttempts, route.ID, route.CredentialID, entry.StageID, strings.Join(entry.StagePath, " / "), route.Provider, route.UpstreamModel, "started", "", "", nil)
 		}
 		response, err := client.Do(ctx, request.Protocol, route.UpstreamModel, body)
 		if err == nil {
@@ -333,7 +333,7 @@ func (p *Proxy) execute(ctx context.Context, writer http.ResponseWriter, request
 					if streamErr != nil {
 						state, code, message, raw = "partial", "stream_error", humanErrorMessage(streamErr), sanitize(streamErr.Error())
 					}
-					_ = recordProxyAttemptRoute(ctx, p.Repositories, requestID, totalAttempts, route.ID, route.CredentialID, entry.StageID, strings.Join(entry.StagePath, " / "), route.Provider, route.UpstreamModel, state, code, message, raw)
+					_ = recordProxyAttemptRoute(ctx, p.Repositories, requestID, totalAttempts, route.ID, route.CredentialID, entry.StageID, strings.Join(entry.StagePath, " / "), route.Provider, route.UpstreamModel, state, code, message, httpStatusPointer(response.StatusCode), raw)
 				}
 				return streamErr
 			}
@@ -344,7 +344,7 @@ func (p *Proxy) execute(ctx context.Context, writer http.ResponseWriter, request
 				if completeErr != nil {
 					state, code, message, raw = "failed", errorCode(completeErr), humanErrorMessage(completeErr), sanitize(completeErr.Error())
 				}
-				_ = recordProxyAttemptRoute(ctx, p.Repositories, requestID, totalAttempts, route.ID, route.CredentialID, entry.StageID, strings.Join(entry.StagePath, " / "), route.Provider, route.UpstreamModel, state, code, message, raw)
+				_ = recordProxyAttemptRoute(ctx, p.Repositories, requestID, totalAttempts, route.ID, route.CredentialID, entry.StageID, strings.Join(entry.StagePath, " / "), route.Provider, route.UpstreamModel, state, code, message, httpStatusPointer(response.StatusCode), raw)
 			}
 			return completeErr
 		}
@@ -364,7 +364,7 @@ func (p *Proxy) execute(ctx context.Context, writer http.ResponseWriter, request
 			}
 		}
 		if p.Repositories != nil {
-			_ = recordProxyAttemptRoute(ctx, p.Repositories, requestID, totalAttempts, route.ID, route.CredentialID, entry.StageID, strings.Join(entry.StagePath, " / "), route.Provider, route.UpstreamModel, "failed", errorCode(err), humanErrorMessage(err), rawErrorMessage(err))
+			_ = recordProxyAttemptRoute(ctx, p.Repositories, requestID, totalAttempts, route.ID, route.CredentialID, entry.StageID, strings.Join(entry.StagePath, " / "), route.Provider, route.UpstreamModel, "failed", errorCode(err), humanErrorMessage(err), upstreamHTTPStatus(err), rawErrorMessage(err))
 		}
 		decision := p.Retry.Decide(retry.Input{Policy: policy, AttemptNumber: totalAttempts, Now: time.Now(), Error: classified, Delivery: retry.NothingSent, SameRouteAvailable: !route.Free, FallbacksRemaining: len(plan.Entries) - current - 1, PlanMode: true, SameRouteRetriesRemaining: retriesRemaining, PlanEntriesRemaining: len(plan.Entries) - current - 1, TotalAttemptsRemaining: policy.MaximumAttempts - totalAttempts})
 		// A provider error must not hide healthy routes later in the plan. The
@@ -604,6 +604,17 @@ func classify(err error) retry.ClassifiedError {
 	}
 	return retry.ClassifiedError{Class: retry.ErrorTransport, Description: err.Error()}
 }
+
+func upstreamHTTPStatus(err error) *int {
+	var upstream *providers.UpstreamError
+	if !errors.As(err, &upstream) || upstream.StatusCode < 100 || upstream.StatusCode > 599 {
+		return nil
+	}
+	status := upstream.StatusCode
+	return &status
+}
+
+func httpStatusPointer(status int) *int { return &status }
 
 func wait(ctx context.Context, delay time.Duration) error {
 	if delay <= 0 {

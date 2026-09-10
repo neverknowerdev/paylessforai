@@ -2,6 +2,7 @@ package proxy
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"io"
 	"net/http"
@@ -202,6 +203,68 @@ func TestProxyRetriesThenFailsOver(t *testing.T) {
 	second.mu.Unlock()
 	if firstCalls != 2 || secondCalls != 1 {
 		t.Fatalf("unexpected call counts: first=%d second=%d", firstCalls, secondCalls)
+	}
+}
+
+func TestProxyReturnsProviderErrorsAfterAllAttemptsFail(t *testing.T) {
+	freeModel := model("model-a:free", 0, 0)
+	freeModel.Free = true
+	free := &fakeProvider{name: "opencode", models: []providers.Model{freeModel}, responses: []func(*http.Request) (*http.Response, error){
+		func(*http.Request) (*http.Response, error) {
+			return nil, &providers.UpstreamError{Provider: "opencode", StatusCode: http.StatusServiceUnavailable, Class: retry.ErrorServer, Message: "free capacity exhausted"}
+		},
+	}}
+	paid := &fakeProvider{name: "surplus", models: []providers.Model{model("model-a", 1, 1)}, responses: []func(*http.Request) (*http.Response, error){
+		func(*http.Request) (*http.Response, error) {
+			return nil, &providers.UpstreamError{Provider: "surplus", StatusCode: http.StatusBadGateway, Class: retry.ErrorServer, Message: "first paid attempt failed"}
+		},
+		func(*http.Request) (*http.Response, error) {
+			return nil, &providers.UpstreamError{Provider: "surplus", StatusCode: http.StatusBadGateway, Class: retry.ErrorServer, Message: "second paid attempt failed"}
+		},
+	}}
+	proxy, db, secret := testProxy(t, free, paid)
+	defer db.Close()
+	request := httptest.NewRequest(http.MethodPost, "/v1/chat/completions", strings.NewReader(`{"model":"model-a","messages":[]}`))
+	request.Header.Set("Authorization", "Bearer "+secret)
+	response := httptest.NewRecorder()
+	proxy.ServeHTTP(response, request, matcher.ProtocolChatCompletions)
+
+	if response.Code != http.StatusBadGateway {
+		t.Fatalf("unexpected status: %d %s", response.Code, response.Body.String())
+	}
+	var payload struct {
+		Error struct {
+			Type    string          `json:"type"`
+			Code    string          `json:"code"`
+			Message string          `json:"message"`
+			Errors  []providerError `json:"errors"`
+		} `json:"error"`
+	}
+	if err := json.Unmarshal(response.Body.Bytes(), &payload); err != nil {
+		t.Fatal(err)
+	}
+	if payload.Error.Type != "payless_error" || payload.Error.Code != "all_provider_attempts_failed" || payload.Error.Message != "all provider attempts failed" {
+		t.Fatalf("expected generic terminal error, got %#v", payload.Error)
+	}
+	want := []providerError{
+		{Provider: "opencode", Error: "free capacity exhausted"},
+		{Provider: "surplus", Error: "first paid attempt failed"},
+		{Provider: "surplus", Error: "second paid attempt failed"},
+	}
+	if len(payload.Error.Errors) != len(want) {
+		t.Fatalf("provider errors: got %#v want %#v", payload.Error.Errors, want)
+	}
+	for i := range want {
+		if payload.Error.Errors[i] != want[i] {
+			t.Fatalf("provider error %d: got %#v want %#v", i, payload.Error.Errors[i], want[i])
+		}
+	}
+	var code, message string
+	if err := db.DB().QueryRow(`SELECT error_code, error_message FROM proxy_requests`).Scan(&code, &message); err != nil {
+		t.Fatal(err)
+	}
+	if code != "all_provider_attempts_failed" || message != "all provider attempts failed" {
+		t.Fatalf("persisted terminal error: code=%q message=%q", code, message)
 	}
 }
 

@@ -1,6 +1,7 @@
 package repositories_test
 
 import (
+	"github.com/neverknowerdev/paylessforai/internal/wire"
 	"testing"
 )
 
@@ -9,11 +10,8 @@ func TestProxyAttemptsRepositoryIntegration(t *testing.T) {
 	if err := i.repos.ProxyRequests.Create(i.ctx, "request-1", "", "chat.completions", "model"); err != nil {
 		t.Fatal(err)
 	}
-	if err := i.repos.ProxyAttempts.Record(i.ctx, "request-1", 1, "provider", "model", "started", "", ""); err != nil {
-		t.Fatal(err)
-	}
 	status := 429
-	if err := i.repos.ProxyAttempts.RecordWithHTTPStatus(i.ctx, "request-1", 1, "provider", "model", "failed", "quota_exhausted", "quota", &status); err != nil {
+	if err := i.repos.ProxyAttempts.RecordWithHTTPStatus(i.ctx, "request-1", 1, "provider", "model", "failed", "quota_exhausted", "quota", wire.FormatChatCompletions, wire.FormatResponses, &status); err != nil {
 		t.Fatal(err)
 	}
 	stats, err := i.repos.Stats.ListRequestStats(i.ctx, 10)

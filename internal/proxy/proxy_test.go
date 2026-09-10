@@ -18,6 +18,7 @@ import (
 	"github.com/neverknowerdev/paylessforai/internal/matcher"
 	"github.com/neverknowerdev/paylessforai/internal/providers"
 	"github.com/neverknowerdev/paylessforai/internal/retry"
+	"github.com/neverknowerdev/paylessforai/internal/wire"
 )
 
 type fakeProvider struct {
@@ -34,6 +35,24 @@ type metadataProvider struct {
 	executionKey string
 	account      string
 	billing      matcher.BillingClass
+}
+
+type translatingProvider struct {
+	*providers.HTTPClient
+	models []providers.Model
+	mu     sync.Mutex
+	paths  []string
+}
+
+func (p *translatingProvider) Discover(context.Context) ([]providers.Model, error) {
+	return p.models, nil
+}
+
+func (p *translatingProvider) DoPrepared(ctx context.Context, request providers.PreparedRequest) (*http.Response, error) {
+	p.mu.Lock()
+	p.paths = append(p.paths, request.URL.Path)
+	p.mu.Unlock()
+	return p.HTTPClient.DoPrepared(ctx, request)
 }
 
 func (p metadataProvider) ExecutionKey() string               { return p.executionKey }
@@ -455,6 +474,58 @@ func TestProxySupportsResponsesAndAnthropicMessages(t *testing.T) {
 	defer provider.mu.Unlock()
 	if len(provider.protocols) != 2 || provider.protocols[0] != matcher.ProtocolResponses || provider.protocols[1] != matcher.ProtocolAnthropic {
 		t.Fatalf("unexpected protocols: %#v", provider.protocols)
+	}
+}
+
+func TestProxyLearnsUpstreamFormatAndTranslatesResponse(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/v1/chat/completions" {
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(http.StatusInternalServerError)
+			_, _ = io.WriteString(w, `{"error":{"message":"wrong endpoint"}}`)
+			return
+		}
+		if r.URL.Path != "/v1/responses" {
+			http.NotFound(w, r)
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = io.WriteString(w, `{"id":"resp-1","model":"upstream","status":"completed","output_text":"translated","output":[{"type":"message","role":"assistant","content":[{"type":"output_text","text":"translated"}]}],"usage":{"input_tokens":2,"output_tokens":1,"total_tokens":3}}`)
+	}))
+	defer server.Close()
+	provider := &translatingProvider{HTTPClient: providers.NewHTTPClient("translated", server.URL+"/v1", "secret"), models: []providers.Model{model("model-a", 1, 1)}}
+	proxy, db, secret := testProxy(t, provider)
+	defer db.Close()
+	request := httptest.NewRequest(http.MethodPost, "/v1/chat/completions", strings.NewReader(`{"model":"model-a","messages":[{"role":"user","content":"hello"}]}`))
+	request.Header.Set("Authorization", "Bearer "+secret)
+	response := httptest.NewRecorder()
+	proxy.ServeHTTP(response, request, matcher.ProtocolChatCompletions)
+	if response.Code != http.StatusOK || !strings.Contains(response.Body.String(), `"content":"translated"`) {
+		t.Fatalf("translated response: %d %s", response.Code, response.Body.String())
+	}
+	provider.mu.Lock()
+	paths := append([]string(nil), provider.paths...)
+	provider.mu.Unlock()
+	if strings.Join(paths, ",") != "/v1/chat/completions,/v1/responses" {
+		t.Fatalf("unexpected discovery paths: %v", paths)
+	}
+	var clientFormat, providerFormat string
+	if err := db.DB().QueryRow(`SELECT client_format, provider_format FROM proxy_attempts WHERE attempt_number=2`).Scan(&clientFormat, &providerFormat); err != nil {
+		t.Fatal(err)
+	}
+	if clientFormat != string(wire.FormatChatCompletions) || providerFormat != string(wire.FormatResponses) {
+		t.Fatalf("unexpected attempt formats: %q -> %q", clientFormat, providerFormat)
+	}
+
+	request = httptest.NewRequest(http.MethodPost, "/v1/chat/completions", strings.NewReader(`{"model":"model-a","messages":[{"role":"user","content":"again"}]}`))
+	request.Header.Set("Authorization", "Bearer "+secret)
+	response = httptest.NewRecorder()
+	proxy.ServeHTTP(response, request, matcher.ProtocolChatCompletions)
+	provider.mu.Lock()
+	paths = append([]string(nil), provider.paths...)
+	provider.mu.Unlock()
+	if len(paths) != 3 || paths[2] != "/v1/responses" {
+		t.Fatalf("learned format was not reused: %v", paths)
 	}
 }
 

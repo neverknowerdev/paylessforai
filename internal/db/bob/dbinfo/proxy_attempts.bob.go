@@ -186,6 +186,24 @@ var ProxyAttempts = Table[
 			Generated: false,
 			AutoIncr:  false,
 		},
+		ClientFormat: column{
+			Name:      "client_format",
+			DBType:    "TEXT",
+			Default:   "NULL",
+			Comment:   "",
+			Nullable:  true,
+			Generated: false,
+			AutoIncr:  false,
+		},
+		ProviderFormat: column{
+			Name:      "provider_format",
+			DBType:    "TEXT",
+			Default:   "NULL",
+			Comment:   "",
+			Nullable:  true,
+			Generated: false,
+			AutoIncr:  false,
+		},
 	},
 	Indexes: proxyAttemptIndexes{
 		SqliteAutoindexProxyAttempts1: index{
@@ -243,11 +261,13 @@ type proxyAttemptColumns struct {
 	GroupStageID     column
 	GroupStagePath   column
 	CredentialID     column
+	ClientFormat     column
+	ProviderFormat   column
 }
 
 func (c proxyAttemptColumns) AsSlice() []column {
 	return []column{
-		c.ID, c.RequestID, c.AttemptNumber, c.RouteID, c.Provider, c.UpstreamModel, c.State, c.StartedAt, c.CompletedAt, c.HTTPStatus, c.ErrorClass, c.ErrorMessage, c.ErrorRaw, c.DurationMS, c.DeliveryState, c.StatsDisposition, c.GroupStageID, c.GroupStagePath, c.CredentialID,
+		c.ID, c.RequestID, c.AttemptNumber, c.RouteID, c.Provider, c.UpstreamModel, c.State, c.StartedAt, c.CompletedAt, c.HTTPStatus, c.ErrorClass, c.ErrorMessage, c.ErrorRaw, c.DurationMS, c.DeliveryState, c.StatsDisposition, c.GroupStageID, c.GroupStagePath, c.CredentialID, c.ClientFormat, c.ProviderFormat,
 	}
 }
 

@@ -11,6 +11,7 @@ import (
 
 	"github.com/neverknowerdev/paylessforai/internal/matcher"
 	"github.com/neverknowerdev/paylessforai/internal/providers"
+	"github.com/neverknowerdev/paylessforai/internal/wire"
 )
 
 type Model struct {
@@ -195,7 +196,13 @@ func (m *Manager) Refresh(ctx context.Context) (refreshErr error) {
 			if free {
 				routeBilling = matcher.BillingFree
 			}
-			routes = append(routes, matcher.Route{ID: executionKey + ":" + model.ID, Provider: batch.provider, LogicalModel: logical, UpstreamModel: model.ID, Free: free, Price: model.Pricing, PriceAvailable: model.PriceAvailable, OfficialPrice: model.OfficialPricing, OfficialPriceAvailable: model.OfficialPriceAvailable, CredentialID: credentialID, Account: account, ExecutionKey: executionKey, BillingClass: routeBilling, Capabilities: matcher.Capabilities{Protocols: protocols, Parameters: parameters, Tools: parameters["tools"], StructuredOutput: parameters["response_format"] || parameters["structured_outputs"], MaxContext: model.ContextLength, MaxOutput: model.MaxCompletionTokens, InputModalities: inputModalities, OutputModalities: outputModalities, Tags: append([]string(nil), model.Tags...)}, Health: matcher.HealthHealthy, Trusted: true})
+			format := model.Format
+			if metadata, ok := batch.client.(interface{ Endpoint() providers.Endpoint }); ok {
+				if !format.Valid() {
+					format = metadata.Endpoint().HintedFormat
+				}
+			}
+			routes = append(routes, matcher.Route{ID: executionKey + ":" + model.ID, Provider: batch.provider, LogicalModel: logical, UpstreamModel: model.ID, Free: free, Price: model.Pricing, PriceAvailable: model.PriceAvailable, OfficialPrice: model.OfficialPricing, OfficialPriceAvailable: model.OfficialPriceAvailable, CredentialID: credentialID, Account: account, ExecutionKey: executionKey, BillingClass: routeBilling, Format: format, Capabilities: matcher.Capabilities{Protocols: protocols, Parameters: parameters, Tools: parameters["tools"], StructuredOutput: parameters["response_format"] || parameters["structured_outputs"], MaxContext: model.ContextLength, MaxOutput: model.MaxCompletionTokens, InputModalities: inputModalities, OutputModalities: outputModalities, Tags: append([]string(nil), model.Tags...)}, Health: matcher.HealthHealthy, Trusted: true})
 		}
 	}
 	// Preserve routes for configured providers during transient discovery failures.
@@ -222,6 +229,17 @@ func (m *Manager) Refresh(ctx context.Context) (refreshErr error) {
 		models = append(models, model)
 	}
 	sort.Slice(models, func(i, j int) bool { return models[i].ID < models[j].ID })
+	previousFormats := make(map[string]wire.Format, len(previous.Routes))
+	for _, route := range previous.Routes {
+		if route.Format.Valid() {
+			previousFormats[route.ID] = route.Format
+		}
+	}
+	for index := range routes {
+		if !routes[index].Format.Valid() {
+			routes[index].Format = previousFormats[routes[index].ID]
+		}
+	}
 	sort.Slice(routes, func(i, j int) bool { return routes[i].ID < routes[j].ID })
 	next := Snapshot{UpdatedAt: now, Models: models, Routes: routes, Additions: previous.Additions}
 	if err := m.recordDiscoveries(ctx, &next); err != nil {
@@ -281,6 +299,32 @@ func (m *Manager) ClientForRoute(route matcher.Route) providers.Client {
 		}
 	}
 	return m.Client(route.Provider)
+}
+
+// LearnFormat updates the in-memory snapshot immediately after a validated
+// response. Persistence is handled by the proxy repository when available;
+// keeping the snapshot current also supports ephemeral catalog managers.
+func (m *Manager) LearnFormat(routeID string, format wire.Format) {
+	if !format.Valid() {
+		return
+	}
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	for index := range m.current.Routes {
+		if m.current.Routes[index].ID == routeID {
+			m.current.Routes[index].Format = format
+		}
+	}
+}
+
+func (m *Manager) ClearFormat(routeID string) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	for index := range m.current.Routes {
+		if m.current.Routes[index].ID == routeID {
+			m.current.Routes[index].Format = wire.FormatUnknown
+		}
+	}
 }
 
 var hyphenatedVersion = regexp.MustCompile(`([0-9]+)-([0-9]+)`)

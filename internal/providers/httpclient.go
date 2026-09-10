@@ -1,8 +1,10 @@
 package providers
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -12,36 +14,93 @@ import (
 
 	"github.com/neverknowerdev/paylessforai/internal/matcher"
 	"github.com/neverknowerdev/paylessforai/internal/retry"
+	"github.com/neverknowerdev/paylessforai/internal/wire"
 )
 
 // HTTPClient owns the provider-neutral HTTP transport used by provider
 // clients. Catalog discovery and pricing enrichment live in separate files so
 // this type remains focused on request execution and upstream errors.
 type HTTPClient struct {
-	Provider string
-	BaseURL  string
-	APIKey   string
-	Client   *http.Client
+	Provider    string
+	BaseURL     string
+	APIKey      string
+	Client      *http.Client
+	endpoint    Endpoint
+	endpointErr error
 }
 
 func NewHTTPClient(provider, baseURL, apiKey string) *HTTPClient {
-	return &HTTPClient{Provider: provider, BaseURL: strings.TrimRight(baseURL, "/"), APIKey: apiKey, Client: &http.Client{Transport: &http.Transport{Proxy: http.ProxyFromEnvironment, MaxIdleConns: 32, MaxIdleConnsPerHost: 8, IdleConnTimeout: 90 * time.Second}}}
+	parsed, err := ParseEndpoint(baseURL)
+	return &HTTPClient{Provider: provider, BaseURL: strings.TrimRight(baseURL, "/"), APIKey: apiKey, endpoint: parsed, endpointErr: err, Client: &http.Client{Transport: &http.Transport{Proxy: http.ProxyFromEnvironment, MaxIdleConns: 32, MaxIdleConnsPerHost: 8, IdleConnTimeout: 90 * time.Second}}}
 }
 
 func (c *HTTPClient) Name() string { return c.Provider }
 
-func (c *HTTPClient) Do(ctx context.Context, protocol matcher.Protocol, model string, body []byte) (*http.Response, error) {
-	if protocol == matcher.ProtocolAnthropic {
-		if c.Provider == "surplus" {
-			return c.doRequest(ctx, strings.TrimSuffix(c.BaseURL, "/v1")+"/anthropic/v1/messages", model, body)
+func (c *HTTPClient) Endpoint() Endpoint { return c.endpoint }
+
+func (c *HTTPClient) Prepare(format wire.Format, model string, body []byte) (PreparedRequest, error) {
+	if err := c.endpointErr; err != nil {
+		return PreparedRequest{}, err
+	}
+	urlValue, err := URLForFormat(c.endpoint, format)
+	if err != nil {
+		return PreparedRequest{}, err
+	}
+	rewritten, err := rewriteModel(body, model)
+	if err != nil {
+		return PreparedRequest{}, fmt.Errorf("rewrite upstream model: %w", err)
+	}
+	headers := make(http.Header)
+	headers.Set("Content-Type", "application/json")
+	headers.Set("Accept", "application/json, text/event-stream")
+	request := PreparedRequest{Format: format, URL: urlValue, Headers: headers, Body: io.NopCloser(bytes.NewReader(rewritten))}
+	if c.APIKey != "" {
+		request.Headers.Set("Authorization", "Bearer "+c.APIKey)
+	}
+	return request, nil
+}
+
+func (c *HTTPClient) DoPrepared(ctx context.Context, prepared PreparedRequest) (*http.Response, error) {
+	if err := prepared.Format.Validate(); err != nil {
+		return nil, err
+	}
+	if prepared.Body == nil {
+		return nil, errors.New("prepared request body is nil")
+	}
+	request, err := http.NewRequestWithContext(ctx, http.MethodPost, prepared.URL.String(), prepared.Body)
+	if err != nil {
+		return nil, err
+	}
+	for key, values := range prepared.Headers {
+		for _, value := range values {
+			request.Header.Add(key, value)
 		}
-		return c.doRequest(ctx, c.BaseURL+"/messages", model, body)
 	}
-	path := "/chat/completions"
-	if protocol == matcher.ProtocolResponses {
-		path = "/responses"
+	response, err := c.Client.Do(request)
+	if err != nil {
+		return nil, err
 	}
-	return c.doRequest(ctx, c.BaseURL+path, model, body)
+	if response.StatusCode < 200 || response.StatusCode >= 300 {
+		upstreamErr := c.readUpstreamError(response)
+		response.Body.Close()
+		return nil, upstreamErr
+	}
+	return response, nil
+}
+
+func (c *HTTPClient) Do(ctx context.Context, protocol matcher.Protocol, model string, body []byte) (*http.Response, error) {
+	if c.endpointErr != nil {
+		return nil, c.endpointErr
+	}
+	format := wire.FormatForProtocol(string(protocol))
+	if !format.Valid() {
+		return nil, fmt.Errorf("unsupported client protocol %q", protocol)
+	}
+	urlValue, err := URLForFormat(c.endpoint, format)
+	if err != nil {
+		return nil, err
+	}
+	return c.doRequest(ctx, urlValue.String(), model, body)
 }
 
 func (c *HTTPClient) doRequest(ctx context.Context, url, model string, body []byte) (*http.Response, error) {

@@ -2,11 +2,14 @@ package providers
 
 import (
 	"context"
+	"io"
 	"net/http"
+	"net/url"
 	"time"
 
 	"github.com/neverknowerdev/paylessforai/internal/matcher"
 	"github.com/neverknowerdev/paylessforai/internal/retry"
+	"github.com/neverknowerdev/paylessforai/internal/wire"
 )
 
 type Model struct {
@@ -23,6 +26,9 @@ type Model struct {
 	InputModalities        []string
 	OutputModalities       []string
 	Tags                   []string
+	// Format is explicit upstream metadata when the provider catalog supplies
+	// it. Empty means the catalog did not establish a wire format.
+	Format wire.Format
 }
 
 // ManualModel is a model definition supplied by the user when an upstream
@@ -50,6 +56,27 @@ type Client interface {
 	Name() string
 	Discover(context.Context) ([]Model, error)
 	Do(context.Context, matcher.Protocol, string, []byte) (*http.Response, error)
+}
+
+// PreparedRequest keeps URL selection outside the HTTP transport. Legacy
+// Client implementations remain supported, but translation-aware clients use
+// this boundary so a caller body cannot be passed through accidentally.
+type PreparedRequest struct {
+	Format  wire.Format
+	URL     url.URL
+	Headers http.Header
+	Body    io.ReadCloser
+}
+
+type Transport interface {
+	Do(context.Context, PreparedRequest) (*http.Response, error)
+}
+
+type TranslationClient interface {
+	Client
+	Endpoint() Endpoint
+	Prepare(wire.Format, string, []byte) (PreparedRequest, error)
+	DoPrepared(context.Context, PreparedRequest) (*http.Response, error)
 }
 
 type UpstreamError struct {

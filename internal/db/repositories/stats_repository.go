@@ -529,5 +529,5 @@ func requestStatFromBob(request *bobmodels.ProxyRequest, usage *bobmodels.Reques
 }
 
 func attemptStatFromBob(attempt *bobmodels.ProxyAttempt) AttemptStat {
-	return AttemptStat{Number: attempt.AttemptNumber, Provider: stringValue(attempt.Provider), UpstreamModel: stringValue(attempt.UpstreamModel), State: attempt.State, StartedAt: attempt.StartedAt, CompletedAt: stringValue(attempt.CompletedAt), DurationMS: int64Pointer(attempt.DurationMS), HTTPStatus: int64Pointer(attempt.HTTPStatus), ErrorClass: stringValue(attempt.ErrorClass), ErrorMessage: stringValue(attempt.ErrorMessage), RawError: stringValue(attempt.ErrorRaw)}
+	return AttemptStat{Number: attempt.AttemptNumber, Provider: stringValue(attempt.Provider), UpstreamModel: stringValue(attempt.UpstreamModel), State: attempt.State, StartedAt: attempt.StartedAt, CompletedAt: stringValue(attempt.CompletedAt), DurationMS: int64Pointer(attempt.DurationMS), HTTPStatus: int64Pointer(attempt.HTTPStatus), ErrorClass: stringValue(attempt.ErrorClass), ErrorMessage: stringValue(attempt.ErrorMessage), RawError: stringValue(attempt.ErrorRaw), ClientFormat: stringValue(attempt.ClientFormat), ProviderFormat: stringValue(attempt.ProviderFormat)}
 }

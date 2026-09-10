@@ -63,7 +63,7 @@ func TestTableRepositoriesCRUD(t *testing.T) {
 	if model, err := s.Models.Get(ctx, "model-1"); err != nil || model.DisplayName != "Model" {
 		t.Fatalf("model: %+v %v", model, err)
 	}
-	if err := s.ModelRoutes.Upsert(ctx, ModelRouteRecord{ID: "route-1", ModelID: "model-1", Provider: "repo-provider", UpstreamModel: "model", Protocol: "chat.completions", PriceJSON: "{}", CapabilitiesJSON: "{}", Health: "healthy", ObservedAt: time.Now().UTC().Format(time.RFC3339Nano), Trusted: true}); err != nil {
+	if err := s.ModelRoutes.Upsert(ctx, ModelRouteRecord{ID: "route-1", ModelID: "model-1", Provider: "repo-provider", UpstreamModel: "model", PriceJSON: "{}", CapabilitiesJSON: "{}", Health: "healthy", ObservedAt: time.Now().UTC().Format(time.RFC3339Nano), Trusted: true}); err != nil {
 		t.Fatal(err)
 	}
 	if route, err := s.ModelRoutes.Get(ctx, "route-1"); err != nil || !route.Trusted {

@@ -39,6 +39,7 @@ type ProxyRequest struct {
 	ResolvedGroupRevision sql.Null[int64]  `db:"resolved_group_revision" `
 	ResolvedPlanJSON      sql.Null[string] `db:"resolved_plan_json" `
 	SelectedLogicalModel  sql.Null[string] `db:"selected_logical_model" `
+	SessionID             sql.Null[string] `db:"session_id" `
 
 	R proxyRequestR `db:"-" `
 }
@@ -71,7 +72,7 @@ type proxyRequestRLoaded struct {
 
 func buildProxyRequestColumns(tableName string) proxyRequestColumns {
 	columnsExpr := expr.NewColumnsExpr(
-		"id", "client_key_id", "protocol", "logical_model", "state", "received_at", "completed_at", "selected_provider", "selected_upstream_model", "attempt_count", "duration_ms", "error_code", "error_message", "stats_disposition", "resolved_group_id", "resolved_group_revision", "resolved_plan_json", "selected_logical_model",
+		"id", "client_key_id", "protocol", "logical_model", "state", "received_at", "completed_at", "selected_provider", "selected_upstream_model", "attempt_count", "duration_ms", "error_code", "error_message", "stats_disposition", "resolved_group_id", "resolved_group_revision", "resolved_plan_json", "selected_logical_model", "session_id",
 	)
 
 	if tableName != "" {
@@ -99,6 +100,7 @@ func buildProxyRequestColumns(tableName string) proxyRequestColumns {
 		ResolvedGroupRevision: buildProxyRequestColumn(tableName, "resolved_group_revision"),
 		ResolvedPlanJSON:      buildProxyRequestColumn(tableName, "resolved_plan_json"),
 		SelectedLogicalModel:  buildProxyRequestColumn(tableName, "selected_logical_model"),
+		SessionID:             buildProxyRequestColumn(tableName, "session_id"),
 	}
 }
 
@@ -123,6 +125,7 @@ type proxyRequestColumns struct {
 	ResolvedGroupRevision proxyRequestColumn
 	ResolvedPlanJSON      proxyRequestColumn
 	SelectedLogicalModel  proxyRequestColumn
+	SessionID             proxyRequestColumn
 }
 
 // Alias returns the current table alias for the columns set.
@@ -186,10 +189,11 @@ type ProxyRequestSetter struct {
 	ResolvedGroupRevision *sql.Null[int64]  `db:"resolved_group_revision" `
 	ResolvedPlanJSON      *sql.Null[string] `db:"resolved_plan_json" `
 	SelectedLogicalModel  *sql.Null[string] `db:"selected_logical_model" `
+	SessionID             *sql.Null[string] `db:"session_id" `
 }
 
 func (s ProxyRequestSetter) SetColumns() []string {
-	vals := make([]string, 0, 18)
+	vals := make([]string, 0, 19)
 	if s.ID != nil {
 		vals = append(vals, "id")
 	}
@@ -243,6 +247,9 @@ func (s ProxyRequestSetter) SetColumns() []string {
 	}
 	if s.SelectedLogicalModel != nil {
 		vals = append(vals, "selected_logical_model")
+	}
+	if s.SessionID != nil {
+		vals = append(vals, "session_id")
 	}
 	return vals
 }
@@ -400,6 +407,15 @@ func (s ProxyRequestSetter) Overwrite(t *ProxyRequest) {
 				return *new(sql.Null[string])
 			}
 			v := s.SelectedLogicalModel
+			return *v
+		}()
+	}
+	if s.SessionID != nil {
+		t.SessionID = func() sql.Null[string] {
+			if s.SessionID == nil {
+				return *new(sql.Null[string])
+			}
+			v := s.SessionID
 			return *v
 		}()
 	}
@@ -648,6 +664,19 @@ func (s *ProxyRequestSetter) Apply(q *dialect.InsertQuery) {
 					return *v
 				}()).WriteSQL(ctx, w, d, start)
 			}))
+		case "session_id":
+			vals = append(vals, bob.ExpressionFunc(func(ctx context.Context, w io.StringWriter, d bob.Dialect, start int) ([]any, error) {
+				if s.SessionID == nil {
+					return sqlite.Arg(nil).WriteSQL(ctx, w, d, start)
+				}
+				return sqlite.Arg(func() sql.Null[string] {
+					if s.SessionID == nil {
+						return *new(sql.Null[string])
+					}
+					v := s.SessionID
+					return *v
+				}()).WriteSQL(ctx, w, d, start)
+			}))
 		}
 	}
 
@@ -659,7 +688,7 @@ func (s ProxyRequestSetter) UpdateMod() bob.Mod[*dialect.UpdateQuery] {
 }
 
 func (s ProxyRequestSetter) Expressions(prefix ...string) []bob.Expression {
-	exprs := make([]bob.Expression, 0, 18)
+	exprs := make([]bob.Expression, 0, 19)
 
 	if s.ID != nil {
 		exprs = append(exprs, expr.Join{Sep: " = ", Exprs: []bob.Expression{
@@ -787,6 +816,13 @@ func (s ProxyRequestSetter) Expressions(prefix ...string) []bob.Expression {
 		}})
 	}
 
+	if s.SessionID != nil {
+		exprs = append(exprs, expr.Join{Sep: " = ", Exprs: []bob.Expression{
+			sqlite.Quote(append(prefix, "session_id")...),
+			sqlite.Arg(s.SessionID),
+		}})
+	}
+
 	return exprs
 }
 
@@ -797,7 +833,7 @@ func proxyRequestScanMapper(ctx context.Context, cols []string) (scan.BeforeFunc
 		idx int
 		dst func(o *ProxyRequest) any
 	}
-	targets := make([]target, 0, 18)
+	targets := make([]target, 0, 19)
 	for i, col := range cols {
 		switch col {
 		case "id":
@@ -836,6 +872,8 @@ func proxyRequestScanMapper(ctx context.Context, cols []string) (scan.BeforeFunc
 			targets = append(targets, target{i, func(o *ProxyRequest) any { return &o.ResolvedPlanJSON }})
 		case "selected_logical_model":
 			targets = append(targets, target{i, func(o *ProxyRequest) any { return &o.SelectedLogicalModel }})
+		case "session_id":
+			targets = append(targets, target{i, func(o *ProxyRequest) any { return &o.SessionID }})
 		}
 	}
 

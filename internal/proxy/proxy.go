@@ -22,6 +22,7 @@ import (
 	"github.com/neverknowerdev/paylessforai/internal/providers"
 	"github.com/neverknowerdev/paylessforai/internal/retry"
 	"github.com/neverknowerdev/paylessforai/internal/routing"
+	"github.com/neverknowerdev/paylessforai/internal/session"
 	"github.com/neverknowerdev/paylessforai/internal/usage"
 	"github.com/neverknowerdev/paylessforai/internal/wire"
 )
@@ -37,6 +38,7 @@ type Proxy struct {
 	Groups           *groups.Manager
 	formatMu         sync.Mutex
 	formatLocks      map[string]*sync.Mutex
+	SessionDetector  *session.Detector
 }
 
 func recordResolution(ctx context.Context, repos *repositories.Repositories, requestID string, plan routing.Plan) error {
@@ -66,7 +68,11 @@ func recordProxyAttemptRouteFormats(ctx context.Context, repos *repositories.Rep
 }
 
 func New(catalogManager *catalog.Manager, repos *repositories.Repositories) *Proxy {
-	return &Proxy{Catalog: catalogManager, Repositories: repos, Retry: retry.New(), MaximumBody: defaultMaximumBody, RequireClientKey: true, formatLocks: make(map[string]*sync.Mutex)}
+	var store session.Store
+	if repos != nil {
+		store = repos.Sessions
+	}
+	return &Proxy{Catalog: catalogManager, Repositories: repos, Retry: retry.New(), MaximumBody: defaultMaximumBody, RequireClientKey: true, formatLocks: make(map[string]*sync.Mutex), SessionDetector: session.NewDetector(store, nil)}
 }
 
 func (p *Proxy) SetGroups(manager *groups.Manager) { p.Groups = manager }
@@ -119,8 +125,12 @@ func (p *Proxy) ServeHTTP(w http.ResponseWriter, r *http.Request, protocol match
 		writeError(w, http.StatusBadRequest, "invalid_request", err.Error())
 		return
 	}
+	sessionID := ""
+	if p.SessionDetector != nil {
+		sessionID = p.SessionDetector.DetectSessionID(r.Context(), session.Input{ClientKeyID: clientKeyID, Format: clientFormat, Headers: r.Header, Body: body})
+	}
 	if p.Repositories != nil {
-		_ = p.Repositories.ProxyRequests.Create(r.Context(), requestID, clientKeyID, string(protocol), request.Model)
+		_ = p.Repositories.ProxyRequests.Create(r.Context(), requestID, clientKeyID, string(protocol), request.Model, sessionID)
 	}
 	if p.Catalog == nil {
 		p.finishError(r.Context(), requestID, "not_configured", "provider catalog is not configured")
@@ -152,7 +162,7 @@ func (p *Proxy) ServeHTTP(w http.ResponseWriter, r *http.Request, protocol match
 		_ = recordResolution(r.Context(), p.Repositories, requestID, plan)
 	}
 	officialPrice, officialExpectedCost := officialPricing(planRanked(plan))
-	if err := p.execute(r.Context(), w, requestID, body, request, canonical, clientFormat, plan, officialPrice, officialExpectedCost); err != nil {
+	if err := p.execute(r.Context(), w, requestID, sessionID, body, request, canonical, clientFormat, plan, officialPrice, officialExpectedCost); err != nil {
 		var partial *partialStreamError
 		if errors.As(err, &partial) {
 			return
@@ -299,7 +309,7 @@ func planRanked(plan routing.Plan) []matcher.RankedRoute {
 	return result
 }
 
-func (p *Proxy) execute(ctx context.Context, writer http.ResponseWriter, requestID string, body []byte, request parsedRequest, canonical *wire.Request, clientFormat wire.Format, plan routing.Plan, officialPrice matcher.Price, officialExpectedCost int64) error {
+func (p *Proxy) execute(ctx context.Context, writer http.ResponseWriter, requestID, sessionID string, body []byte, request parsedRequest, canonical *wire.Request, clientFormat wire.Format, plan routing.Plan, officialPrice matcher.Price, officialExpectedCost int64) error {
 	current := 0
 	blocked := false
 	policy := retry.DefaultPolicy()
@@ -357,7 +367,7 @@ func (p *Proxy) execute(ctx context.Context, writer http.ResponseWriter, request
 			translatedOK = false
 		}
 		if translatedOK && canonical != nil {
-			lastErr, completed, attemptsUsed := p.executeTranslatedRoute(ctx, writer, requestID, request, canonical, clientFormat, translated, route, entry, totalAttempts, policy.MaximumAttempts-totalAttempts, officialPrice, officialExpectedCost)
+			lastErr, completed, attemptsUsed := p.executeTranslatedRoute(ctx, writer, requestID, sessionID, request, canonical, clientFormat, translated, route, entry, totalAttempts, policy.MaximumAttempts-totalAttempts, officialPrice, officialExpectedCost)
 			totalAttempts += attemptsUsed - 1
 			if completed {
 				return lastErr
@@ -409,7 +419,7 @@ func (p *Proxy) execute(ctx context.Context, writer http.ResponseWriter, request
 			}
 			continue
 		}
-		response, err := client.Do(ctx, request.Protocol, route.UpstreamModel, body)
+		response, err := client.Do(ctx, request.Protocol, route.UpstreamModel, body, sessionID)
 		if err == nil {
 			if request.Stream || strings.Contains(strings.ToLower(response.Header.Get("Content-Type")), "text/event-stream") {
 				streamErr := p.stream(ctx, writer, requestID, response, entry.ExpectedCost, officialExpectedCost, route.Price, officialPrice)
@@ -479,7 +489,7 @@ func (p *Proxy) execute(ctx context.Context, writer http.ResponseWriter, request
 	return allProviderAttemptsFailed(http.StatusBadGateway, totalAttempts, providerErrors, lastAttemptErrorCode)
 }
 
-func (p *Proxy) executeTranslatedRoute(ctx context.Context, writer http.ResponseWriter, requestID string, request parsedRequest, canonical *wire.Request, clientFormat wire.Format, client providers.TranslationClient, route matcher.Route, entry routing.Entry, firstAttempt, remainingBudget int, officialPrice matcher.Price, officialExpectedCost int64) (error, bool, int) {
+func (p *Proxy) executeTranslatedRoute(ctx context.Context, writer http.ResponseWriter, requestID, sessionID string, request parsedRequest, canonical *wire.Request, clientFormat wire.Format, client providers.TranslationClient, route matcher.Route, entry routing.Entry, firstAttempt, remainingBudget int, officialPrice matcher.Price, officialExpectedCost int64) (error, bool, int) {
 	lock := p.routeFormatLock(route.ID)
 	lock.Lock()
 	defer lock.Unlock()
@@ -535,7 +545,7 @@ func (p *Proxy) executeTranslatedRoute(ctx context.Context, writer http.Response
 			p.recordTranslatedAttempt(ctx, requestID, attempt, route, entry, clientFormat, candidate, "failed", "local", err)
 			continue
 		}
-		prepared, err := client.Prepare(candidate, route.UpstreamModel, encoded)
+		prepared, err := client.Prepare(candidate, route.UpstreamModel, encoded, sessionID)
 		if err != nil {
 			lastErr = err
 			p.recordTranslatedAttempt(ctx, requestID, attempt, route, entry, clientFormat, candidate, "failed", "local", err)

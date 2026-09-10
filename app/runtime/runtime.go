@@ -32,6 +32,7 @@ import (
 	"github.com/neverknowerdev/paylessforai/internal/proxy"
 	"github.com/neverknowerdev/paylessforai/internal/remoteaccess"
 	"github.com/neverknowerdev/paylessforai/internal/secrets"
+	"github.com/neverknowerdev/paylessforai/internal/session"
 	"github.com/neverknowerdev/paylessforai/internal/updater"
 	"github.com/neverknowerdev/paylessforai/internal/wire"
 )
@@ -125,6 +126,7 @@ func Run(parent context.Context, args []string) error {
 		return catalogManager.Refresh(appContext)
 	}
 	proxyHandler := proxy.New(catalogManager, db)
+	proxyHandler.SessionDetector = session.NewDetector(db.Sessions, secretBox.Derive("session-correlation-v1"))
 	proxyHandler.SetGroups(groupManager)
 	server, err := controlplane.NewWithDeps(
 		networkState.ActiveAddress(),
@@ -306,12 +308,12 @@ func (c credentialClient) Endpoint() providers.Endpoint {
 	return client.Endpoint()
 }
 
-func (c credentialClient) Prepare(format wire.Format, model string, body []byte) (providers.PreparedRequest, error) {
+func (c credentialClient) Prepare(format wire.Format, model string, body []byte, sessionID string) (providers.PreparedRequest, error) {
 	client, ok := c.Client.(providers.TranslationClient)
 	if !ok {
 		return providers.PreparedRequest{}, fmt.Errorf("provider client does not support prepared requests")
 	}
-	return client.Prepare(format, model, body)
+	return client.Prepare(format, model, body, sessionID)
 }
 
 func (c credentialClient) DoPrepared(ctx context.Context, request providers.PreparedRequest) (*http.Response, error) {

@@ -88,8 +88,18 @@ test('configures providers, creates a client key, and routes an OpenAI request',
   await page.locator('#refresh-button').click();
   const requestsTable = page.locator('[data-view-panel="requests"] table');
   await expect(requestsTable).not.toContainText('Provider');
+  await expect(requestsTable).toContainText('Session ID');
   await expect(requestsTable).toContainText('Attempts');
   await page.locator('#requests-table-body tr').first().click();
+  const sessionValue = page.locator('#request-detail .detail-grid > div').filter({ hasText: 'Session ID' }).locator('strong');
+  await expect(sessionValue).toHaveText(/^[0-9a-f]{32}$/);
+  const sessionID = await sessionValue.textContent();
+  await page.locator('#requests-search').fill(sessionID || '');
+  await expect(page.locator('#requests-table-body tr.data-row')).toHaveCount(1);
+  await page.locator('#requests-search').fill('');
+  const requestRow = page.locator('#requests-table-body tr.data-row').first();
+  await requestRow.focus();
+  await requestRow.press('Enter');
   await expect(page.locator('#request-detail')).toContainText('Terminal provider');
   await expect(page.locator('#request-detail')).toContainText('OpenRouter');
   await expect(page.locator('#request-detail')).toContainText('Routing attempts (2)');

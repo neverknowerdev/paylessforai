@@ -10,11 +10,55 @@ import (
 
 	"github.com/neverknowerdev/paylessforai/internal/matcher"
 	"github.com/neverknowerdev/paylessforai/internal/retry"
+	"github.com/neverknowerdev/paylessforai/internal/wire"
 )
 
 type roundTripFunc func(*http.Request) (*http.Response, error)
 
 func (f roundTripFunc) RoundTrip(request *http.Request) (*http.Response, error) { return f(request) }
+
+func TestOpenCodeSessionHeadersApplyAtBothSendBoundaries(t *testing.T) {
+	client := NewHTTPClient("opencode-go", "https://provider.invalid/v1", "key")
+	client.Client = &http.Client{Transport: roundTripFunc(func(r *http.Request) (*http.Response, error) {
+		if r.Header.Get("x-opencode-session") != "session-1" {
+			t.Fatalf("missing session header: %#v", r.Header)
+		}
+		if r.Header.Get("User-Agent") == "" {
+			t.Fatal("missing gateway user-agent")
+		}
+		return &http.Response{StatusCode: http.StatusOK, Header: http.Header{"Content-Type": []string{"application/json"}}, Body: io.NopCloser(strings.NewReader(`{}`)), Request: r}, nil
+	})}
+	response, err := client.Do(context.Background(), matcher.ProtocolChatCompletions, "model", []byte(`{"model":"model","messages":[]}`), "session-1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	response.Body.Close()
+	prepared, err := client.Prepare(wire.FormatResponses, "model", []byte(`{"model":"model","input":"hello"}`), "session-1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer prepared.Body.Close()
+	response, err = client.DoPrepared(context.Background(), prepared)
+	if err != nil {
+		t.Fatal(err)
+	}
+	response.Body.Close()
+}
+
+func TestNonOpenCodeDoesNotReceiveOpenCodeSessionHeader(t *testing.T) {
+	client := NewHTTPClient("openrouter", "https://provider.invalid/v1", "key")
+	client.Client = &http.Client{Transport: roundTripFunc(func(r *http.Request) (*http.Response, error) {
+		if r.Header.Get("x-opencode-session") != "" {
+			t.Fatal("non-OpenCode request received OpenCode session header")
+		}
+		return &http.Response{StatusCode: http.StatusOK, Header: make(http.Header), Body: io.NopCloser(strings.NewReader(`{}`)), Request: r}, nil
+	})}
+	response, err := client.Do(context.Background(), matcher.ProtocolChatCompletions, "model", []byte(`{"model":"model","messages":[]}`), "session-1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	response.Body.Close()
+}
 
 func TestDiscoverAndParsePricing(t *testing.T) {
 	client := NewHTTPClient("openrouter", "https://provider.invalid/v1", "key")
@@ -203,7 +247,7 @@ func TestDoRewritesModelAndClassifiesErrors(t *testing.T) {
 		}
 		return &http.Response{StatusCode: http.StatusTooManyRequests, Body: io.NopCloser(strings.NewReader("slow down")), Header: make(http.Header), Request: r}, nil
 	})}
-	_, err := client.Do(context.Background(), matcher.ProtocolChatCompletions, "upstream", []byte(`{"model":"logical","messages":[]}`))
+	_, err := client.Do(context.Background(), matcher.ProtocolChatCompletions, "upstream", []byte(`{"model":"logical","messages":[]}`), "")
 	if err == nil {
 		t.Fatal("expected error")
 	}
@@ -218,7 +262,7 @@ func TestDoClassifiesQuotaAndResetHeader(t *testing.T) {
 	client.Client = &http.Client{Transport: roundTripFunc(func(r *http.Request) (*http.Response, error) {
 		return &http.Response{StatusCode: http.StatusTooManyRequests, Body: io.NopCloser(strings.NewReader(`{"error":{"message":"monthly usage quota exceeded"}}`)), Header: http.Header{"X-Ratelimit-Reset": []string{"4102444800"}}, Request: r}, nil
 	})}
-	_, err := client.Do(context.Background(), matcher.ProtocolChatCompletions, "upstream", []byte(`{"model":"logical","messages":[]}`))
+	_, err := client.Do(context.Background(), matcher.ProtocolChatCompletions, "upstream", []byte(`{"model":"logical","messages":[]}`), "")
 	var upstream *UpstreamError
 	if !errors.As(err, &upstream) || upstream.Class != retry.ErrorQuotaExhausted || upstream.NextAvailableAt == nil {
 		t.Fatalf("unexpected quota error: %#v", err)

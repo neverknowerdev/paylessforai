@@ -18,6 +18,7 @@ import (
 	"github.com/neverknowerdev/paylessforai/internal/matcher"
 	"github.com/neverknowerdev/paylessforai/internal/providers"
 	"github.com/neverknowerdev/paylessforai/internal/retry"
+	"github.com/neverknowerdev/paylessforai/internal/session"
 	"github.com/neverknowerdev/paylessforai/internal/wire"
 )
 
@@ -27,6 +28,7 @@ type fakeProvider struct {
 	mu         sync.Mutex
 	protocols  []matcher.Protocol
 	modelsSeen []string
+	sessionIDs []string
 	responses  []func(*http.Request) (*http.Response, error)
 }
 
@@ -77,10 +79,11 @@ func (f *fakeProvider) Name() string { return f.name }
 
 func (f *fakeProvider) Discover(context.Context) ([]providers.Model, error) { return f.models, nil }
 
-func (f *fakeProvider) Do(_ context.Context, protocol matcher.Protocol, model string, body []byte) (*http.Response, error) {
+func (f *fakeProvider) Do(_ context.Context, protocol matcher.Protocol, model string, body []byte, sessionID string) (*http.Response, error) {
 	f.mu.Lock()
 	f.protocols = append(f.protocols, protocol)
 	f.modelsSeen = append(f.modelsSeen, model)
+	f.sessionIDs = append(f.sessionIDs, sessionID)
 	var response func(*http.Request) (*http.Response, error)
 	if len(f.responses) > 0 {
 		response = f.responses[0]
@@ -92,6 +95,61 @@ func (f *fakeProvider) Do(_ context.Context, protocol matcher.Protocol, model st
 	}
 	request := httptest.NewRequest(http.MethodPost, "http://provider.invalid", strings.NewReader(string(body)))
 	return response(request)
+}
+
+func TestProxyPropagatesAndRecordsDetectedSessionID(t *testing.T) {
+	provider := &fakeProvider{name: "surplus", models: []providers.Model{model("model-a", 1, 1)}}
+	proxy, db, secret := testProxy(t, provider)
+	defer db.Close()
+	request := httptest.NewRequest(http.MethodPost, "/v1/chat/completions", strings.NewReader(`{"model":"model-a","messages":[{"role":"user","content":"hello"}]}`))
+	request.Header.Set("Authorization", "Bearer "+secret)
+	request.Header.Set("X-PayLess-Chat-Id", "chat-123")
+	response := httptest.NewRecorder()
+	proxy.ServeHTTP(response, request, matcher.ProtocolChatCompletions)
+	if response.Code != http.StatusOK {
+		t.Fatalf("unexpected response: %d %s", response.Code, response.Body.String())
+	}
+	provider.mu.Lock()
+	defer provider.mu.Unlock()
+	if len(provider.sessionIDs) != 1 || provider.sessionIDs[0] != "chat-123" {
+		t.Fatalf("provider session metadata: %#v", provider.sessionIDs)
+	}
+	var sessionID string
+	if err := db.DB().QueryRow(`SELECT session_id FROM proxy_requests`).Scan(&sessionID); err != nil {
+		t.Fatal(err)
+	}
+	if sessionID != "chat-123" {
+		t.Fatalf("recorded session id: %q", sessionID)
+	}
+}
+
+func TestProxyHeaderlessHistoryReusesSessionAcrossRequests(t *testing.T) {
+	provider := &fakeProvider{name: "surplus", models: []providers.Model{model("model-a", 1, 1)}}
+	proxy, db, secret := testProxy(t, provider)
+	defer db.Close()
+	proxy.SessionDetector = session.NewDetector(db.Sessions, []byte("test-installation-key"))
+	body := `{"model":"model-a","messages":[{"role":"user","content":"same conversation start"}]}`
+	for range 2 {
+		request := httptest.NewRequest(http.MethodPost, "/v1/chat/completions", strings.NewReader(body))
+		request.Header.Set("Authorization", "Bearer "+secret)
+		response := httptest.NewRecorder()
+		proxy.ServeHTTP(response, request, matcher.ProtocolChatCompletions)
+		if response.Code != http.StatusOK {
+			t.Fatalf("unexpected response: %d %s", response.Code, response.Body.String())
+		}
+	}
+	provider.mu.Lock()
+	defer provider.mu.Unlock()
+	if len(provider.sessionIDs) != 2 || provider.sessionIDs[0] == "" || provider.sessionIDs[0] != provider.sessionIDs[1] {
+		t.Fatalf("headerless session IDs did not converge: %#v", provider.sessionIDs)
+	}
+	var distinct int
+	if err := db.DB().QueryRow(`SELECT count(DISTINCT session_id) FROM proxy_requests`).Scan(&distinct); err != nil {
+		t.Fatal(err)
+	}
+	if distinct != 1 {
+		t.Fatalf("request recording split a reused history session: %d", distinct)
+	}
 }
 
 func successResponse(body string) *http.Response {

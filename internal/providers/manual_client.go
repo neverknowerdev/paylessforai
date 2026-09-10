@@ -24,8 +24,8 @@ func (c WithManualModels) TranslationEnabled() bool {
 
 func (c WithManualModels) Name() string { return c.Client.Name() }
 
-func (c WithManualModels) Do(ctx context.Context, protocol matcher.Protocol, model string, body []byte) (*http.Response, error) {
-	return c.Client.Do(ctx, protocol, model, body)
+func (c WithManualModels) Do(ctx context.Context, protocol matcher.Protocol, model string, body []byte, sessionID string) (*http.Response, error) {
+	return c.Client.Do(ctx, protocol, model, body, sessionID)
 }
 
 func (c WithManualModels) Endpoint() Endpoint {
@@ -35,12 +35,12 @@ func (c WithManualModels) Endpoint() Endpoint {
 	return Endpoint{}
 }
 
-func (c WithManualModels) Prepare(format wire.Format, model string, body []byte) (PreparedRequest, error) {
+func (c WithManualModels) Prepare(format wire.Format, model string, body []byte, sessionID string) (PreparedRequest, error) {
 	client, ok := c.Client.(TranslationClient)
 	if !ok {
 		return PreparedRequest{}, fmt.Errorf("provider client does not support prepared requests")
 	}
-	return client.Prepare(format, model, body)
+	return client.Prepare(format, model, body, sessionID)
 }
 
 func (c WithManualModels) DoPrepared(ctx context.Context, request PreparedRequest) (*http.Response, error) {

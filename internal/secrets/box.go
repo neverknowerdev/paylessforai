@@ -3,7 +3,9 @@ package secrets
 import (
 	"crypto/aes"
 	"crypto/cipher"
+	"crypto/hmac"
 	"crypto/rand"
+	"crypto/sha256"
 	"errors"
 	"fmt"
 	"io"
@@ -12,6 +14,17 @@ import (
 )
 
 type Box struct{ key []byte }
+
+// Derive returns stable, purpose-separated key material for components that
+// need an installation secret without reusing the encryption key directly.
+func (b *Box) Derive(purpose string) []byte {
+	if b == nil || len(b.key) == 0 {
+		return nil
+	}
+	hash := hmac.New(sha256.New, b.key)
+	_, _ = hash.Write([]byte(purpose))
+	return hash.Sum(nil)
+}
 
 func LoadOrCreate(path string) (*Box, error) {
 	if path == "" {

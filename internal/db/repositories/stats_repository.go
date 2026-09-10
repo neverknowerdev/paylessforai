@@ -510,7 +510,7 @@ func (r *StatsRepository) ProviderStats(ctx context.Context) ([]ProviderStats, e
 }
 
 func requestStatFromBob(request *bobmodels.ProxyRequest, usage *bobmodels.RequestUsage) RequestStat {
-	item := RequestStat{ID: request.ID, Protocol: request.Protocol, Model: request.LogicalModel, State: request.State, ReceivedAt: request.ReceivedAt, Attempts: request.AttemptCount}
+	item := RequestStat{ID: request.ID, SessionID: stringPointer(request.SessionID), Protocol: request.Protocol, Model: request.LogicalModel, State: request.State, ReceivedAt: request.ReceivedAt, Attempts: request.AttemptCount}
 	item.CompletedAt = stringPointer(request.CompletedAt)
 	item.ErrorCode = stringPointer(request.ErrorCode)
 	item.DurationMS = int64Pointer(request.DurationMS)

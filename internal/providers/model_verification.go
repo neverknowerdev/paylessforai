@@ -6,6 +6,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/neverknowerdev/paylessforai/internal/ids"
 	"github.com/neverknowerdev/paylessforai/internal/matcher"
 )
 
@@ -16,6 +17,7 @@ func (c *HTTPClient) VerifyModels(ctx context.Context, manual []ManualModel) ([]
 		return nil, fmt.Errorf("at least one model is required")
 	}
 	verified := make([]Model, 0, len(manual))
+	operationSessionID := ids.New()
 	for _, specification := range manual {
 		id := strings.TrimSpace(specification.ID)
 		if id == "" {
@@ -25,7 +27,7 @@ func (c *HTTPClient) VerifyModels(ctx context.Context, manual []ManualModel) ([]
 			return nil, fmt.Errorf("model %q needs positive input and output pricing", id)
 		}
 		body := []byte(`{"model":"manual-verification","messages":[{"role":"user","content":"Reply with OK"}],"max_tokens":1}`)
-		response, err := c.Do(ctx, matcher.ProtocolChatCompletions, id, body)
+		response, err := c.Do(ctx, matcher.ProtocolChatCompletions, id, body, operationSessionID)
 		if err != nil {
 			return nil, fmt.Errorf("model %q verification failed: %w", id, err)
 		}

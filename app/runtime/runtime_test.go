@@ -91,7 +91,7 @@ func TestCredentialClientPreservesTranslationClient(t *testing.T) {
 	if !ok {
 		t.Fatal("credential client must preserve the translation-capable provider interface")
 	}
-	prepared, err := translated.Prepare(wire.FormatResponses, "muse-spark-1.3-contributor", []byte(`{"model":"old","input":"hello"}`))
+	prepared, err := translated.Prepare(wire.FormatResponses, "muse-spark-1.3-contributor", []byte(`{"model":"old","input":"hello"}`), "")
 	if err != nil {
 		t.Fatalf("prepare through credential client: %v", err)
 	}

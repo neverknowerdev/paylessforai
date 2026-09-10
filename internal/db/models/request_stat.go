@@ -2,6 +2,7 @@ package models
 
 type RequestStat struct {
 	ID                string        `json:"id"`
+	SessionID         *string       `json:"session_id,omitempty"`
 	Protocol          string        `json:"protocol"`
 	Model             string        `json:"model"`
 	State             string        `json:"state"`

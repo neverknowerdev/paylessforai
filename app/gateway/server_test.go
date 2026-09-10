@@ -23,7 +23,7 @@ func (c gatewayModelClient) Name() string { return c.name }
 func (c gatewayModelClient) Discover(context.Context) ([]providers.Model, error) {
 	return []providers.Model{c.model}, nil
 }
-func (c gatewayModelClient) Do(context.Context, matcher.Protocol, string, []byte) (*http.Response, error) {
+func (c gatewayModelClient) Do(context.Context, matcher.Protocol, string, []byte, string) (*http.Response, error) {
 	return nil, nil
 }
 

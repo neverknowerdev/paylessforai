@@ -24,6 +24,7 @@ type Repositories struct {
 	Groups              *RoutingGroupsRepository
 	Stats               *StatsRepository
 	Subscriptions       *SubscriptionRepository
+	Sessions            *SessionRepository
 	database            *sql.DB
 }
 
@@ -57,6 +58,7 @@ func New(db DBTX) *Repositories {
 	}
 	if provider, ok := db.(SQLDBTX); ok {
 		result.database = provider.SQLDB()
+		result.Sessions = &SessionRepository{database: result.database}
 		result.Groups = &RoutingGroupsRepository{bobRepository: bobRepository{exec: bobExec}, database: bob.NewDB(result.database)}
 		result.Stats = &StatsRepository{bobRepository: bobRepository{exec: bobExec}}
 		result.Subscriptions = &SubscriptionRepository{bobRepository: bobRepository{exec: bobExec}}

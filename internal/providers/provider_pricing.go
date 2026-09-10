@@ -29,7 +29,7 @@ func applySurplusMarketPricing(ctx context.Context, client *HTTPClient, models [
 	if err != nil {
 		return
 	}
-	client.addHeaders(request)
+	client.addHeaders(request, "")
 	response, err := client.Client.Do(request)
 	if err != nil {
 		return

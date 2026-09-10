@@ -37,7 +37,7 @@ func (c credentialTestClient) Discover(context.Context) ([]providers.Model, erro
 	price := matcher.Price{InputPicoUSDPerToken: 1_000_000, OutputPicoUSDPerToken: 2_000_000}
 	return []providers.Model{{ID: "model-a", Name: "Model A", Pricing: price, OfficialPricing: price, PriceAvailable: true, OfficialPriceAvailable: true}}, nil
 }
-func (c credentialTestClient) Do(context.Context, matcher.Protocol, string, []byte) (*http.Response, error) {
+func (c credentialTestClient) Do(context.Context, matcher.Protocol, string, []byte, string) (*http.Response, error) {
 	return &http.Response{StatusCode: http.StatusOK, Body: io.NopCloser(strings.NewReader(`{"choices":[]}`)), Header: make(http.Header)}, nil
 }
 

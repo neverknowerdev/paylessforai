@@ -71,7 +71,7 @@ func (c *HTTPClient) discoverPath(ctx context.Context, path string) ([]Model, er
 	if err != nil {
 		return nil, err
 	}
-	c.addHeaders(request)
+	c.addHeaders(request, "")
 	response, err := c.Client.Do(request)
 	if err != nil {
 		return nil, err

@@ -23,7 +23,7 @@ func (c catalogModelTestClient) Name() string { return c.provider }
 func (c catalogModelTestClient) Discover(context.Context) ([]providers.Model, error) {
 	return []providers.Model{c.model}, nil
 }
-func (c catalogModelTestClient) Do(context.Context, matcher.Protocol, string, []byte) (*http.Response, error) {
+func (c catalogModelTestClient) Do(context.Context, matcher.Protocol, string, []byte, string) (*http.Response, error) {
 	return nil, nil
 }
 

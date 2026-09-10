@@ -55,17 +55,18 @@ type ModelVerifier interface {
 type Client interface {
 	Name() string
 	Discover(context.Context) ([]Model, error)
-	Do(context.Context, matcher.Protocol, string, []byte) (*http.Response, error)
+	Do(context.Context, matcher.Protocol, string, []byte, string) (*http.Response, error)
 }
 
 // PreparedRequest keeps URL selection outside the HTTP transport. Legacy
 // Client implementations remain supported, but translation-aware clients use
 // this boundary so a caller body cannot be passed through accidentally.
 type PreparedRequest struct {
-	Format  wire.Format
-	URL     url.URL
-	Headers http.Header
-	Body    io.ReadCloser
+	Format    wire.Format
+	URL       url.URL
+	Headers   http.Header
+	Body      io.ReadCloser
+	SessionID string
 }
 
 type Transport interface {
@@ -75,7 +76,7 @@ type Transport interface {
 type TranslationClient interface {
 	Client
 	Endpoint() Endpoint
-	Prepare(wire.Format, string, []byte) (PreparedRequest, error)
+	Prepare(wire.Format, string, []byte, string) (PreparedRequest, error)
 	DoPrepared(context.Context, PreparedRequest) (*http.Response, error)
 }
 

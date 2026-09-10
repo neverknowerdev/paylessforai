@@ -9,11 +9,16 @@ import (
 
 type ProxyRequestsRepository struct{ bobRepository }
 
-func (r *ProxyRequestsRepository) Create(ctx context.Context, id, clientKeyID, protocol, model string) error {
+func (r *ProxyRequestsRepository) Create(ctx context.Context, id, clientKeyID, protocol, model string, sessionIDs ...string) error {
 	state := "received"
 	receivedAt := time.Now().UTC().Format(time.RFC3339Nano)
 	client := nullableString(pointerIfNonEmpty(clientKeyID))
-	setter := &bobmodels.ProxyRequestSetter{ID: &id, ClientKeyID: &client, Protocol: &protocol, LogicalModel: &model, State: &state, ReceivedAt: &receivedAt}
+	sessionID := ""
+	if len(sessionIDs) > 0 {
+		sessionID = sessionIDs[0]
+	}
+	session := nullableString(pointerIfNonEmpty(sessionID))
+	setter := &bobmodels.ProxyRequestSetter{ID: &id, ClientKeyID: &client, SessionID: &session, Protocol: &protocol, LogicalModel: &model, State: &state, ReceivedAt: &receivedAt}
 	_, err := bobmodels.ProxyRequests.Insert(setter).One(ctx, r.exec)
 	return err
 }

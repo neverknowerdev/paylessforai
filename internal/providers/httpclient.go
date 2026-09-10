@@ -21,24 +21,29 @@ import (
 // clients. Catalog discovery and pricing enrichment live in separate files so
 // this type remains focused on request execution and upstream errors.
 type HTTPClient struct {
-	Provider    string
-	BaseURL     string
-	APIKey      string
-	Client      *http.Client
-	endpoint    Endpoint
-	endpointErr error
+	Provider       string
+	BaseURL        string
+	APIKey         string
+	Client         *http.Client
+	endpoint       Endpoint
+	endpointErr    error
+	requestHeaders RequestHeaders
 }
 
 func NewHTTPClient(provider, baseURL, apiKey string) *HTTPClient {
 	parsed, err := ParseEndpoint(baseURL)
-	return &HTTPClient{Provider: provider, BaseURL: strings.TrimRight(baseURL, "/"), APIKey: apiKey, endpoint: parsed, endpointErr: err, Client: &http.Client{Transport: &http.Transport{Proxy: http.ProxyFromEnvironment, MaxIdleConns: 32, MaxIdleConnsPerHost: 8, IdleConnTimeout: 90 * time.Second}}}
+	var requestHeaders RequestHeaders = noopRequestHeaders{}
+	if provider == "opencode-go" || provider == "opencode-zen" || provider == "opencode" {
+		requestHeaders = openCodeRequestHeaders{}
+	}
+	return &HTTPClient{Provider: provider, BaseURL: strings.TrimRight(baseURL, "/"), APIKey: apiKey, endpoint: parsed, endpointErr: err, requestHeaders: requestHeaders, Client: &http.Client{Transport: &http.Transport{Proxy: http.ProxyFromEnvironment, MaxIdleConns: 32, MaxIdleConnsPerHost: 8, IdleConnTimeout: 90 * time.Second}}}
 }
 
 func (c *HTTPClient) Name() string { return c.Provider }
 
 func (c *HTTPClient) Endpoint() Endpoint { return c.endpoint }
 
-func (c *HTTPClient) Prepare(format wire.Format, model string, body []byte) (PreparedRequest, error) {
+func (c *HTTPClient) Prepare(format wire.Format, model string, body []byte, sessionID string) (PreparedRequest, error) {
 	if err := c.endpointErr; err != nil {
 		return PreparedRequest{}, err
 	}
@@ -53,7 +58,7 @@ func (c *HTTPClient) Prepare(format wire.Format, model string, body []byte) (Pre
 	headers := make(http.Header)
 	headers.Set("Content-Type", "application/json")
 	headers.Set("Accept", "application/json, text/event-stream")
-	request := PreparedRequest{Format: format, URL: urlValue, Headers: headers, Body: io.NopCloser(bytes.NewReader(rewritten))}
+	request := PreparedRequest{Format: format, URL: urlValue, Headers: headers, Body: io.NopCloser(bytes.NewReader(rewritten)), SessionID: sessionID}
 	if c.APIKey != "" {
 		request.Headers.Set("Authorization", "Bearer "+c.APIKey)
 	}
@@ -76,6 +81,7 @@ func (c *HTTPClient) DoPrepared(ctx context.Context, prepared PreparedRequest) (
 			request.Header.Add(key, value)
 		}
 	}
+	c.requestHeaders.Apply(request.Header, prepared.SessionID)
 	response, err := c.Client.Do(request)
 	if err != nil {
 		return nil, err
@@ -88,7 +94,7 @@ func (c *HTTPClient) DoPrepared(ctx context.Context, prepared PreparedRequest) (
 	return response, nil
 }
 
-func (c *HTTPClient) Do(ctx context.Context, protocol matcher.Protocol, model string, body []byte) (*http.Response, error) {
+func (c *HTTPClient) Do(ctx context.Context, protocol matcher.Protocol, model string, body []byte, sessionID string) (*http.Response, error) {
 	if c.endpointErr != nil {
 		return nil, c.endpointErr
 	}
@@ -100,10 +106,10 @@ func (c *HTTPClient) Do(ctx context.Context, protocol matcher.Protocol, model st
 	if err != nil {
 		return nil, err
 	}
-	return c.doRequest(ctx, urlValue.String(), model, body)
+	return c.doRequest(ctx, urlValue.String(), model, body, sessionID)
 }
 
-func (c *HTTPClient) doRequest(ctx context.Context, url, model string, body []byte) (*http.Response, error) {
+func (c *HTTPClient) doRequest(ctx context.Context, url, model string, body []byte, sessionID string) (*http.Response, error) {
 	rewritten, err := rewriteModel(body, model)
 	if err != nil {
 		return nil, fmt.Errorf("rewrite upstream model: %w", err)
@@ -113,7 +119,7 @@ func (c *HTTPClient) doRequest(ctx context.Context, url, model string, body []by
 		return nil, err
 	}
 	request.Header.Set("Content-Type", "application/json")
-	c.addHeaders(request)
+	c.addHeaders(request, sessionID)
 	response, err := c.Client.Do(request)
 	if err != nil {
 		return nil, err
@@ -126,11 +132,12 @@ func (c *HTTPClient) doRequest(ctx context.Context, url, model string, body []by
 	return response, nil
 }
 
-func (c *HTTPClient) addHeaders(request *http.Request) {
+func (c *HTTPClient) addHeaders(request *http.Request, sessionID string) {
 	if c.APIKey != "" {
 		request.Header.Set("Authorization", "Bearer "+c.APIKey)
 	}
 	request.Header.Set("Accept", "application/json, text/event-stream")
+	c.requestHeaders.Apply(request.Header, sessionID)
 }
 
 func (c *HTTPClient) readUpstreamError(response *http.Response) error {

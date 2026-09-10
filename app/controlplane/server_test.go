@@ -186,6 +186,9 @@ func TestRequestStatsAPI(t *testing.T) {
 	if err := db.ProxyRequests.Create(context.Background(), "request-1", "", "chat_completions", "model-a", "session-123"); err != nil {
 		t.Fatal(err)
 	}
+	if err := db.ProxyRequests.Create(context.Background(), "legacy-request", "", "chat_completions", "model-a"); err != nil {
+		t.Fatal(err)
+	}
 	group, err := db.Groups.Save(context.Background(), groups.Definition{ID: "stats-group", Name: "Stats group", Slug: "stats-group", Enabled: true, Stages: []groups.Stage{{Name: "primary", Sources: []groups.Source{{Kind: groups.SourceModel, ModelID: "model-a"}}}}}, nil)
 	if err != nil {
 		t.Fatal(err)
@@ -208,9 +211,27 @@ func TestRequestStatsAPI(t *testing.T) {
 	if response.Code != http.StatusOK || !strings.Contains(response.Body.String(), `"session_id":"session-123"`) || !strings.Contains(response.Body.String(), `"total_tokens":5`) {
 		t.Fatalf("unexpected request stats response: %d %s", response.Code, response.Body.String())
 	}
+	var stats struct {
+		Data []models.RequestStat `json:"data"`
+	}
+	if err := json.Unmarshal(response.Body.Bytes(), &stats); err != nil {
+		t.Fatal(err)
+	}
+	var legacyFound, sessionFound bool
+	for _, item := range stats.Data {
+		switch item.ID {
+		case "request-1":
+			sessionFound = item.SessionID != nil && *item.SessionID == "session-123"
+		case "legacy-request":
+			legacyFound = item.SessionID == nil
+		}
+	}
+	if !sessionFound || !legacyFound {
+		t.Fatalf("request session compatibility: %+v", stats.Data)
+	}
 	summary := httptest.NewRecorder()
 	server.httpServer.Handler.ServeHTTP(summary, httptest.NewRequest(http.MethodGet, "/api/stats/summary", nil))
-	if summary.Code != http.StatusOK || !strings.Contains(summary.Body.String(), `"total_requests":1`) {
+	if summary.Code != http.StatusOK || !strings.Contains(summary.Body.String(), `"total_requests":2`) {
 		t.Fatalf("unexpected stats summary response: %d %s", summary.Code, summary.Body.String())
 	}
 	modelSummary := httptest.NewRecorder()

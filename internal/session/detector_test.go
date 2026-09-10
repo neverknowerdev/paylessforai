@@ -98,6 +98,14 @@ func TestHistoryProjectionExcludesToolsAndAssistant(t *testing.T) {
 	if _, ok := extractHistory(wire.FormatChatCompletions, []byte(`{"messages":[{"role":"user","content":[{"type":"image_url","image_url":{"url":"https://example.invalid"}}]}]}`)); ok {
 		t.Fatal("unsupported remote media must skip history detection")
 	}
+	inlineA, ok := extractHistory(wire.FormatChatCompletions, []byte(`{"messages":[{"role":"user","content":[{"type":"image_url","image_url":{"url":"data:image/png;base64,AAAA"}}]}]}`))
+	if !ok || len(inlineA) != 1 {
+		t.Fatalf("inline data media should be supported: %#v, %v", inlineA, ok)
+	}
+	inlineB, ok := extractHistory(wire.FormatChatCompletions, []byte(`{"messages":[{"role":"user","content":[{"type":"image_url","image_url":{"url":"data:image/png;base64,BBBB"}}]}]}`))
+	if !ok || len(inlineB) != 1 || inlineA[0].value == inlineB[0].value {
+		t.Fatalf("inline media should affect the fingerprint: %#v, %#v, %v", inlineA, inlineB, ok)
+	}
 }
 
 func TestResponsesStringAndHashBoundaries(t *testing.T) {

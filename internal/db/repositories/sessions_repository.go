@@ -50,7 +50,12 @@ func (r *SessionRepository) ResolveAndRegister(ctx context.Context, clientKeyID 
 	err := db.RunInTx(ctx, nil, func(ctx context.Context, tx bob.Transaction) error {
 		if cleanup {
 			cutoff := now.UTC().Add(-correlationRetention).Format(time.RFC3339Nano)
-			if _, err := tx.ExecContext(ctx, `DELETE FROM session_keys WHERE session_id IN (SELECT session_id FROM sessions WHERE last_seen_at < ?)`, cutoff); err != nil {
+			if _, err := tx.ExecContext(ctx, `DELETE FROM session_keys WHERE EXISTS (
+				SELECT 1 FROM sessions
+				WHERE sessions.client_key_id = session_keys.client_key_id
+				  AND sessions.session_id = session_keys.session_id
+				  AND sessions.last_seen_at < ?
+			)`, cutoff); err != nil {
 				return err
 			}
 		}

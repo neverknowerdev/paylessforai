@@ -202,7 +202,11 @@ func inlineMediaDigest(part map[string]any) (string, bool) {
 		if typ, _ := nested["type"].(string); strings.EqualFold(typ, "url") {
 			return "", false
 		}
-		value = nested["data"]
+		if url, ok := nested["url"].(string); ok {
+			value = url
+		} else {
+			value = nested["data"]
+		}
 	}
 	text, ok := value.(string)
 	if !ok || text == "" || strings.HasPrefix(strings.ToLower(text), "http://") || strings.HasPrefix(strings.ToLower(text), "https://") {

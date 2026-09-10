@@ -609,3 +609,5 @@ code { display: inline-block; max-width: 100%; overflow: hidden; padding: 10px 1
  .catalog-refresh-status { color: var(--faint); font-size: 12px; margin: 14px 0; }
 .session-id-cell { max-width: 220px; }
 .session-id-cell strong { overflow-wrap: anywhere; font-family: var(--mono); font-size: 10px; }
+tr.data-row:hover td, tr.data-row:focus-visible td { background: #17213a; }
+tr.data-row:focus-visible { outline: 2px solid var(--blue); outline-offset: -2px; }

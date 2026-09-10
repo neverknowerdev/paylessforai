@@ -52,3 +52,41 @@ func TestSessionRepositoryAmbiguityDoesNotFallBackToShorterPrefix(t *testing.T) 
 		t.Fatalf("ambiguous shorter prefix must not be reused: %q", got)
 	}
 }
+
+func TestSessionRepositoryCleanupRemovesOnlyStaleClientHistory(t *testing.T) {
+	i := newIntegrationDB(t)
+	now := time.Unix(3000, 0).UTC()
+	old := now.Add(-30*24*time.Hour - time.Hour).Format(time.RFC3339Nano)
+	current := now.Format(time.RFC3339Nano)
+	if _, err := i.repos.DB().ExecContext(i.ctx, `
+		INSERT INTO sessions(client_key_id, session_id, created_at, last_seen_at) VALUES
+			('client-a', 'shared-id', ?, ?),
+			('client-b', 'shared-id', ?, ?)`, old, old, current, current); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := i.repos.DB().ExecContext(i.ctx, `
+		INSERT INTO session_keys(client_key_id, session_id, key_hash, is_anchor, last_seen_at) VALUES
+			('client-a', 'shared-id', 'stale-key', 1, ?),
+			('client-b', 'shared-id', 'active-key', 1, ?)`, old, current); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := i.repos.Sessions.ResolveAndRegister(i.ctx, "client-a", []string{"new-key"}, "new-key", "new-key", "fresh", now); err != nil {
+		t.Fatal(err)
+	}
+	var stale, active, staleSession, activeSession int
+	if err := i.repos.DB().QueryRowContext(i.ctx, `SELECT count(*) FROM session_keys WHERE client_key_id = 'client-a' AND session_id = 'shared-id'`).Scan(&stale); err != nil {
+		t.Fatal(err)
+	}
+	if err := i.repos.DB().QueryRowContext(i.ctx, `SELECT count(*) FROM session_keys WHERE client_key_id = 'client-b' AND session_id = 'shared-id' AND key_hash = 'active-key'`).Scan(&active); err != nil {
+		t.Fatal(err)
+	}
+	if err := i.repos.DB().QueryRowContext(i.ctx, `SELECT count(*) FROM sessions WHERE client_key_id = 'client-a' AND session_id = 'shared-id'`).Scan(&staleSession); err != nil {
+		t.Fatal(err)
+	}
+	if err := i.repos.DB().QueryRowContext(i.ctx, `SELECT count(*) FROM sessions WHERE client_key_id = 'client-b' AND session_id = 'shared-id'`).Scan(&activeSession); err != nil {
+		t.Fatal(err)
+	}
+	if stale != 0 || active != 1 || staleSession != 1 || activeSession != 1 {
+		t.Fatalf("cleanup crossed client namespace or removed session identities: stale=%d active=%d stale_session=%d active_session=%d", stale, active, staleSession, activeSession)
+	}
+}

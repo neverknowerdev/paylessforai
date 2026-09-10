@@ -2,6 +2,7 @@ package session
 
 import (
 	"context"
+	"log/slog"
 	"net/http"
 	"time"
 
@@ -35,7 +36,9 @@ func (d *Detector) DetectSessionID(ctx context.Context, input Input) string {
 	if value, ok := selectedHeader(input.Headers); ok {
 		if d.store != nil && input.ClientKeyID != "" {
 			storeCtx, cancel := context.WithTimeout(ctx, storeTimeout)
-			_ = d.store.UpsertSession(storeCtx, input.ClientKeyID, value, d.now().UTC())
+			if err := d.store.UpsertSession(storeCtx, input.ClientKeyID, value, d.now().UTC()); err != nil {
+				slog.Warn("session persistence failed", "operation", "upsert")
+			}
 			cancel()
 		}
 		return value
@@ -60,7 +63,11 @@ func (d *Detector) DetectSessionID(ctx context.Context, input Input) string {
 	storeCtx, cancel := context.WithTimeout(ctx, storeTimeout)
 	selected, err := d.store.ResolveAndRegister(storeCtx, input.ClientKeyID, hashes, anchor, fingerprint, fresh, d.now().UTC())
 	cancel()
-	if err != nil || selected == "" {
+	if err != nil {
+		slog.Warn("session persistence failed", "operation", "resolve_and_register")
+		return fresh
+	}
+	if selected == "" {
 		return fresh
 	}
 	return selected

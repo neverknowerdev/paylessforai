@@ -32,8 +32,13 @@ func FromJSON(body []byte) Stats {
 func FromEnvelope(envelope map[string]any) Stats {
 	usage, _ := envelope["usage"].(map[string]any)
 	if usage == nil {
-		if response, ok := envelope["response"].(map[string]any); ok {
-			usage, _ = response["usage"].(map[string]any)
+		for _, key := range []string{"response", "message"} {
+			if nested, ok := envelope[key].(map[string]any); ok {
+				if candidate, ok := nested["usage"].(map[string]any); ok {
+					usage = candidate
+					break
+				}
+			}
 		}
 	}
 	stats := Stats{Raw: usage}
@@ -44,12 +49,13 @@ func FromEnvelope(envelope map[string]any) Stats {
 	_, hasNetInputTokens := usage["input_tokens"]
 	_, hasCacheRead := usage["cache_read_input_tokens"]
 	stats.InputTokensNetOfCache = !hasPromptTokens && hasNetInputTokens && hasCacheRead
-	if stats.TotalTokens == 0 {
-		stats.TotalTokens = stats.InputTokens + stats.OutputTokens
-	}
 	if details, ok := usage["prompt_tokens_details"].(map[string]any); ok {
 		stats.CachedReadTokens = integer(details, "cached_tokens")
 		stats.CacheWriteTokens = integer(details, "cache_write_tokens")
+	}
+	if details, ok := usage["input_tokens_details"].(map[string]any); ok {
+		stats.CachedReadTokens = integer(details, "cached_tokens", "cache_read_input_tokens")
+		stats.CacheWriteTokens = integer(details, "cache_write_tokens", "cache_creation_input_tokens")
 	}
 	if stats.CachedReadTokens == 0 {
 		stats.CachedReadTokens = integer(usage, "cache_read_input_tokens", "cached_tokens")
@@ -67,6 +73,12 @@ func FromEnvelope(envelope map[string]any) Stats {
 	}
 	if stats.ReasoningTokens == 0 {
 		stats.ReasoningTokens = integer(usage, "reasoning_tokens")
+	}
+	if stats.TotalTokens == 0 {
+		stats.TotalTokens = stats.InputTokens + stats.OutputTokens
+		if stats.InputTokensNetOfCache {
+			stats.TotalTokens += stats.CachedReadTokens + stats.CacheWriteTokens
+		}
 	}
 	for _, values := range []map[string]any{usage, envelope} {
 		for _, name := range []string{"cost", "total_cost", "cost_usd", "total_cost_usd", "price"} {

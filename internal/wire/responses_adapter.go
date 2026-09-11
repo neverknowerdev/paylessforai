@@ -348,6 +348,13 @@ func encodeResponsesContent(role Role, blocks []ContentBlock) ([]any, error) {
 }
 
 func decodeResponsesResponsePayload(payload map[string]json.RawMessage) (Response, error) {
+	// Responses streaming lifecycle events wrap the completed response under
+	// `response`; decode that object using the same response contract.
+	if len(payload["output"]) == 0 && len(payload["output_text"]) == 0 {
+		if nested, ok := rawObject(payload["response"]); ok {
+			return decodeResponsesResponsePayload(nested)
+		}
+	}
 	result := Response{ID: stringValue(payload["id"]), Model: stringValue(payload["model"]), Text: stringValue(payload["output_text"]), FinishReason: stringValue(payload["status"])}
 	if len(payload["output"]) > 0 {
 		var output []map[string]json.RawMessage
@@ -396,7 +403,21 @@ func encodeResponsesResponse(response Response) any {
 			output = append(output, map[string]any{"type": "function_call", "call_id": call.ID, "name": call.Name, "arguments": string(call.Arguments)})
 		}
 	}
-	return map[string]any{"id": valueOr(response.ID, "resp-translation"), "object": "response", "model": response.Model, "status": "completed", "output_text": response.Text, "output": output, "usage": map[string]any{"input_tokens": response.Usage.InputTokens, "output_tokens": response.Usage.OutputTokens, "total_tokens": response.Usage.TotalTokens}}
+	usage := map[string]any{"input_tokens": response.Usage.InputTokens, "output_tokens": response.Usage.OutputTokens, "total_tokens": response.Usage.TotalTokens}
+	inputDetails := map[string]any{}
+	if response.Usage.CachedReadTokens != 0 {
+		inputDetails["cached_tokens"] = response.Usage.CachedReadTokens
+	}
+	if response.Usage.CacheWriteTokens != 0 {
+		inputDetails["cache_write_tokens"] = response.Usage.CacheWriteTokens
+	}
+	if len(inputDetails) > 0 {
+		usage["input_tokens_details"] = inputDetails
+	}
+	if response.Usage.ReasoningTokens != 0 {
+		usage["output_tokens_details"] = map[string]any{"reasoning_tokens": response.Usage.ReasoningTokens}
+	}
+	return map[string]any{"id": valueOr(response.ID, "resp-translation"), "object": "response", "model": response.Model, "status": "completed", "output_text": response.Text, "output": output, "usage": usage}
 }
 
 func encodeResponsesStreamEvent(event Event) any {

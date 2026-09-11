@@ -599,7 +599,7 @@ func TestProxyLearnsUpstreamFormatAndTranslatesResponse(t *testing.T) {
 			}
 		}
 		w.Header().Set("Content-Type", "application/json")
-		_, _ = io.WriteString(w, `{"id":"resp-1","model":"upstream","status":"completed","output_text":"translated","output":[{"type":"message","role":"assistant","content":[{"type":"output_text","text":"translated"}]}],"usage":{"input_tokens":2,"output_tokens":1,"total_tokens":3}}`)
+		_, _ = io.WriteString(w, `{"id":"resp-1","model":"upstream","status":"completed","output_text":"translated","output":[{"type":"message","role":"assistant","content":[{"type":"output_text","text":"translated"}]}],"usage":{"input_tokens":100,"output_tokens":20,"total_tokens":120,"input_tokens_details":{"cached_tokens":60,"cache_write_tokens":10},"output_tokens_details":{"reasoning_tokens":5}}}`)
 	}))
 	defer server.Close()
 	provider := &translatingProvider{HTTPClient: providers.NewHTTPClient("translated", server.URL+"/v1", "secret"), models: []providers.Model{model("model-a", 1, 1)}}
@@ -624,6 +624,13 @@ func TestProxyLearnsUpstreamFormatAndTranslatesResponse(t *testing.T) {
 	}
 	if clientFormat != string(wire.FormatChatCompletions) || providerFormat != string(wire.FormatResponses) {
 		t.Fatalf("unexpected attempt formats: %q -> %q", clientFormat, providerFormat)
+	}
+	var input, output, total, cached, cacheWrite, reasoning int64
+	if err := db.DB().QueryRow(`SELECT input_tokens, output_tokens, total_tokens, cached_read_tokens, cache_write_tokens, reasoning_tokens FROM request_usage LIMIT 1`).Scan(&input, &output, &total, &cached, &cacheWrite, &reasoning); err != nil {
+		t.Fatal(err)
+	}
+	if input != 100 || output != 20 || total != 120 || cached != 60 || cacheWrite != 10 || reasoning != 5 {
+		t.Fatalf("persisted usage = %d/%d/%d cache %d/%d reasoning %d", input, output, total, cached, cacheWrite, reasoning)
 	}
 
 	request = httptest.NewRequest(http.MethodPost, "/v1/chat/completions", strings.NewReader(`{"model":"model-a","messages":[{"role":"user","content":"again"}]}`))

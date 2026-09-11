@@ -2,8 +2,58 @@ package wire
 
 import (
 	"encoding/json"
+	"io"
+	"net/http"
+	"strings"
 	"testing"
 )
+
+func TestResponsesStreamingCompletedEnvelopePreservesUsageDetails(t *testing.T) {
+	body := "data: {\"type\":\"response.output_text.delta\",\"delta\":\"hello\"}\n\n" +
+		"data: {\"type\":\"response.completed\",\"response\":{\"status\":\"completed\",\"output_text\":\"hello\",\"usage\":{\"input_tokens\":100,\"output_tokens\":20,\"total_tokens\":120,\"input_tokens_details\":{\"cached_tokens\":60},\"output_tokens_details\":{\"reasoning_tokens\":5}}}}\n\n"
+	response := &http.Response{StatusCode: http.StatusOK, Header: http.Header{"Content-Type": []string{"text/event-stream"}}, Body: io.NopCloser(strings.NewReader(body))}
+	events, err := DecodeResponse(FormatResponses, response)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var got Usage
+	for _, event := range events.Events {
+		if event.Usage != nil {
+			got = *event.Usage
+		}
+		if event.Response != nil {
+			got = event.Response.Usage
+		}
+	}
+	if got.InputTokens != 100 || got.OutputTokens != 20 || got.TotalTokens != 120 || got.CachedReadTokens != 60 || got.ReasoningTokens != 5 {
+		t.Fatalf("usage = %+v", got)
+	}
+}
+
+func TestAllFormatsDecodeCacheAndReasoningDetails(t *testing.T) {
+	fixtures := []struct {
+		format Format
+		body   string
+		want   Usage
+	}{
+		{FormatChatCompletions, `{"model":"m","choices":[{"message":{"role":"assistant","content":"ok"}}],"usage":{"prompt_tokens":100,"completion_tokens":20,"total_tokens":120,"prompt_tokens_details":{"cached_tokens":60,"cache_write_tokens":10},"completion_tokens_details":{"reasoning_tokens":5}}}`, Usage{InputTokens: 100, OutputTokens: 20, TotalTokens: 120, CachedReadTokens: 60, CacheWriteTokens: 10, ReasoningTokens: 5}},
+		{FormatResponses, `{"id":"r","output_text":"ok","usage":{"input_tokens":100,"output_tokens":20,"total_tokens":120,"input_tokens_details":{"cached_tokens":60,"cache_write_tokens":10},"output_tokens_details":{"reasoning_tokens":5}}}`, Usage{InputTokens: 100, OutputTokens: 20, TotalTokens: 120, CachedReadTokens: 60, CacheWriteTokens: 10, ReasoningTokens: 5}},
+		{FormatAnthropicMessages, `{"id":"m","content":[{"type":"text","text":"ok"}],"usage":{"input_tokens":40,"output_tokens":20,"cache_read_input_tokens":60,"cache_creation_input_tokens":10,"output_tokens_details":{"thinking_tokens":5}}}`, Usage{InputTokens: 40, OutputTokens: 20, TotalTokens: 130, CachedReadTokens: 60, CacheWriteTokens: 10, ReasoningTokens: 5, InputTokensNetOfCache: true}},
+	}
+	for _, tc := range fixtures {
+		t.Run(string(tc.format), func(t *testing.T) {
+			response := &http.Response{StatusCode: http.StatusOK, Header: http.Header{"Content-Type": []string{"application/json"}}, Body: io.NopCloser(strings.NewReader(tc.body))}
+			events, err := DecodeResponse(tc.format, response)
+			if err != nil {
+				t.Fatal(err)
+			}
+			got := events.Events[0].Response.Usage
+			if got != tc.want {
+				t.Fatalf("usage = %+v, want %+v", got, tc.want)
+			}
+		})
+	}
+}
 
 func TestResponsesHistoryUsesRoleSpecificTextTypes(t *testing.T) {
 	for _, tc := range []struct {

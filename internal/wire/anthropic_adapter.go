@@ -375,7 +375,17 @@ func encodeAnthropicResponse(response Response) any {
 			content = append(content, map[string]any{"type": "tool_use", "id": call.ID, "name": call.Name, "input": jsonObject(call.Arguments)})
 		}
 	}
-	return map[string]any{"id": valueOr(response.ID, "msg-translation"), "type": "message", "role": "assistant", "model": response.Model, "content": content, "stop_reason": valueOr(response.FinishReason, "end_turn"), "usage": map[string]any{"input_tokens": response.Usage.InputTokens, "output_tokens": response.Usage.OutputTokens}}
+	usage := map[string]any{"input_tokens": response.Usage.InputTokens, "output_tokens": response.Usage.OutputTokens}
+	if response.Usage.CachedReadTokens != 0 {
+		usage["cache_read_input_tokens"] = response.Usage.CachedReadTokens
+	}
+	if response.Usage.CacheWriteTokens != 0 {
+		usage["cache_creation_input_tokens"] = response.Usage.CacheWriteTokens
+	}
+	if response.Usage.ReasoningTokens != 0 {
+		usage["output_tokens_details"] = map[string]any{"thinking_tokens": response.Usage.ReasoningTokens}
+	}
+	return map[string]any{"id": valueOr(response.ID, "msg-translation"), "type": "message", "role": "assistant", "model": response.Model, "content": content, "stop_reason": valueOr(response.FinishReason, "end_turn"), "usage": usage}
 }
 
 func encodeAnthropicStreamEvent(event Event) any {

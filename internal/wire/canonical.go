@@ -70,6 +70,9 @@ type Usage struct {
 	CachedReadTokens int64 `json:"cached_read_tokens,omitempty"`
 	CacheWriteTokens int64 `json:"cache_write_tokens,omitempty"`
 	ReasoningTokens  int64 `json:"reasoning_tokens,omitempty"`
+	// InputTokensNetOfCache is true for providers whose input_tokens excludes
+	// cache buckets (currently Anthropic Messages).
+	InputTokensNetOfCache bool `json:"-"`
 }
 
 type Request struct {
@@ -504,8 +507,9 @@ func stringValue(raw json.RawMessage) string {
 	return value
 }
 func decodeUsage(payload map[string]json.RawMessage, usage *Usage) {
+	payload = usagePayload(payload)
 	var value map[string]json.RawMessage
-	if json.Unmarshal(payload["usage"], &value) != nil {
+	if raw := payload["usage"]; len(raw) == 0 || json.Unmarshal(raw, &value) != nil {
 		return
 	}
 	_ = json.Unmarshal(value["prompt_tokens"], &usage.InputTokens)
@@ -514,6 +518,23 @@ func decodeUsage(payload map[string]json.RawMessage, usage *Usage) {
 	_ = json.Unmarshal(value["output_tokens"], &usage.OutputTokens)
 	_ = json.Unmarshal(value["total_tokens"], &usage.TotalTokens)
 	_ = json.Unmarshal(value["reasoning_tokens"], &usage.ReasoningTokens)
+	if details, ok := rawObject(value["prompt_tokens_details"]); ok {
+		_ = json.Unmarshal(details["cached_tokens"], &usage.CachedReadTokens)
+		_ = json.Unmarshal(details["cache_read_input_tokens"], &usage.CachedReadTokens)
+		_ = json.Unmarshal(details["cache_write_tokens"], &usage.CacheWriteTokens)
+	}
+	if details, ok := rawObject(value["input_tokens_details"]); ok {
+		_ = json.Unmarshal(details["cached_tokens"], &usage.CachedReadTokens)
+		_ = json.Unmarshal(details["cache_read_input_tokens"], &usage.CachedReadTokens)
+		_ = json.Unmarshal(details["cache_write_tokens"], &usage.CacheWriteTokens)
+	}
+	_ = json.Unmarshal(value["cached_tokens"], &usage.CachedReadTokens)
+	_ = json.Unmarshal(value["cache_read_input_tokens"], &usage.CachedReadTokens)
+	_ = json.Unmarshal(value["cache_creation_input_tokens"], &usage.CacheWriteTokens)
+	_ = json.Unmarshal(value["cache_write_tokens"], &usage.CacheWriteTokens)
+	if _, hasCacheRead := value["cache_read_input_tokens"]; hasCacheRead {
+		usage.InputTokensNetOfCache = true
+	}
 	if details, ok := rawObject(value["completion_tokens_details"]); ok {
 		_ = json.Unmarshal(details["reasoning_tokens"], &usage.ReasoningTokens)
 	}
@@ -527,7 +548,28 @@ func decodeUsage(payload map[string]json.RawMessage, usage *Usage) {
 	}
 	if usage.TotalTokens == 0 {
 		usage.TotalTokens = usage.InputTokens + usage.OutputTokens
+		if usage.InputTokensNetOfCache {
+			usage.TotalTokens += usage.CachedReadTokens + usage.CacheWriteTokens
+		}
 	}
+}
+
+// usagePayload unwraps lifecycle envelopes used by Responses and Anthropic
+// streaming. It intentionally only follows documented response/message keys.
+func usagePayload(payload map[string]json.RawMessage) map[string]json.RawMessage {
+	if len(payload["usage"]) > 0 {
+		return payload
+	}
+	for _, key := range []string{"response", "message"} {
+		if nested, ok := rawObject(payload[key]); ok && len(nested["usage"]) > 0 {
+			return nested
+		}
+	}
+	return payload
+}
+
+func hasUsage(payload map[string]json.RawMessage) bool {
+	return len(usagePayload(payload)["usage"]) > 0
 }
 
 func rawObject(value json.RawMessage) (map[string]json.RawMessage, bool) {
@@ -557,7 +599,7 @@ func decodeSSEFor(format Format, body []byte, payloadDecoder responsePayloadDeco
 		if json.Unmarshal([]byte(data), &payload) != nil {
 			continue
 		}
-		if len(payload["usage"]) > 0 {
+		if hasUsage(payload) {
 			var usage Usage
 			decodeUsage(payload, &usage)
 			events = append(events, Event{Type: EventUsage, Usage: &usage})
@@ -615,7 +657,21 @@ func encodeResponseFor(format Format, events EventStream, w http.ResponseWriter,
 	return json.NewEncoder(w).Encode(responseEncoder(response))
 }
 func usageMap(usage Usage) map[string]any {
-	return map[string]any{"prompt_tokens": usage.InputTokens, "completion_tokens": usage.OutputTokens, "total_tokens": usage.TotalTokens}
+	result := map[string]any{"prompt_tokens": usage.InputTokens, "completion_tokens": usage.OutputTokens, "total_tokens": usage.TotalTokens}
+	prompt := map[string]any{}
+	if usage.CachedReadTokens != 0 {
+		prompt["cached_tokens"] = usage.CachedReadTokens
+	}
+	if usage.CacheWriteTokens != 0 {
+		prompt["cache_write_tokens"] = usage.CacheWriteTokens
+	}
+	if len(prompt) > 0 {
+		result["prompt_tokens_details"] = prompt
+	}
+	if usage.ReasoningTokens != 0 {
+		result["completion_tokens_details"] = map[string]any{"reasoning_tokens": usage.ReasoningTokens}
+	}
+	return result
 }
 func encodeStreamFor(events EventStream, w http.ResponseWriter, streamEncoder func(Event) any) error {
 	w.Header().Set("Content-Type", "text/event-stream")

@@ -694,20 +694,10 @@ func (p *Proxy) completeTranslated(ctx context.Context, writer http.ResponseWrit
 	stats := usage.Stats{}
 	for _, event := range events.Events {
 		if event.Usage != nil {
-			stats.InputTokens = event.Usage.InputTokens
-			stats.OutputTokens = event.Usage.OutputTokens
-			stats.TotalTokens = event.Usage.TotalTokens
-			stats.CachedReadTokens = event.Usage.CachedReadTokens
-			stats.CacheWriteTokens = event.Usage.CacheWriteTokens
-			stats.ReasoningTokens = event.Usage.ReasoningTokens
+			mergeWireUsage(&stats, *event.Usage)
 		}
 		if event.Response != nil {
-			stats.InputTokens = event.Response.Usage.InputTokens
-			stats.OutputTokens = event.Response.Usage.OutputTokens
-			stats.TotalTokens = event.Response.Usage.TotalTokens
-			stats.CachedReadTokens = event.Response.Usage.CachedReadTokens
-			stats.CacheWriteTokens = event.Response.Usage.CacheWriteTokens
-			stats.ReasoningTokens = event.Response.Usage.ReasoningTokens
+			mergeWireUsage(&stats, event.Response.Usage)
 		}
 	}
 	persistUsage(ctx, p.Repositories, requestID, stats, expectedCost, officialExpectedCost, price, officialPrice)
@@ -715,6 +705,33 @@ func (p *Proxy) completeTranslated(ctx context.Context, writer http.ResponseWrit
 		_ = p.Repositories.ProxyRequests.Complete(ctx, requestID, "succeeded", "", "")
 	}
 	return nil
+}
+
+// mergeWireUsage keeps sparse lifecycle events from erasing a previously
+// observed snapshot. Provider usage values are cumulative snapshots, so a
+// later non-zero value replaces an earlier one rather than being added.
+func mergeWireUsage(dst *usage.Stats, src wire.Usage) {
+	if src.InputTokens != 0 {
+		dst.InputTokens = src.InputTokens
+	}
+	if src.OutputTokens != 0 {
+		dst.OutputTokens = src.OutputTokens
+	}
+	if src.TotalTokens != 0 {
+		dst.TotalTokens = src.TotalTokens
+	}
+	if src.CachedReadTokens != 0 {
+		dst.CachedReadTokens = src.CachedReadTokens
+	}
+	if src.CacheWriteTokens != 0 {
+		dst.CacheWriteTokens = src.CacheWriteTokens
+	}
+	if src.ReasoningTokens != 0 {
+		dst.ReasoningTokens = src.ReasoningTokens
+	}
+	if src.InputTokensNetOfCache {
+		dst.InputTokensNetOfCache = true
+	}
 }
 
 func (p *Proxy) complete(ctx context.Context, writer http.ResponseWriter, requestID string, response *http.Response, expectedCost, officialExpectedCost int64, price, officialPrice matcher.Price) error {

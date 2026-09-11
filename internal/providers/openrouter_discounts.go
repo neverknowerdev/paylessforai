@@ -98,7 +98,7 @@ func (c *HTTPClient) openRouterModelDiscount(ctx context.Context, model Model) (
 	if err != nil {
 		return model, false
 	}
-	c.addHeaders(request)
+	c.addHeaders(request, "")
 	response, err := c.Client.Do(request)
 	if err != nil {
 		return model, false

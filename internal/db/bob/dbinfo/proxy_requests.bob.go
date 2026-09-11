@@ -177,8 +177,60 @@ var ProxyRequests = Table[
 			Generated: false,
 			AutoIncr:  false,
 		},
+		SessionID: column{
+			Name:      "session_id",
+			DBType:    "TEXT",
+			Default:   "NULL",
+			Comment:   "",
+			Nullable:  true,
+			Generated: false,
+			AutoIncr:  false,
+		},
 	},
 	Indexes: proxyRequestIndexes{
+		ProxyRequestsSession: index{
+			Type: "c",
+			Name: "proxy_requests_session",
+			Columns: []indexColumn{
+				{
+					Name:         "client_key_id",
+					Desc:         null.FromCond(false, true),
+					IsExpression: false,
+				},
+				{
+					Name:         "session_id",
+					Desc:         null.FromCond(false, true),
+					IsExpression: false,
+				},
+			},
+			Unique:  false,
+			Comment: "",
+			Partial: false,
+		},
+		IdxProxyRequestsCatalogUsage: index{
+			Type: "c",
+			Name: "idx_proxy_requests_catalog_usage",
+			Columns: []indexColumn{
+				{
+					Name:         "received_at",
+					Desc:         null.FromCond(false, true),
+					IsExpression: false,
+				},
+				{
+					Name:         "selected_provider",
+					Desc:         null.FromCond(false, true),
+					IsExpression: false,
+				},
+				{
+					Name:         "selected_upstream_model",
+					Desc:         null.FromCond(false, true),
+					IsExpression: false,
+				},
+			},
+			Unique:  false,
+			Comment: "",
+			Partial: false,
+		},
 		SqliteAutoindexProxyRequests1: index{
 			Type: "pk",
 			Name: "sqlite_autoindex_proxy_requests_1",
@@ -222,21 +274,24 @@ type proxyRequestColumns struct {
 	ResolvedGroupRevision column
 	ResolvedPlanJSON      column
 	SelectedLogicalModel  column
+	SessionID             column
 }
 
 func (c proxyRequestColumns) AsSlice() []column {
 	return []column{
-		c.ID, c.ClientKeyID, c.Protocol, c.LogicalModel, c.State, c.ReceivedAt, c.CompletedAt, c.SelectedProvider, c.SelectedUpstreamModel, c.AttemptCount, c.DurationMS, c.ErrorCode, c.ErrorMessage, c.StatsDisposition, c.ResolvedGroupID, c.ResolvedGroupRevision, c.ResolvedPlanJSON, c.SelectedLogicalModel,
+		c.ID, c.ClientKeyID, c.Protocol, c.LogicalModel, c.State, c.ReceivedAt, c.CompletedAt, c.SelectedProvider, c.SelectedUpstreamModel, c.AttemptCount, c.DurationMS, c.ErrorCode, c.ErrorMessage, c.StatsDisposition, c.ResolvedGroupID, c.ResolvedGroupRevision, c.ResolvedPlanJSON, c.SelectedLogicalModel, c.SessionID,
 	}
 }
 
 type proxyRequestIndexes struct {
+	ProxyRequestsSession          index
+	IdxProxyRequestsCatalogUsage  index
 	SqliteAutoindexProxyRequests1 index
 }
 
 func (i proxyRequestIndexes) AsSlice() []index {
 	return []index{
-		i.SqliteAutoindexProxyRequests1,
+		i.ProxyRequestsSession, i.IdxProxyRequestsCatalogUsage, i.SqliteAutoindexProxyRequests1,
 	}
 }
 

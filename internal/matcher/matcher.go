@@ -6,6 +6,8 @@ import (
 	"sort"
 	"strings"
 	"time"
+
+	"github.com/neverknowerdev/paylessforai/internal/wire"
 )
 
 // Protocol identifies the wire protocol required by a request.
@@ -89,8 +91,12 @@ type Route struct {
 	SuccessRateBPS         int64
 	LatencyMillisP50       int64
 	CredentialID           string
+	Account                string
 	ExecutionKey           string
 	BillingClass           BillingClass
+	// Format is the learned upstream format and is independent from the
+	// caller protocol used by MatchRequest.
+	Format wire.Format
 }
 
 // MatchRequest contains only facts needed by the matcher.
@@ -99,7 +105,6 @@ type MatchRequest struct {
 	LogicalModel                 string
 	LogicalModels                []string
 	RequiredParameters           []string
-	RequireTools                 bool
 	RequireStructured            bool
 	InputTokens                  int64
 	ExpectedOutput               int64
@@ -192,8 +197,8 @@ func (Engine) Match(input MatchInput) MatchResult {
 
 	sort.SliceStable(result.Ranked, func(i, j int) bool {
 		a, b := result.Ranked[i], result.Ranked[j]
-		if a.Route.Free != b.Route.Free {
-			return a.Route.Free
+		if aTier, bTier := billingTier(a.Route), billingTier(b.Route); aTier != bTier {
+			return aTier < bTier
 		}
 		if a.ExpectedCost != b.ExpectedCost {
 			return a.ExpectedCost < b.ExpectedCost
@@ -215,6 +220,20 @@ func (Engine) Match(input MatchInput) MatchResult {
 		result.Error = &MatchError{Code: "no_eligible_route", Message: "no healthy compatible route is available"}
 	}
 	return result
+}
+
+// billingTier keeps the cost comparison inside a billing class. A
+// subscription route is intentionally preferred to every metered API route,
+// even when its catalog price is higher: the subscription has already been
+// paid for and should be consumed before metered capacity.
+func billingTier(route Route) int {
+	if route.Free || route.BillingClass == BillingFree {
+		return 1
+	}
+	if route.BillingClass == BillingSubscription {
+		return 2
+	}
+	return 3
 }
 
 func rejectRoute(request MatchRequest, route Route, now time.Time, allowed, excluded map[string]struct{}) (RouteRejection, bool) {
@@ -255,13 +274,16 @@ func rejectRoute(request MatchRequest, route Route, now time.Time, allowed, excl
 			return reject("wrong_billing_class", "route billing class is outside the stage policy")
 		}
 	}
-	if request.RequireTools && !route.Capabilities.Tools {
-		return reject("missing_capability", "route does not support tools")
-	}
 	if request.RequireStructured && !route.Capabilities.StructuredOutput {
 		return reject("missing_capability", "route does not support structured output")
 	}
 	for _, parameter := range request.RequiredParameters {
+		// Tool invocation is provider-normalized at execution time. Catalog
+		// metadata is not authoritative enough to exclude a route: providers
+		// that support tools frequently omit it from their model discovery data.
+		if strings.EqualFold(strings.TrimSpace(parameter), "tools") {
+			continue
+		}
 		if !route.Capabilities.Parameters[parameter] {
 			return reject("missing_capability", "route does not support parameter "+parameter)
 		}
@@ -295,7 +317,12 @@ func rejectRoute(request MatchRequest, route Route, now time.Time, allowed, excl
 		return reject("stale_price", "route price snapshot is stale")
 	}
 	if !route.PriceAvailable {
-		return reject("missing_price", "route does not expose usable pricing")
+		// A subscription has no marginal token price to compare. It remains a
+		// valid fallback when the request does not impose a price constraint;
+		// otherwise we cannot safely prove that it satisfies that constraint.
+		if route.BillingClass != BillingSubscription || requestNeedsPrice(request) {
+			return reject("missing_price", "route does not expose usable pricing")
+		}
 	}
 	if route.Price.InputPicoUSDPerToken < 0 || route.Price.OutputPicoUSDPerToken < 0 || route.Price.FixedPicoUSD < 0 {
 		return reject("missing_price", "route has invalid negative pricing")
@@ -321,6 +348,13 @@ func rejectRoute(request MatchRequest, route Route, now time.Time, allowed, excl
 		return reject("over_output_price_limit", "route output price exceeds the stage limit")
 	}
 	return RouteRejection{}, false
+}
+
+func requestNeedsPrice(request MatchRequest) bool {
+	return request.MaximumCostPicoUSD != nil ||
+		request.MaximumInputPicoUSDPerToken != nil ||
+		request.MaximumOutputPicoUSDPerToken != nil ||
+		request.MaximumOfficialPricePercent != nil
 }
 
 const maxInt64 = int64(^uint64(0) >> 1)

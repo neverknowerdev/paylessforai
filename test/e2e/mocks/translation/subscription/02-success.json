@@ -1,0 +1,11 @@
+{
+  "status": 200,
+  "body": {
+    "id": "subscription-success",
+    "type": "message",
+    "role": "assistant",
+    "content": [{"type": "text", "text": "subscription provider success"}],
+    "stop_reason": "end_turn",
+    "usage": {"input_tokens": 3, "output_tokens": 2}
+  }
+}

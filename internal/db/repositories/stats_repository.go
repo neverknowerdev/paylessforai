@@ -5,9 +5,12 @@ import (
 	"fmt"
 	"sort"
 	"strings"
+	"time"
 
 	bobmodels "github.com/neverknowerdev/paylessforai/internal/db/bob/models"
 	"github.com/neverknowerdev/paylessforai/internal/db/models"
+	"github.com/stephenafamo/bob/dialect/sqlite"
+	"github.com/stephenafamo/bob/dialect/sqlite/sm"
 )
 
 // StatsRepository reads the persisted request, usage, and attempt models with
@@ -27,6 +30,30 @@ type statsData struct {
 	usage    map[string]*bobmodels.RequestUsage
 	attempts map[string][]*bobmodels.ProxyAttempt
 	groups   map[string]*bobmodels.RoutingGroup
+}
+
+// RouteUsageSince counts requests by the provider and upstream model selected
+// for the request. A request is counted once, even when routing retried it.
+// The selected route is the final route recorded by the proxy request.
+func (r *StatsRepository) RouteUsageSince(ctx context.Context, since time.Time) (map[string]int64, error) {
+	if r == nil || r.exec == nil {
+		return nil, fmt.Errorf("database unavailable")
+	}
+	rows, err := bobmodels.ProxyRequests.Query(
+		sm.Where(bobmodels.ProxyRequests.Columns.ReceivedAt.GTE(sqlite.Arg(since.UTC().Format(time.RFC3339Nano)))),
+	).All(ctx, r.exec)
+	if err != nil {
+		return nil, err
+	}
+	result := make(map[string]int64)
+	for _, row := range rows {
+		if !row.SelectedProvider.Valid || row.SelectedProvider.V == "" || !row.SelectedUpstreamModel.Valid || row.SelectedUpstreamModel.V == "" {
+			continue
+		}
+		key := row.SelectedProvider.V + "\x00" + row.SelectedUpstreamModel.V
+		result[key]++
+	}
+	return result, nil
 }
 
 func (r *StatsRepository) load(ctx context.Context) (statsData, error) {
@@ -483,9 +510,10 @@ func (r *StatsRepository) ProviderStats(ctx context.Context) ([]ProviderStats, e
 }
 
 func requestStatFromBob(request *bobmodels.ProxyRequest, usage *bobmodels.RequestUsage) RequestStat {
-	item := RequestStat{ID: request.ID, Protocol: request.Protocol, Model: request.LogicalModel, State: request.State, ReceivedAt: request.ReceivedAt, Attempts: request.AttemptCount}
+	item := RequestStat{ID: request.ID, SessionID: stringPointer(request.SessionID), Protocol: request.Protocol, Model: request.LogicalModel, State: request.State, ReceivedAt: request.ReceivedAt, Attempts: request.AttemptCount}
 	item.CompletedAt = stringPointer(request.CompletedAt)
 	item.ErrorCode = stringPointer(request.ErrorCode)
+	item.ErrorMessage = stringPointer(request.ErrorMessage)
 	item.DurationMS = int64Pointer(request.DurationMS)
 	item.Provider = stringValue(request.SelectedProvider)
 	item.UpstreamModel = stringValue(request.SelectedUpstreamModel)
@@ -502,5 +530,5 @@ func requestStatFromBob(request *bobmodels.ProxyRequest, usage *bobmodels.Reques
 }
 
 func attemptStatFromBob(attempt *bobmodels.ProxyAttempt) AttemptStat {
-	return AttemptStat{Number: attempt.AttemptNumber, Provider: stringValue(attempt.Provider), UpstreamModel: stringValue(attempt.UpstreamModel), State: attempt.State, StartedAt: attempt.StartedAt, CompletedAt: stringValue(attempt.CompletedAt), DurationMS: int64Pointer(attempt.DurationMS), ErrorClass: stringValue(attempt.ErrorClass), ErrorMessage: stringValue(attempt.ErrorMessage), RawError: stringValue(attempt.ErrorRaw)}
+	return AttemptStat{Number: attempt.AttemptNumber, Provider: stringValue(attempt.Provider), UpstreamModel: stringValue(attempt.UpstreamModel), State: attempt.State, StartedAt: attempt.StartedAt, CompletedAt: stringValue(attempt.CompletedAt), DurationMS: int64Pointer(attempt.DurationMS), HTTPStatus: int64Pointer(attempt.HTTPStatus), ErrorClass: stringValue(attempt.ErrorClass), ErrorMessage: stringValue(attempt.ErrorMessage), RawError: stringValue(attempt.ErrorRaw), ClientFormat: stringValue(attempt.ClientFormat), ProviderFormat: stringValue(attempt.ProviderFormat)}
 }

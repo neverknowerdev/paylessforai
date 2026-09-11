@@ -2,6 +2,7 @@ package models
 
 type RequestStat struct {
 	ID                string        `json:"id"`
+	SessionID         *string       `json:"session_id,omitempty"`
 	Protocol          string        `json:"protocol"`
 	Model             string        `json:"model"`
 	State             string        `json:"state"`
@@ -9,6 +10,7 @@ type RequestStat struct {
 	CompletedAt       *string       `json:"completed_at,omitempty"`
 	DurationMS        *int64        `json:"duration_ms,omitempty"`
 	ErrorCode         *string       `json:"error_code,omitempty"`
+	ErrorMessage      *string       `json:"error_message,omitempty"`
 	InputTokens       int64         `json:"input_tokens"`
 	OutputTokens      int64         `json:"output_tokens"`
 	TotalTokens       int64         `json:"total_tokens"`

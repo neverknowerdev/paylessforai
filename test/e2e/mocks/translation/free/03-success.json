@@ -1,0 +1,10 @@
+{
+  "status": 200,
+  "body": {
+    "id": "free-success",
+    "object": "response",
+    "status": "completed",
+    "output": [{"type": "message", "role": "assistant", "content": [{"type": "output_text", "text": "free provider success"}]}],
+    "usage": {"input_tokens": 3, "output_tokens": 2, "total_tokens": 5}
+  }
+}

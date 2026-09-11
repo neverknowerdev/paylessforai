@@ -32,7 +32,9 @@ import (
 	"github.com/neverknowerdev/paylessforai/internal/proxy"
 	"github.com/neverknowerdev/paylessforai/internal/remoteaccess"
 	"github.com/neverknowerdev/paylessforai/internal/secrets"
+	"github.com/neverknowerdev/paylessforai/internal/session"
 	"github.com/neverknowerdev/paylessforai/internal/updater"
+	"github.com/neverknowerdev/paylessforai/internal/wire"
 )
 
 var ErrUpdateRequested = errors.New("restart requested for update")
@@ -124,6 +126,7 @@ func Run(parent context.Context, args []string) error {
 		return catalogManager.Refresh(appContext)
 	}
 	proxyHandler := proxy.New(catalogManager, db)
+	proxyHandler.SessionDetector = session.NewDetector(db.Sessions, secretBox.Derive("session-correlation-v1"))
 	proxyHandler.SetGroups(groupManager)
 	server, err := controlplane.NewWithDeps(
 		networkState.ActiveAddress(),
@@ -269,7 +272,7 @@ func loadProviderClients(registry *providers.Registry, repos *repositories.Repos
 			if credential.AccessMode == "subscription" {
 				billing = matcher.BillingSubscription
 			}
-			clients = append(clients, credentialClient{Client: client, id: credential.ID, billing: billing})
+			clients = append(clients, credentialClient{Client: client, id: credential.ID, account: credential.Label, billing: billing})
 		}
 	}
 	return clients
@@ -278,9 +281,45 @@ func loadProviderClients(registry *providers.Registry, repos *repositories.Repos
 type credentialClient struct {
 	providers.Client
 	id      string
+	account string
 	billing matcher.BillingClass
 }
 
 func (c credentialClient) ExecutionKey() string               { return c.id }
 func (c credentialClient) CredentialID() string               { return c.id }
+func (c credentialClient) AccountLabel() string               { return c.account }
 func (c credentialClient) BillingClass() matcher.BillingClass { return c.billing }
+
+// TranslationEnabled and the forwarding methods preserve optional
+// translation support through the credential/account wrapper. Embedding the
+// base Client interface alone hides methods implemented by the concrete
+// provider client, which would otherwise force all requests through the
+// legacy pass-through path.
+func (c credentialClient) TranslationEnabled() bool {
+	_, ok := c.Client.(providers.TranslationClient)
+	return ok
+}
+
+func (c credentialClient) Endpoint() providers.Endpoint {
+	client, ok := c.Client.(providers.TranslationClient)
+	if !ok {
+		return providers.Endpoint{}
+	}
+	return client.Endpoint()
+}
+
+func (c credentialClient) Prepare(format wire.Format, model string, body []byte, sessionID string) (providers.PreparedRequest, error) {
+	client, ok := c.Client.(providers.TranslationClient)
+	if !ok {
+		return providers.PreparedRequest{}, fmt.Errorf("provider client does not support prepared requests")
+	}
+	return client.Prepare(format, model, body, sessionID)
+}
+
+func (c credentialClient) DoPrepared(ctx context.Context, request providers.PreparedRequest) (*http.Response, error) {
+	client, ok := c.Client.(providers.TranslationClient)
+	if !ok {
+		return nil, fmt.Errorf("provider client does not support prepared requests")
+	}
+	return client.DoPrepared(ctx, request)
+}

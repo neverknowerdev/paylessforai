@@ -41,6 +41,83 @@ func TestMatchPrefersFreeRouteAndAcceptsFreeVariantRequests(t *testing.T) {
 	}
 }
 
+func TestMatchOrdersFreeSubscriptionThenCheapestMetered(t *testing.T) {
+	free := testRoute("free", "opencode", 100, 100)
+	free.Free = true
+	subscription := testRoute("subscription", "opencode-go", 100, 100)
+	subscription.BillingClass = BillingSubscription
+	metered := testRoute("metered", "openrouter", 1, 1)
+	metered.BillingClass = BillingMetered
+
+	result := New().Match(MatchInput{Request: MatchRequest{Protocol: ProtocolChatCompletions, LogicalModel: "model-a", InputTokens: 1, ExpectedOutput: 1}, Routes: []Route{metered, subscription, free}, Now: time.Unix(20, 0)})
+	if len(result.Ranked) != 3 {
+		t.Fatalf("expected all routes to be ranked, got %#v", result)
+	}
+	got := []string{result.Ranked[0].Route.ID, result.Ranked[1].Route.ID, result.Ranked[2].Route.ID}
+	want := []string{"free", "subscription", "metered"}
+	for index := range want {
+		if got[index] != want[index] {
+			t.Fatalf("unexpected billing-tier order: got %v want %v", got, want)
+		}
+	}
+}
+
+func TestMatchAllowsUnpricedSubscriptionUnlessPriceIsConstrained(t *testing.T) {
+	subscription := testRoute("subscription", "opencode-go", 0, 0)
+	subscription.BillingClass = BillingSubscription
+	subscription.PriceAvailable = false
+	metered := testRoute("metered", "openrouter", 1, 1)
+	metered.BillingClass = BillingMetered
+	base := MatchRequest{Protocol: ProtocolChatCompletions, LogicalModel: "model-a", InputTokens: 1, ExpectedOutput: 1}
+
+	result := New().Match(MatchInput{Request: base, Routes: []Route{metered, subscription}, Now: time.Unix(20, 0)})
+	if result.Selected == nil || result.Selected.Route.ID != "subscription" {
+		t.Fatalf("unpriced subscription should be eligible before metered routes, got %#v", result)
+	}
+
+	cost := int64(1)
+	input := int64(1)
+	output := int64(1)
+	percent := 100
+	for _, constrained := range []struct {
+		name  string
+		apply func(*MatchRequest)
+	}{
+		{"maximum total cost", func(request *MatchRequest) { request.MaximumCostPicoUSD = &cost }},
+		{"maximum input price", func(request *MatchRequest) { request.MaximumInputPicoUSDPerToken = &input }},
+		{"maximum output price", func(request *MatchRequest) { request.MaximumOutputPicoUSDPerToken = &output }},
+		{"maximum official price percentage", func(request *MatchRequest) { request.MaximumOfficialPricePercent = &percent }},
+	} {
+		t.Run(constrained.name, func(t *testing.T) {
+			request := base
+			constrained.apply(&request)
+			result := New().Match(MatchInput{Request: request, Routes: []Route{subscription}, Now: time.Unix(20, 0)})
+			if result.Selected != nil || len(result.Rejections) != 1 || result.Rejections[0].Code != "missing_price" {
+				t.Fatalf("price-constrained request must reject unpriced subscription, got %#v", result)
+			}
+		})
+	}
+}
+
+func TestBillingTierUsesOneBasedPriorityValues(t *testing.T) {
+	cases := []struct {
+		name  string
+		route Route
+		want  int
+	}{
+		{name: "free", route: Route{Free: true}, want: 1},
+		{name: "subscription", route: Route{BillingClass: BillingSubscription}, want: 2},
+		{name: "metered", route: Route{BillingClass: BillingMetered}, want: 3},
+	}
+	for _, test := range cases {
+		t.Run(test.name, func(t *testing.T) {
+			if got := billingTier(test.route); got != test.want {
+				t.Fatalf("billingTier() = %d, want %d", got, test.want)
+			}
+		})
+	}
+}
+
 func TestMatchAcceptsProviderQualifiedAndHyphenFreeAliases(t *testing.T) {
 	route := testRoute("route", "openrouter", 1, 1)
 	route.LogicalModel = "muse-spark-1.3-contributor"
@@ -50,11 +127,26 @@ func TestMatchAcceptsProviderQualifiedAndHyphenFreeAliases(t *testing.T) {
 	}
 }
 
+func TestMatchDoesNotGateRoutesOnToolMetadata(t *testing.T) {
+	route := testRoute("opencode-go", "opencode-go", 1, 1)
+	route.Capabilities.Tools = false
+	route.Capabilities.Parameters = map[string]bool{}
+
+	result := New().Match(MatchInput{Request: MatchRequest{
+		Protocol:           ProtocolChatCompletions,
+		LogicalModel:       "model-a",
+		RequiredParameters: []string{"tools"},
+	}, Routes: []Route{route}, Now: time.Unix(20, 0)})
+	if result.Selected == nil || result.Selected.Route.ID != "opencode-go" || len(result.Rejections) != 0 {
+		t.Fatalf("tool metadata must not exclude a route, got %#v", result)
+	}
+}
+
 func TestMatchRejectsIncompatibleRoutesWithReasons(t *testing.T) {
 	route := testRoute("r1", "openrouter", 1, 1)
 	route.Capabilities.Protocols = map[Protocol]bool{ProtocolChatCompletions: true}
 	route.Health = HealthBackoff
-	result := New().Match(MatchInput{Request: MatchRequest{Protocol: ProtocolResponses, LogicalModel: "model-a", RequireTools: true}, Routes: []Route{route}, Now: time.Unix(20, 0)})
+	result := New().Match(MatchInput{Request: MatchRequest{Protocol: ProtocolResponses, LogicalModel: "model-a"}, Routes: []Route{route}, Now: time.Unix(20, 0)})
 	if result.Selected != nil || result.Error == nil || result.Error.Code != "no_eligible_route" {
 		t.Fatalf("expected no route, got %#v", result)
 	}

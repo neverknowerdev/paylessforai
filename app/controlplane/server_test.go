@@ -37,7 +37,7 @@ func (c credentialTestClient) Discover(context.Context) ([]providers.Model, erro
 	price := matcher.Price{InputPicoUSDPerToken: 1_000_000, OutputPicoUSDPerToken: 2_000_000}
 	return []providers.Model{{ID: "model-a", Name: "Model A", Pricing: price, OfficialPricing: price, PriceAvailable: true, OfficialPriceAvailable: true}}, nil
 }
-func (c credentialTestClient) Do(context.Context, matcher.Protocol, string, []byte) (*http.Response, error) {
+func (c credentialTestClient) Do(context.Context, matcher.Protocol, string, []byte, string) (*http.Response, error) {
 	return &http.Response{StatusCode: http.StatusOK, Body: io.NopCloser(strings.NewReader(`{"choices":[]}`)), Header: make(http.Header)}, nil
 }
 
@@ -183,7 +183,10 @@ func TestRequestStatsAPI(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer db.Close()
-	if err := db.ProxyRequests.Create(context.Background(), "request-1", "", "chat_completions", "model-a"); err != nil {
+	if err := db.ProxyRequests.Create(context.Background(), "request-1", "", "chat_completions", "model-a", "session-123"); err != nil {
+		t.Fatal(err)
+	}
+	if err := db.ProxyRequests.Create(context.Background(), "legacy-request", "", "chat_completions", "model-a"); err != nil {
 		t.Fatal(err)
 	}
 	group, err := db.Groups.Save(context.Background(), groups.Definition{ID: "stats-group", Name: "Stats group", Slug: "stats-group", Enabled: true, Stages: []groups.Stage{{Name: "primary", Sources: []groups.Source{{Kind: groups.SourceModel, ModelID: "model-a"}}}}}, nil)
@@ -205,12 +208,30 @@ func TestRequestStatsAPI(t *testing.T) {
 	}
 	response := httptest.NewRecorder()
 	server.httpServer.Handler.ServeHTTP(response, httptest.NewRequest(http.MethodGet, "/api/requests?limit=10", nil))
-	if response.Code != http.StatusOK || !strings.Contains(response.Body.String(), `"total_tokens":5`) {
+	if response.Code != http.StatusOK || !strings.Contains(response.Body.String(), `"session_id":"session-123"`) || !strings.Contains(response.Body.String(), `"total_tokens":5`) {
 		t.Fatalf("unexpected request stats response: %d %s", response.Code, response.Body.String())
+	}
+	var stats struct {
+		Data []models.RequestStat `json:"data"`
+	}
+	if err := json.Unmarshal(response.Body.Bytes(), &stats); err != nil {
+		t.Fatal(err)
+	}
+	var legacyFound, sessionFound bool
+	for _, item := range stats.Data {
+		switch item.ID {
+		case "request-1":
+			sessionFound = item.SessionID != nil && *item.SessionID == "session-123"
+		case "legacy-request":
+			legacyFound = item.SessionID == nil
+		}
+	}
+	if !sessionFound || !legacyFound {
+		t.Fatalf("request session compatibility: %+v", stats.Data)
 	}
 	summary := httptest.NewRecorder()
 	server.httpServer.Handler.ServeHTTP(summary, httptest.NewRequest(http.MethodGet, "/api/stats/summary", nil))
-	if summary.Code != http.StatusOK || !strings.Contains(summary.Body.String(), `"total_requests":1`) {
+	if summary.Code != http.StatusOK || !strings.Contains(summary.Body.String(), `"total_requests":2`) {
 		t.Fatalf("unexpected stats summary response: %d %s", summary.Code, summary.Body.String())
 	}
 	modelSummary := httptest.NewRecorder()

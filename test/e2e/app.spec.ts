@@ -77,19 +77,34 @@ test('configures providers, creates a client key, and routes an OpenAI request',
   expect(response.ok()).toBeTruthy();
   expect((await response.json()).choices[0].message.content).toBe('mock response');
   const openRouterRequests = await (await request.get('http://127.0.0.1:19475/__mock/requests')).json();
-  const surplusRequests = await (await request.get('http://127.0.0.1:19476/__mock/requests')).json();
   expect(openRouterRequests.data.some((item: { path: string; body: string }) => item.path.endsWith('/chat/completions') && item.body.includes('model-a:free'))).toBeTruthy();
-  expect(surplusRequests.data.some((item: { path: string; body: string }) => item.path.endsWith('/chat/completions') && item.body.includes('model-a'))).toBeTruthy();
+  expect(openRouterRequests.data.some((item: { path: string; body: string }) => item.path.endsWith('/responses') && item.body.includes('model-a:free'))).toBeTruthy();
   await page.locator('#sidebar').getByRole('link', { name: 'Models' }).click();
   await expect(page.locator('[data-view-panel="models"] table')).toContainText('Modalities');
   await expect(page.locator('[data-view-panel="models"] table')).toContainText('free-tier');
-  await expect(page.locator('#models-table-body .modality-icon[aria-label="Text"]')).toHaveCount(2);
-  await expect(page.locator('#models-table-body .modality-icon[aria-label="Image"]')).toHaveCount(1);
+  await expect(page.locator('#models-table-body .modality-icon[aria-label="Text"]')).toHaveCount(4);
+  await expect(page.locator('#models-table-body .modality-icon[aria-label="Image"]')).toHaveCount(2);
   await page.getByRole('link', { name: 'Requests' }).click();
   await page.locator('#refresh-button').click();
-  await expect(page.locator('[data-view-panel="requests"] table')).toContainText('Provider');
-  await expect(page.locator('[data-view-panel="requests"] table')).toContainText('Attempts');
-  await expect(page.locator('[data-view-panel="requests"] table')).toContainText('Surplus Intelligence');
+  const requestsTable = page.locator('[data-view-panel="requests"] table');
+  await expect(requestsTable).not.toContainText('Provider');
+  await expect(requestsTable).toContainText('Session ID');
+  await expect(requestsTable).toContainText('Attempts');
+  await page.locator('#requests-table-body tr').first().click();
+  const sessionValue = page.locator('#request-detail .detail-grid > div').filter({ hasText: 'Session ID' }).locator('strong');
+  await expect(sessionValue).toHaveText(/^[0-9a-f]{32}$/);
+  const sessionID = await sessionValue.textContent();
+  await page.locator('#requests-search').fill(sessionID || '');
+  await expect(page.locator('#requests-table-body tr.data-row')).toHaveCount(1);
+  await page.locator('#requests-search').fill('');
+  const requestRow = page.locator('#requests-table-body tr.data-row').first();
+  await requestRow.focus();
+  await requestRow.press('Enter');
+  await expect(page.locator('#request-detail')).toContainText('Terminal provider');
+  await expect(page.locator('#request-detail')).toContainText('OpenRouter');
+  await expect(page.locator('#request-detail')).toContainText('Routing attempts (2)');
+  await expect(page.locator('#request-detail')).toContainText('HTTP 503');
+  await expect(page.locator('#request-detail')).toContainText('HTTP 200');
   await expect(page.locator('#status')).toContainText('Ready');
 });
 
@@ -482,7 +497,15 @@ test('configures a subscription, records quota blocking, and shows dynamic prici
   await request.post('http://127.0.0.1:19474/__mock/scenario', { data: { models: [{ id: 'subscription-model', name: 'Subscription Model', prompt_price: '0.000001', completion_price: '0.000002' }], status: 429, failure_message: 'monthly usage quota exceeded' } });
   const limited = await request.post('/v1/chat/completions', { headers: { Authorization: `Bearer ${secret}` }, data: { model: 'subscription-model', messages: [{ role: 'user', content: 'again' }] } });
   expect(limited.status()).toBe(429);
-  expect((await limited.json()).error.code).toBe('provider_quota_exhausted');
+  expect(await limited.json()).toMatchObject({
+    error: {
+      type: 'payless_error',
+      code: 'all_provider_attempts_failed',
+      message: 'all provider attempts failed',
+      attempts: 1,
+      errors: [{ provider: 'subscription-mock', account: 'Pro plan', error: 'monthly usage quota exceeded' }],
+    },
+  });
   const credentials = await (await request.get('/api/providers/credentials')).json();
   expect(credentials.data.find((item: { provider: string }) => item.provider === 'subscription-mock')).toMatchObject({ access_mode: 'subscription', subscription_status: 'limited' });
   const summary = await (await request.get('/api/stats/summary')).json();

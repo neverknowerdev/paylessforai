@@ -17,7 +17,7 @@ type fakeClient struct {
 
 func (f fakeClient) Name() string                                        { return f.name }
 func (f fakeClient) Discover(context.Context) ([]providers.Model, error) { return f.models, nil }
-func (f fakeClient) Do(context.Context, matcher.Protocol, string, []byte) (*http.Response, error) {
+func (f fakeClient) Do(context.Context, matcher.Protocol, string, []byte, string) (*http.Response, error) {
 	return nil, nil
 }
 

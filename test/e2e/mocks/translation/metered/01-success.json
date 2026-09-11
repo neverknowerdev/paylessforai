@@ -1,0 +1,9 @@
+{
+  "status": 200,
+  "body": {
+    "id": "metered-success",
+    "object": "chat.completion",
+    "choices": [{"index": 0, "message": {"role": "assistant", "content": "metered provider success"}, "finish_reason": "stop"}],
+    "usage": {"prompt_tokens": 3, "completion_tokens": 2, "total_tokens": 5}
+  }
+}

@@ -7,10 +7,12 @@ import (
 	"io"
 	"math/big"
 	"net/http"
+	"net/url"
 	"strings"
 	"time"
 
 	"github.com/neverknowerdev/paylessforai/internal/matcher"
+	"github.com/neverknowerdev/paylessforai/internal/wire"
 )
 
 // Discover loads a provider catalog and applies any provider-specific pricing
@@ -65,11 +67,11 @@ func (c *HTTPClient) modelPaths() []string {
 }
 
 func (c *HTTPClient) discoverPath(ctx context.Context, path string) ([]Model, error) {
-	request, err := http.NewRequestWithContext(ctx, http.MethodGet, c.BaseURL+path, nil)
+	request, err := http.NewRequestWithContext(ctx, http.MethodGet, c.catalogURL(path), nil)
 	if err != nil {
 		return nil, err
 	}
-	c.addHeaders(request)
+	c.addHeaders(request, "")
 	response, err := c.Client.Do(request)
 	if err != nil {
 		return nil, err
@@ -94,6 +96,7 @@ func (c *HTTPClient) discoverPath(ctx context.Context, path string) ([]Model, er
 			} `json:"architecture"`
 			SupportedFeatures []string `json:"supported_features"`
 			Tags              []string `json:"tags"`
+			Format            string   `json:"format"`
 		} `json:"data"`
 	}
 	if err := json.NewDecoder(io.LimitReader(response.Body, 16<<20)).Decode(&payload); err != nil {
@@ -125,9 +128,44 @@ func (c *HTTPClient) discoverPath(ctx context.Context, path string) ([]Model, er
 		}
 		tags := append(append([]string(nil), item.SupportedFeatures...), item.Tags...)
 		pricing := matcher.Price{InputPicoUSDPerToken: input, OutputPicoUSDPerToken: output, CachedReadPicoUSDPerToken: cachedRead, CacheWritePicoUSDPerToken: cacheWrite, ReasoningPicoUSDPerToken: reasoning, FixedPicoUSD: fixed, ObservedAt: time.Now().UTC()}
-		models = append(models, Model{ID: item.ID, Name: item.Name, Free: free, ContextLength: item.ContextLength, MaxCompletionTokens: item.MaxCompletionTokens, Pricing: pricing, PriceAvailable: inputOK && outputOK, OfficialPricing: pricing, OfficialPriceAvailable: inputOK && outputOK, SupportedParameters: item.SupportedParameters, InputModalities: normalizeTags(inputModalities), OutputModalities: normalizeTags(outputModalities), Tags: normalizeTags(tags)})
+		format := metadataFormat(item.Format)
+		if !format.Valid() {
+			format = wire.FormatUnknown
+		}
+		models = append(models, Model{ID: item.ID, Name: item.Name, Free: free, ContextLength: item.ContextLength, MaxCompletionTokens: item.MaxCompletionTokens, Pricing: pricing, PriceAvailable: inputOK && outputOK, OfficialPricing: pricing, OfficialPriceAvailable: inputOK && outputOK, SupportedParameters: item.SupportedParameters, InputModalities: normalizeTags(inputModalities), OutputModalities: normalizeTags(outputModalities), Tags: normalizeTags(tags), Format: format})
 	}
 	return models, nil
+}
+
+func (c *HTTPClient) catalogURL(path string) string {
+	if c.endpointErr != nil {
+		return c.BaseURL + path
+	}
+	relative, err := url.Parse(path)
+	if err != nil {
+		return c.BaseURL + path
+	}
+	base := c.endpoint.BaseURL
+	basePath := strings.TrimSuffix(base.EscapedPath(), "/")
+	basePath += "/" + strings.TrimPrefix(relative.EscapedPath(), "/")
+	base.Path, base.RawPath = splitEscapedPath(basePath)
+	if relative.RawQuery != "" {
+		base.RawQuery = relative.RawQuery
+	}
+	return base.String()
+}
+
+func metadataFormat(value string) wire.Format {
+	switch strings.ToLower(strings.TrimSpace(value)) {
+	case "chat_completions", "openai_chat_completions":
+		return wire.FormatChatCompletions
+	case "responses", "openai_responses":
+		return wire.FormatResponses
+	case "anthropic_messages", "messages":
+		return wire.FormatAnthropicMessages
+	default:
+		return wire.FormatUnknown
+	}
 }
 
 func modalitiesFromDescriptor(value string) ([]string, []string) {

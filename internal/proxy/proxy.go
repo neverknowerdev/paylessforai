@@ -114,13 +114,13 @@ func (p *Proxy) ServeHTTP(w http.ResponseWriter, r *http.Request, protocol match
 		writeError(w, http.StatusBadRequest, "invalid_body", err.Error())
 		return
 	}
-	request, err := parseRequest(body, protocol)
+	clientFormat := wire.FormatForProtocol(string(protocol))
+	canonical, err := wire.DecodeRequest(clientFormat, body)
 	if err != nil {
 		writeError(w, http.StatusBadRequest, "invalid_request", err.Error())
 		return
 	}
-	clientFormat := wire.FormatForProtocol(string(protocol))
-	canonical, err := wire.DecodeRequest(clientFormat, body)
+	request, err := parseRequest(body, protocol, canonical)
 	if err != nil {
 		writeError(w, http.StatusBadRequest, "invalid_request", err.Error())
 		return
@@ -195,22 +195,20 @@ func (p parsedRequest) MatchRequest(protocol matcher.Protocol) matcher.MatchRequ
 	return matcher.MatchRequest{Protocol: protocol, LogicalModel: p.Model, RequiredParameters: p.RequiredParams, RequireStructured: p.RequireStructured, InputTokens: p.InputTokens, ExpectedOutput: p.ExpectedOutput, MaxContext: p.MaxContext, MaxOutput: p.MaxOutput, RequiredInputModalities: p.RequiredInputModalities, RequiredOutputModalities: p.RequiredOutputModalities}
 }
 
-func parseRequest(body []byte, protocol matcher.Protocol) (parsedRequest, error) {
+func parseRequest(body []byte, protocol matcher.Protocol, canonical *wire.Request) (parsedRequest, error) {
 	var payload map[string]json.RawMessage
 	if err := json.Unmarshal(body, &payload); err != nil {
 		return parsedRequest{}, fmt.Errorf("body must be valid JSON: %w", err)
 	}
+	if canonical == nil {
+		return parsedRequest{}, errors.New("canonical request is required")
+	}
 	request := parsedRequest{Protocol: protocol}
-	if err := json.Unmarshal(payload["model"], &request.Model); err != nil || strings.TrimSpace(request.Model) == "" {
-		return parsedRequest{}, errors.New("model is required")
+	request.Model = canonical.Model
+	request.Stream = canonical.Options.Stream
+	if canonical.Options.MaxOutputTokens != nil {
+		request.ExpectedOutput = *canonical.Options.MaxOutputTokens
 	}
-	if protocol == matcher.ProtocolChatCompletions || protocol == matcher.ProtocolAnthropic {
-		if _, ok := payload["messages"]; !ok {
-			return parsedRequest{}, errors.New("messages is required")
-		}
-	}
-	request.Stream = boolValue(payload["stream"])
-	request.ExpectedOutput = integerValue(payload, "max_tokens", "max_completion_tokens", "max_output_tokens")
 	if request.ExpectedOutput == 0 {
 		request.ExpectedOutput = 256
 	}
@@ -218,7 +216,7 @@ func parseRequest(body []byte, protocol matcher.Protocol) (parsedRequest, error)
 	if request.InputTokens == 0 {
 		request.InputTokens = 1
 	}
-	if _, ok := payload["response_format"]; ok {
+	if canonical.Options.StructuredOutput != nil {
 		request.RequireStructured = true
 		request.RequiredParams = append(request.RequiredParams, "response_format")
 	}
@@ -231,12 +229,7 @@ func parseRequest(body []byte, protocol matcher.Protocol) (parsedRequest, error)
 		_ = json.Unmarshal(raw, &decoded)
 		request.RequiredInputModalities = appendUnique(request.RequiredInputModalities, detectModalities(decoded)...)
 	}
-	if raw, ok := payload["modalities"]; ok {
-		var output []string
-		if json.Unmarshal(raw, &output) == nil {
-			request.RequiredOutputModalities = normalizeModalities(output)
-		}
-	}
+	request.RequiredOutputModalities = normalizeModalities(canonical.Options.Modalities)
 	return request, nil
 }
 
@@ -983,22 +976,6 @@ func bearerToken(value string) string {
 		return parts[1]
 	}
 	return ""
-}
-
-func boolValue(raw json.RawMessage) bool {
-	var value bool
-	_ = json.Unmarshal(raw, &value)
-	return value
-}
-
-func integerValue(values map[string]json.RawMessage, names ...string) int64 {
-	for _, name := range names {
-		var value int64
-		if json.Unmarshal(values[name], &value) == nil && value > 0 {
-			return value
-		}
-	}
-	return 0
 }
 
 func copyHeaders(destination, source http.Header) {

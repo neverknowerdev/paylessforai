@@ -14,23 +14,20 @@ type Codec interface {
 	EncodeResponse(events EventStream, dst http.ResponseWriter) error
 }
 
-type codec struct{ format Format }
-
-func (c codec) Format() Format                              { return c.format }
-func (c codec) DecodeRequest(body []byte) (*Request, error) { return DecodeRequest(c.format, body) }
-func (c codec) EncodeRequest(req *Request) ([]byte, error)  { return EncodeRequest(c.format, req) }
-func (c codec) DecodeResponse(resp *http.Response) (EventStream, error) {
-	return DecodeResponse(c.format, resp)
-}
-func (c codec) EncodeResponse(events EventStream, dst http.ResponseWriter) error {
-	return EncodeResponse(c.format, events, dst)
-}
-
 func CodecFor(format Format) (Codec, error) {
 	if err := format.Validate(); err != nil {
 		return nil, err
 	}
-	return codec{format: format}, nil
+	switch format {
+	case FormatChatCompletions:
+		return chatAdapter{}, nil
+	case FormatResponses:
+		return responsesAdapter{}, nil
+	case FormatAnthropicMessages:
+		return anthropicAdapter{}, nil
+	default:
+		return nil, format.Validate()
+	}
 }
 
 func MustCodec(format Format) Codec {

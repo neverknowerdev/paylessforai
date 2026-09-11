@@ -8,8 +8,11 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"errors"
+	"io"
+	"net/http"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 	"time"
@@ -18,6 +21,33 @@ import (
 )
 
 type memorySettings struct{ values map[string]string }
+
+type roundTripFunc func(*http.Request) (*http.Response, error)
+
+func (f roundTripFunc) RoundTrip(request *http.Request) (*http.Response, error) { return f(request) }
+
+type gatedReader struct {
+	data    []byte
+	offset  int
+	started chan<- struct{}
+	release <-chan struct{}
+}
+
+func (r *gatedReader) Read(buffer []byte) (int, error) {
+	if r.offset == 0 {
+		n := copy(buffer, r.data[:2])
+		r.offset += n
+		close(r.started)
+		return n, nil
+	}
+	<-r.release
+	if r.offset >= len(r.data) {
+		return 0, io.EOF
+	}
+	n := copy(buffer, r.data[r.offset:])
+	r.offset += n
+	return n, nil
+}
 
 func (m *memorySettings) Get(_ context.Context, key string) (string, bool, error) {
 	value, ok := m.values[key]
@@ -72,6 +102,170 @@ func TestJournalSnapshotRefreshesStateWrittenByAnotherProcess(t *testing.T) {
 	state := reader.Snapshot()
 	if state.Phase != PhasePromoted || state.CurrentVersion != "v2" {
 		t.Fatalf("state = %#v", state)
+	}
+}
+
+func TestJournalLogsAreDurableOperationScopedAndChronological(t *testing.T) {
+	root := t.TempDir()
+	journal, err := OpenJournal(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := journal.AppendLog("op-1", PhaseDownloading, "download started"); err != nil {
+		t.Fatal(err)
+	}
+	if err := journal.AppendLog("op-2", PhaseFailed, "other operation"); err != nil {
+		t.Fatal(err)
+	}
+	if err := journal.AppendLog("op-1", PhaseVerified, "artifact verified"); err != nil {
+		t.Fatal(err)
+	}
+	logs, err := journal.Logs("op-1", 10)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(logs) != 2 || logs[0].Message != "download started" || logs[1].Message != "artifact verified" {
+		t.Fatalf("logs = %#v", logs)
+	}
+	reloaded, err := OpenJournal(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	logs, err = reloaded.Logs("op-2", 10)
+	if err != nil || len(logs) != 1 || logs[0].OperationID != "op-2" {
+		t.Fatalf("reloaded logs = %#v, err=%v", logs, err)
+	}
+}
+
+func TestSnapshotRehydratesActiveOperationAfterServiceRestart(t *testing.T) {
+	root := t.TempDir()
+	settings := &memorySettings{values: map[string]string{}}
+	first, err := NewService(root, settings, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	state := State{
+		OperationID:        "op-reload",
+		Phase:              PhaseStabilizing,
+		CurrentVersion:     "v1.0.0",
+		CandidateVersion:   "v1.1.0",
+		CandidateCommit:    "candidate-commit",
+		CandidateChannel:   "releases",
+		DownloadBytes:      1024,
+		DownloadTotalBytes: 2048,
+		PhaseProgress:      60,
+		OverallProgress:    96,
+	}
+	if err := first.journal.Transition(state); err != nil {
+		t.Fatal(err)
+	}
+	state = first.journal.Snapshot()
+	if err := first.journal.AppendLog(state.OperationID, state.Phase, "candidate is ready"); err != nil {
+		t.Fatal(err)
+	}
+
+	second, err := NewService(root, settings, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	snapshot, err := second.Snapshot(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if snapshot.Available != nil {
+		t.Fatalf("available manifest should not be required after restart: %#v", snapshot.Available)
+	}
+	if snapshot.State != state {
+		t.Fatalf("state after restart = %#v, want %#v", snapshot.State, state)
+	}
+	if len(snapshot.Logs) != 1 || snapshot.Logs[0].OperationID != state.OperationID || snapshot.Logs[0].Message != "candidate is ready" {
+		t.Fatalf("logs after restart = %#v", snapshot.Logs)
+	}
+}
+
+func TestDownloadProgressReaderReportsBytes(t *testing.T) {
+	var total int64
+	reader := &downloadProgressReader{reader: bytes.NewReader([]byte("candidate artifact")), onRead: func(count int64) { total += count }}
+	data, err := io.ReadAll(reader)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(data) != "candidate artifact" || total != int64(len(data)) {
+		t.Fatalf("data=%q total=%d", data, total)
+	}
+}
+
+func TestInstallFailureIsPersistedWithLifecycleLog(t *testing.T) {
+	settings := &memorySettings{values: map[string]string{}}
+	service, err := NewService(t.TempDir(), settings, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := service.journal.Transition(State{Phase: PhaseAvailable, CurrentPath: "/active/paylessforai-app", CurrentVersion: "v1.0.0", LastCheckAt: "2026-09-07T10:00:00Z"}); err != nil {
+		t.Fatal(err)
+	}
+	err = service.failInstall(State{OperationID: "op-failure", CandidateVersion: "v9.9.9", CandidateCommit: "test", CandidateChannel: "releases", DownloadTotalBytes: 10}, PhaseDownloading, errors.New("download update: HTTP 502"))
+	if err == nil {
+		t.Fatal("expected failure")
+	}
+	snapshot, err := service.Snapshot(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if snapshot.State.Phase != PhaseFailed || snapshot.State.FailedPhase != PhaseDownloading {
+		t.Fatalf("state = %#v", snapshot.State)
+	}
+	if snapshot.State.DownloadTotalBytes != 10 || snapshot.State.DownloadBytes != 0 {
+		t.Fatalf("download progress = %#v", snapshot.State)
+	}
+	if snapshot.State.CurrentPath != "/active/paylessforai-app" || snapshot.State.CurrentVersion != "v1.0.0" || snapshot.State.LastCheckAt != "2026-09-07T10:00:00Z" {
+		t.Fatalf("active state was not preserved: %#v", snapshot.State)
+	}
+	if len(snapshot.History) != 1 || snapshot.History[0].Outcome != "failed" {
+		t.Fatalf("history = %#v", snapshot.History)
+	}
+	if len(snapshot.Logs) < 1 || snapshot.Logs[0].Phase != PhaseFailed {
+		t.Fatalf("logs = %#v", snapshot.Logs)
+	}
+}
+
+func TestInstallPersistsLiveDownloadProgressBeforeReadingBody(t *testing.T) {
+	data := []byte("mock update artifact")
+	started := make(chan struct{})
+	release := make(chan struct{})
+	settings := &memorySettings{values: map[string]string{}}
+	service, err := NewService(t.TempDir(), settings, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	service.client = &http.Client{Transport: roundTripFunc(func(request *http.Request) (*http.Response, error) {
+		return &http.Response{StatusCode: http.StatusOK, Body: io.NopCloser(&gatedReader{data: data, started: started, release: release}), Header: make(http.Header), Request: request}, nil
+	})}
+	service.available = &Manifest{Schema: 1, Channel: "releases", Version: "v9.9.10", Commit: "progress", Artifacts: []Artifact{{OS: runtime.GOOS, Arch: runtime.GOARCH, URL: "http://mock.invalid/artifact", Size: int64(len(data)), SHA256: "0000000000000000000000000000000000000000000000000000000000000000"}}}
+	result := make(chan error, 1)
+	go func() { result <- service.Install(context.Background(), "v9.9.10") }()
+	select {
+	case <-started:
+	case <-time.After(time.Second):
+		t.Fatal("download body was not read")
+	}
+	snapshot, err := service.Snapshot(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if snapshot.State.Phase != PhaseDownloading || snapshot.State.DownloadBytes != 2 || snapshot.State.DownloadTotalBytes != int64(len(data)) || snapshot.State.OverallProgress <= 10 {
+		t.Fatalf("live progress = %#v", snapshot.State)
+	}
+	close(release)
+	if err := <-result; err == nil {
+		t.Fatal("expected checksum failure")
+	}
+	snapshot, err = service.Snapshot(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if snapshot.State.Phase != PhaseFailed || snapshot.State.DownloadBytes != int64(len(data)) || len(snapshot.Logs) < 2 {
+		t.Fatalf("final state/logs = %#v / %#v", snapshot.State, snapshot.Logs)
 	}
 }
 

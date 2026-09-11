@@ -68,6 +68,16 @@ function dataPayload(frame: string) {
   return data && data !== '[DONE]' ? JSON.parse(data) as Record<string, unknown> : data;
 }
 
+function textDelta(frame: string) {
+  const payload = dataPayload(frame);
+  if (!payload || typeof payload === 'string') return '';
+  const choices = payload.choices as Array<{ delta?: { content?: string } }> | undefined;
+  if (choices?.[0]?.delta?.content) return choices[0].delta.content;
+  if (typeof payload.delta === 'string') return payload.delta;
+  const delta = payload.delta as { text?: string } | undefined;
+  return delta?.text ?? '';
+}
+
 test('streams real SSE incrementally for Chat, Responses, and Anthropic clients', async ({ request }) => {
   const secret = await configureProvider(request);
   const cases = [
@@ -114,7 +124,7 @@ test('streams real SSE incrementally for Chat, Responses, and Anthropic clients'
       if (frame.includes('[DONE]') || frame.includes('message_stop') || frame.includes('response.completed')) break;
     }
     const body = frames.join('\n\n');
-    expect(body).toContain('streaming');
+    expect(frames.map(textDelta).join('')).toBe('streaming works');
     if (testCase.name === 'chat') expect(body).toContain('[DONE]');
     if (testCase.name === 'responses') expect(body).toContain('response.completed');
     if (testCase.name === 'anthropic') expect(body).toContain('message_stop');

@@ -18,31 +18,53 @@ type roundTripFunc func(*http.Request) (*http.Response, error)
 func (f roundTripFunc) RoundTrip(request *http.Request) (*http.Response, error) { return f(request) }
 
 func TestOpenCodeSessionHeadersApplyAtBothSendBoundaries(t *testing.T) {
-	client := NewHTTPClient("opencode-go", "https://provider.invalid/v1", "key")
-	client.Client = &http.Client{Transport: roundTripFunc(func(r *http.Request) (*http.Response, error) {
-		if r.Header.Get("x-opencode-session") != "session-1" {
-			t.Fatalf("missing session header: %#v", r.Header)
+	for _, credential := range []struct{ name, baseURL string }{
+		{"opencode-go", "https://provider.invalid/v1"},
+		{"opencode-zen", "https://provider.invalid/v1"},
+		{"opencode", "https://provider.invalid/v1"},
+		{"opencode go", "https://provider.invalid/v1"},
+		{" OpenCode Zen ", "https://provider.invalid/v1"},
+		{"my subscription", "https://opencode.ai/zen/go/v1"},
+		{"my zen", "https://OPENCODE.AI/zen/v1/responses"},
+	} {
+		t.Run(credential.name, func(t *testing.T) {
+			client := NewHTTPClient(credential.name, credential.baseURL, "key")
+			client.Client = &http.Client{Transport: roundTripFunc(func(r *http.Request) (*http.Response, error) {
+				if r.Header.Get("x-opencode-session") != "session-1" {
+					t.Fatalf("missing session header: %#v", r.Header)
+				}
+				if r.Header.Get("User-Agent") == "" {
+					t.Fatal("missing gateway user-agent")
+				}
+				return &http.Response{StatusCode: http.StatusOK, Header: http.Header{"Content-Type": []string{"application/json"}}, Body: io.NopCloser(strings.NewReader(`{}`)), Request: r}, nil
+			})}
+			for _, format := range []wire.Format{wire.FormatChatCompletions, wire.FormatResponses, wire.FormatAnthropicMessages} {
+				body := []byte(`{"model":"model","messages":[],"input":"hello"}`)
+				response, err := client.Do(context.Background(), map[wire.Format]matcher.Protocol{wire.FormatChatCompletions: matcher.ProtocolChatCompletions, wire.FormatResponses: matcher.ProtocolResponses, wire.FormatAnthropicMessages: matcher.ProtocolAnthropic}[format], "model", body, "session-1")
+				if err != nil {
+					t.Fatal(err)
+				}
+				response.Body.Close()
+				prepared, err := client.Prepare(format, "model", body, "session-1")
+				if err != nil {
+					t.Fatal(err)
+				}
+				response, err = client.DoPrepared(context.Background(), prepared)
+				if err != nil {
+					t.Fatal(err)
+				}
+				response.Body.Close()
+			}
+		})
+	}
+}
+
+func TestOpenCodeHostRecognitionIsExact(t *testing.T) {
+	for _, baseURL := range []string{"https://opencode.ai.example/v1", "https://example.com/opencode.ai", "https://opencode.ai@example.com/v1", "https://example.com/zen/go/v1"} {
+		if isOpenCode("custom", baseURL) {
+			t.Fatalf("incorrectly identified OpenCode: %s", baseURL)
 		}
-		if r.Header.Get("User-Agent") == "" {
-			t.Fatal("missing gateway user-agent")
-		}
-		return &http.Response{StatusCode: http.StatusOK, Header: http.Header{"Content-Type": []string{"application/json"}}, Body: io.NopCloser(strings.NewReader(`{}`)), Request: r}, nil
-	})}
-	response, err := client.Do(context.Background(), matcher.ProtocolChatCompletions, "model", []byte(`{"model":"model","messages":[]}`), "session-1")
-	if err != nil {
-		t.Fatal(err)
 	}
-	response.Body.Close()
-	prepared, err := client.Prepare(wire.FormatResponses, "model", []byte(`{"model":"model","input":"hello"}`), "session-1")
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer prepared.Body.Close()
-	response, err = client.DoPrepared(context.Background(), prepared)
-	if err != nil {
-		t.Fatal(err)
-	}
-	response.Body.Close()
 }
 
 func TestNonOpenCodeDoesNotReceiveOpenCodeSessionHeader(t *testing.T) {

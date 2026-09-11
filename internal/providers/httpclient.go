@@ -33,7 +33,7 @@ type HTTPClient struct {
 func NewHTTPClient(provider, baseURL, apiKey string) *HTTPClient {
 	parsed, err := ParseEndpoint(baseURL)
 	var requestHeaders RequestHeaders = noopRequestHeaders{}
-	if provider == "opencode-go" || provider == "opencode-zen" || provider == "opencode" {
+	if isOpenCode(provider, baseURL) {
 		requestHeaders = openCodeRequestHeaders{}
 	}
 	return &HTTPClient{Provider: provider, BaseURL: strings.TrimRight(baseURL, "/"), APIKey: apiKey, endpoint: parsed, endpointErr: err, requestHeaders: requestHeaders, Client: &http.Client{Transport: &http.Transport{Proxy: http.ProxyFromEnvironment, MaxIdleConns: 32, MaxIdleConnsPerHost: 8, IdleConnTimeout: 90 * time.Second}}}

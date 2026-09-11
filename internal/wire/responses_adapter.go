@@ -177,7 +177,7 @@ func encodeResponses(request *Request) ([]byte, error) {
 	for _, message := range request.Messages {
 		switch message.Role {
 		case RoleSystem, RoleDeveloper, RoleUser, RoleAssistant:
-			content, err := encodeResponsesContent(message.Content)
+			content, err := encodeResponsesContent(message.Role, message.Content)
 			if err != nil {
 				return nil, err
 			}
@@ -312,12 +312,16 @@ func encodeResponsesStructuredOutput(value *StructuredOutput) (any, error) {
 	return result, nil
 }
 
-func encodeResponsesContent(blocks []ContentBlock) ([]any, error) {
+func encodeResponsesContent(role Role, blocks []ContentBlock) ([]any, error) {
+	textType := "input_text"
+	if role == RoleAssistant {
+		textType = "output_text"
+	}
 	result := make([]any, 0, len(blocks))
 	for _, block := range blocks {
 		switch block.Type {
 		case "text":
-			result = append(result, map[string]any{"type": "input_text", "text": block.Text})
+			result = append(result, map[string]any{"type": textType, "text": block.Text})
 		case "image":
 			if url := mediaDataURL(block); url != "" {
 				result = append(result, map[string]any{"type": "input_image", "image_url": url})
@@ -335,7 +339,7 @@ func encodeResponsesContent(blocks []ContentBlock) ([]any, error) {
 		case "reasoning":
 			result = append(result, map[string]any{"type": "reasoning", "summary": []any{map[string]any{"type": "summary_text", "text": block.Text}}})
 		case "tool_result":
-			result = append(result, map[string]any{"type": "input_text", "text": blocksText([]ContentBlock{block})})
+			result = append(result, map[string]any{"type": textType, "text": blocksText([]ContentBlock{block})})
 		default:
 			return nil, newIncompatibility(FormatResponses, block.Type)
 		}

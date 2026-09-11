@@ -153,7 +153,7 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if scenario.Stream || requestStream(body) {
-		s.writeStream(w, r.URL.Path, scenario)
+		s.writeStream(w, r, scenario)
 		return
 	}
 	s.writeInference(w, r.URL.Path, scenario)
@@ -247,7 +247,13 @@ func (s *Server) writeGeneric(w http.ResponseWriter, _ string, value any) {
 	_ = json.NewEncoder(w).Encode(value)
 }
 
-func (s *Server) writeStream(w http.ResponseWriter, path string, scenario Scenario) {
+func (s *Server) writeStream(w http.ResponseWriter, request *http.Request, scenario Scenario) {
+	path := request.URL.Path
+	// Capture the latch before flushing: the client can release it immediately
+	// after receiving the first frame.
+	s.mu.Lock()
+	release := s.streamRelease
+	s.mu.Unlock()
 	w.Header().Set("Content-Type", "text/event-stream")
 	w.Header().Set("Cache-Control", "no-cache")
 	w.WriteHeader(http.StatusOK)
@@ -262,10 +268,11 @@ func (s *Server) writeStream(w http.ResponseWriter, path string, scenario Scenar
 			writeSSE(w, flusher, "", map[string]any{"choices": []any{map[string]any{"index": 0, "delta": map[string]any{"content": chunk}}}})
 		}
 		if index == 0 && scenario.StreamWait {
-			s.mu.Lock()
-			release := s.streamRelease
-			s.mu.Unlock()
-			<-release
+			select {
+			case <-release:
+			case <-request.Context().Done():
+				return
+			}
 		}
 	}
 	if scenario.StreamDisconnect {

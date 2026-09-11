@@ -15,10 +15,10 @@ func (anthropicAdapter) DecodeRequest(body []byte) (*Request, error) {
 }
 func (anthropicAdapter) EncodeRequest(req *Request) ([]byte, error) { return encodeAnthropic(req) }
 func (anthropicAdapter) DecodeResponse(resp *http.Response) (EventStream, error) {
-	return decodeResponseFor(FormatAnthropicMessages, resp, decodeAnthropicResponsePayload, decodeAnthropicStreamDelta)
+	return decodeResponseFor(FormatAnthropicMessages, resp, decodeAnthropicResponsePayload)
 }
 func (anthropicAdapter) EncodeResponse(events EventStream, dst http.ResponseWriter) error {
-	return encodeResponseFor(FormatAnthropicMessages, events, dst, encodeAnthropicResponse, encodeAnthropicStreamEvent)
+	return encodeResponseFor(FormatAnthropicMessages, events, dst, encodeAnthropicResponse)
 }
 
 func decodeAnthropicOptions(payload map[string]json.RawMessage) (RequestOptions, error) {

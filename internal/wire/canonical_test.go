@@ -8,7 +8,6 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
-	"time"
 )
 
 func TestRequestConversionPreservesMultimodalToolsAndOptions(t *testing.T) {
@@ -221,58 +220,3 @@ func TestResponseConversionAndMalformedValidation(t *testing.T) {
 }
 
 func IsMalformed(err error) bool { var target *MalformedResponseError; return errors.As(err, &target) }
-
-func TestStreamResponseDeliversBeforeUpstreamCompletes(t *testing.T) {
-	reader, writer := io.Pipe()
-	release := make(chan struct{})
-	go func() {
-		_, _ = io.WriteString(writer, "data: {\"choices\":[{\"delta\":{\"content\":\"first\"}}]}\n\n")
-		<-release
-		_, _ = io.WriteString(writer, "data: [DONE]\n\n")
-		_ = writer.Close()
-	}()
-	response := &http.Response{StatusCode: http.StatusOK, Header: http.Header{"Content-Type": []string{"text/event-stream"}}, Body: reader}
-	got := make(chan Event, 1)
-	done := make(chan error, 1)
-	go func() {
-		_, err := StreamResponse(FormatChatCompletions, response, func(event Event) error {
-			got <- event
-			return nil
-		})
-		done <- err
-	}()
-	select {
-	case event := <-got:
-		if event.Type != EventTextDelta || event.Text != "first" {
-			t.Fatalf("event = %+v", event)
-		}
-	case <-time.After(time.Second):
-		t.Fatal("first stream event was buffered until upstream completion")
-	}
-	close(release)
-	if err := <-done; err != nil {
-		t.Fatal(err)
-	}
-}
-
-func TestEndStreamUsesProtocolSpecificTerminal(t *testing.T) {
-	for _, format := range []Format{FormatChatCompletions, FormatResponses, FormatAnthropicMessages} {
-		t.Run(string(format), func(t *testing.T) {
-			recorder := httptest.NewRecorder()
-			flusher, err := StartStream(format, recorder)
-			if err != nil {
-				t.Fatal(err)
-			}
-			if err := EndStream(format, recorder, flusher); err != nil {
-				t.Fatal(err)
-			}
-			body := recorder.Body.String()
-			if format == FormatChatCompletions && !strings.Contains(body, "[DONE]") {
-				t.Fatalf("missing Chat terminal: %s", body)
-			}
-			if format != FormatChatCompletions && strings.Contains(body, "[DONE]") {
-				t.Fatalf("non-Chat stream used Chat terminal: %s", body)
-			}
-		})
-	}
-}

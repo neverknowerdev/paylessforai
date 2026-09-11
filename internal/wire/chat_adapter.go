@@ -15,10 +15,10 @@ func (chatAdapter) DecodeRequest(body []byte) (*Request, error) {
 }
 func (chatAdapter) EncodeRequest(req *Request) ([]byte, error) { return encodeChat(req) }
 func (chatAdapter) DecodeResponse(resp *http.Response) (EventStream, error) {
-	return decodeResponseFor(FormatChatCompletions, resp, decodeChatResponsePayload, decodeChatStreamDelta)
+	return decodeResponseFor(FormatChatCompletions, resp, decodeChatResponsePayload)
 }
 func (chatAdapter) EncodeResponse(events EventStream, dst http.ResponseWriter) error {
-	return encodeResponseFor(FormatChatCompletions, events, dst, encodeChatResponse, encodeChatStreamEvent)
+	return encodeResponseFor(FormatChatCompletions, events, dst, encodeChatResponse)
 }
 
 func decodeChatOptions(payload map[string]json.RawMessage) (RequestOptions, error) {

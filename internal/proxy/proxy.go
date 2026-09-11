@@ -1,7 +1,6 @@
 package proxy
 
 import (
-	"bufio"
 	"context"
 	"encoding/json"
 	"errors"
@@ -417,12 +416,15 @@ func (p *Proxy) execute(ctx context.Context, writer http.ResponseWriter, request
 			if request.Stream || strings.Contains(strings.ToLower(response.Header.Get("Content-Type")), "text/event-stream") {
 				streamErr := p.stream(ctx, writer, requestID, response, entry.ExpectedCost, officialExpectedCost, route.Price, officialPrice)
 				if p.Repositories != nil {
-					state, code, message := "succeeded", "", ""
+					state, code := streamOutcome(streamErr)
+					message := ""
 					raw := ""
 					if streamErr != nil {
-						state, code, message, raw = "partial", "stream_error", humanErrorMessage(streamErr), sanitize(streamErr.Error())
+						message, raw = humanErrorMessage(streamErr), sanitize(streamErr.Error())
 					}
-					_ = recordProxyAttemptRoute(ctx, p.Repositories, requestID, totalAttempts, route.ID, route.CredentialID, entry.StageID, strings.Join(entry.StagePath, " / "), route.Provider, route.UpstreamModel, state, code, message, httpStatusPointer(response.StatusCode), raw)
+					finalCtx, cancel := streamFinalizeContext(ctx)
+					_ = recordProxyAttemptRoute(finalCtx, p.Repositories, requestID, totalAttempts, route.ID, route.CredentialID, entry.StageID, strings.Join(entry.StagePath, " / "), route.Provider, route.UpstreamModel, state, code, message, httpStatusPointer(response.StatusCode), raw)
+					cancel()
 				}
 				return streamErr
 			}
@@ -555,89 +557,31 @@ func (p *Proxy) executeTranslatedRoute(ctx context.Context, writer http.Response
 			formatFailure = true
 			continue
 		}
-		if request.Stream && strings.Contains(strings.ToLower(response.Header.Get("Content-Type")), "text/event-stream") {
-			var stats usage.Stats
-			var flusher http.Flusher
-			committed := false
-			streamErrCount, streamErr := wire.StreamResponse(candidate, response, func(event wire.Event) error {
-				if !committed {
-					var startErr error
-					flusher, startErr = wire.StartStream(clientFormat, writer)
-					if startErr != nil {
-						return startErr
-					}
-					committed = true
-				}
-				if event.Usage != nil {
-					mergeWireUsage(&stats, *event.Usage)
-				}
-				if event.Response != nil {
-					mergeWireUsage(&stats, event.Response.Usage)
-				}
-				// Terminal response snapshots carry usage/status; text was already
-				// delivered by preceding deltas and must not be duplicated.
-				if event.Type == wire.EventResponse && clientFormat != wire.FormatResponses {
-					return nil
-				}
-				return wire.EncodeStreamEvent(clientFormat, event, writer, flusher)
-			})
-			if streamErr != nil {
-				if committed || streamErrCount > 0 {
-					finalCtx, cancel := streamFinalizeContext(ctx)
-					defer cancel()
-					persistUsage(finalCtx, p.Repositories, requestID, stats, entry.ExpectedCost, officialExpectedCost, route.Price, officialPrice)
-					if p.Repositories != nil {
-						code := "stream_error"
-						if errors.Is(streamErr, context.Canceled) {
-							code = "client_disconnected"
-						}
-						_ = p.Repositories.ProxyRequests.Complete(finalCtx, requestID, "partial", code, sanitize(streamErr.Error()))
-					}
-					p.recordTranslatedAttempt(ctx, requestID, attempt, route, entry, clientFormat, candidate, "partial", "stream_error", streamErr)
-					return &partialStreamError{err: streamErr}, true, used
-				}
-				lastErr = streamErr
-				p.recordTranslatedAttempt(ctx, requestID, attempt, route, entry, clientFormat, candidate, "failed", "malformed_response", streamErr)
-				if !shouldTryNextFormat(streamErr, !formatKnown) {
+		if request.Stream && wire.IsStreamResponse(response) {
+			result := pumpTranslatedStream(writer, clientFormat, candidate, response)
+			if result.err != nil && !result.committed {
+				lastErr = result.err
+				p.recordTranslatedAttempt(ctx, requestID, attempt, route, entry, clientFormat, candidate, "failed", "malformed_response", result.err)
+				if !shouldTryNextFormat(result.err, !formatKnown) {
 					break
 				}
 				formatFailure = true
 				continue
 			}
-			if committed {
-				if err := wire.EndStream(clientFormat, writer, flusher); err != nil {
-					finalCtx, cancel := streamFinalizeContext(ctx)
-					defer cancel()
-					persistUsage(finalCtx, p.Repositories, requestID, stats, entry.ExpectedCost, officialExpectedCost, route.Price, officialPrice)
-					if p.Repositories != nil {
-						_ = p.Repositories.ProxyRequests.Complete(finalCtx, requestID, "partial", "stream_error", sanitize(err.Error()))
-					}
-					return &partialStreamError{err: err}, true, used
-				}
+			streamErr := p.finalizeStream(ctx, requestID, result.stats, entry.ExpectedCost, officialExpectedCost, route.Price, officialPrice, result.err)
+			if streamErr == nil {
+				p.learnTranslatedFormat(ctx, route, candidate)
 			}
-			if p.Repositories != nil {
-				_ = persistLearnedFormat(ctx, p.Repositories, route, candidate)
-			}
-			if p.Catalog != nil {
-				p.Catalog.LearnFormat(route.ID, candidate)
-			}
-			persistUsage(ctx, p.Repositories, requestID, stats, entry.ExpectedCost, officialExpectedCost, route.Price, officialPrice)
-			if p.Repositories != nil {
-				_ = p.Repositories.ProxyRequests.Complete(ctx, requestID, "succeeded", "", "")
-			}
-			p.recordTranslatedAttempt(ctx, requestID, attempt, route, entry, clientFormat, candidate, "succeeded", "", nil)
-			return nil, true, used
+			p.recordTranslatedStreamAttempt(ctx, requestID, attempt, route, entry, clientFormat, candidate, streamErr)
+			return streamErr, true, used
 		}
 		events, decodeErr := wire.DecodeResponse(candidate, response)
 		if decodeErr != nil {
 			var partial *wire.PartialResponseError
 			if errors.As(decodeErr, &partial) && len(events.Events) > 0 {
-				_ = wire.EncodeResponse(clientFormat, events, writer)
-				if p.Repositories != nil {
-					_ = p.Repositories.ProxyRequests.Complete(ctx, requestID, "partial", "stream_error", sanitize(decodeErr.Error()))
-				}
-				p.recordTranslatedAttempt(ctx, requestID, attempt, route, entry, clientFormat, candidate, "partial", "stream_error", decodeErr)
-				return &partialStreamError{err: decodeErr}, true, used
+				streamErr := p.completeTranslatedStream(ctx, writer, requestID, events, entry.ExpectedCost, officialExpectedCost, route.Price, officialPrice, clientFormat, decodeErr)
+				p.recordTranslatedStreamAttempt(ctx, requestID, attempt, route, entry, clientFormat, candidate, streamErr)
+				return streamErr, true, used
 			}
 			lastErr = decodeErr
 			p.recordTranslatedAttempt(ctx, requestID, attempt, route, entry, clientFormat, candidate, "failed", "malformed_response", decodeErr)
@@ -647,23 +591,11 @@ func (p *Proxy) executeTranslatedRoute(ctx context.Context, writer http.Response
 			formatFailure = true
 			continue
 		}
-		if p.Repositories != nil {
-			if err := persistLearnedFormat(ctx, p.Repositories, route, candidate); err != nil {
-				// A valid upstream response is still useful. Persistence errors
-				// are intentionally observable but do not discard that response.
-				lastErr = err
-			}
-		}
-		if p.Catalog != nil {
-			p.Catalog.LearnFormat(route.ID, candidate)
-		}
+		p.learnTranslatedFormat(ctx, route, candidate)
 		if request.Stream {
-			if err := p.completeTranslatedStream(ctx, writer, requestID, events, entry.ExpectedCost, officialExpectedCost, route.Price, officialPrice, clientFormat); err != nil {
-				p.recordTranslatedAttempt(ctx, requestID, attempt, route, entry, clientFormat, candidate, "partial", "stream_error", err)
-				return &partialStreamError{err: err}, true, used
-			}
-			p.recordTranslatedAttempt(ctx, requestID, attempt, route, entry, clientFormat, candidate, "succeeded", "", nil)
-			return nil, true, used
+			streamErr := p.completeTranslatedStream(ctx, writer, requestID, events, entry.ExpectedCost, officialExpectedCost, route.Price, officialPrice, clientFormat, nil)
+			p.recordTranslatedStreamAttempt(ctx, requestID, attempt, route, entry, clientFormat, candidate, streamErr)
+			return streamErr, true, used
 		}
 		completeErr := p.completeTranslated(ctx, writer, requestID, events, entry.ExpectedCost, officialExpectedCost, route.Price, officialPrice, clientFormat)
 		if completeErr != nil {
@@ -788,40 +720,6 @@ func (p *Proxy) completeTranslated(ctx context.Context, writer http.ResponseWrit
 	return nil
 }
 
-func (p *Proxy) completeTranslatedStream(ctx context.Context, writer http.ResponseWriter, requestID string, events wire.EventStream, expectedCost, officialExpectedCost int64, price, officialPrice matcher.Price, clientFormat wire.Format) error {
-	flusher, err := wire.StartStream(clientFormat, writer)
-	if err != nil {
-		return err
-	}
-	var stats usage.Stats
-	for _, event := range events.Events {
-		if event.Usage != nil {
-			mergeWireUsage(&stats, *event.Usage)
-		}
-		if event.Response != nil {
-			mergeWireUsage(&stats, event.Response.Usage)
-			if event.Response.Text != "" {
-				if err := wire.EncodeStreamEvent(clientFormat, wire.Event{Type: wire.EventTextDelta, Text: event.Response.Text}, writer, flusher); err != nil {
-					return err
-				}
-			}
-		}
-	}
-	if stats.InputTokens != 0 || stats.OutputTokens != 0 || stats.TotalTokens != 0 {
-		if err := wire.EncodeStreamEvent(clientFormat, wire.Event{Type: wire.EventUsage, Usage: &wire.Usage{InputTokens: stats.InputTokens, OutputTokens: stats.OutputTokens, TotalTokens: stats.TotalTokens, CachedReadTokens: stats.CachedReadTokens, CacheWriteTokens: stats.CacheWriteTokens, ReasoningTokens: stats.ReasoningTokens}}, writer, flusher); err != nil {
-			return err
-		}
-	}
-	if err := wire.EndStream(clientFormat, writer, flusher); err != nil {
-		return err
-	}
-	persistUsage(ctx, p.Repositories, requestID, stats, expectedCost, officialExpectedCost, price, officialPrice)
-	if p.Repositories != nil {
-		_ = p.Repositories.ProxyRequests.Complete(ctx, requestID, "succeeded", "", "")
-	}
-	return nil
-}
-
 // mergeWireUsage keeps sparse lifecycle events from erasing a previously
 // observed snapshot. Provider usage values are cumulative snapshots, so a
 // later non-zero value replaces an earlier one rather than being added.
@@ -847,9 +745,11 @@ func mergeWireUsage(dst *usage.Stats, src wire.Usage) {
 	if src.InputTokensNetOfCache {
 		dst.InputTokensNetOfCache = true
 	}
-	if dst.TotalTokens < dst.InputTokens+dst.OutputTokens {
-		dst.TotalTokens = dst.InputTokens + dst.OutputTokens
+	total := dst.InputTokens + dst.OutputTokens
+	if dst.InputTokensNetOfCache {
+		total += dst.CachedReadTokens + dst.CacheWriteTokens
 	}
+	dst.TotalTokens = max(dst.TotalTokens, total)
 }
 
 func (p *Proxy) complete(ctx context.Context, writer http.ResponseWriter, requestID string, response *http.Response, expectedCost, officialExpectedCost int64, price, officialPrice matcher.Price) error {
@@ -866,91 +766,6 @@ func (p *Proxy) complete(ctx context.Context, writer http.ResponseWriter, reques
 		_ = p.Repositories.ProxyRequests.Complete(ctx, requestID, "succeeded", "", "")
 	}
 	return nil
-}
-
-func (p *Proxy) stream(ctx context.Context, writer http.ResponseWriter, requestID string, response *http.Response, expectedCost, officialExpectedCost int64, price, officialPrice matcher.Price) error {
-	defer response.Body.Close()
-	copyHeaders(writer.Header(), response.Header)
-	writer.WriteHeader(response.StatusCode)
-	flusher, _ := writer.(http.Flusher)
-	reader := bufio.NewReaderSize(response.Body, 64<<10)
-	stats := usage.Stats{}
-	terminal := false
-	for {
-		line, err := reader.ReadBytes('\n')
-		if len(line) > 0 {
-			if _, writeErr := writer.Write(line); writeErr != nil {
-				return writeErr
-			}
-			if flusher != nil {
-				flusher.Flush()
-			}
-			if observeSSE(line, &stats) {
-				terminal = true
-			}
-		}
-		if err != nil {
-			if errors.Is(err, io.EOF) {
-				if !terminal {
-					finalCtx, cancel := streamFinalizeContext(ctx)
-					defer cancel()
-					if p.Repositories != nil {
-						_ = p.Repositories.ProxyRequests.Complete(finalCtx, requestID, "partial", "stream_error", "stream ended before terminal event")
-					}
-					return &partialStreamError{err: errors.New("stream ended before terminal event")}
-				}
-				persistUsage(ctx, p.Repositories, requestID, stats, expectedCost, officialExpectedCost, price, officialPrice)
-				if p.Repositories != nil {
-					_ = p.Repositories.ProxyRequests.Complete(ctx, requestID, "succeeded", "", "")
-				}
-				return nil
-			}
-			if p.Repositories != nil {
-				_ = p.Repositories.ProxyRequests.Complete(ctx, requestID, "partial", "stream_error", sanitize(err.Error()))
-			}
-			return &partialStreamError{err: err}
-		}
-	}
-}
-
-func observeSSE(line []byte, stats *usage.Stats) bool {
-	trimmed := strings.TrimSpace(string(line))
-	if !strings.HasPrefix(trimmed, "data:") {
-		return false
-	}
-	data := strings.TrimSpace(strings.TrimPrefix(trimmed, "data:"))
-	if data == "" || data == "[DONE]" {
-		return data == "[DONE]"
-	}
-	var envelope map[string]any
-	if json.Unmarshal([]byte(data), &envelope) != nil {
-		return false
-	}
-	observed := usage.FromEnvelope(envelope)
-	if observed.InputTokens != 0 {
-		stats.InputTokens = observed.InputTokens
-	}
-	if observed.OutputTokens != 0 {
-		stats.OutputTokens = observed.OutputTokens
-	}
-	if observed.TotalTokens != 0 {
-		stats.TotalTokens = observed.TotalTokens
-	}
-	if observed.CachedReadTokens != 0 {
-		stats.CachedReadTokens = observed.CachedReadTokens
-	}
-	if observed.CacheWriteTokens != 0 {
-		stats.CacheWriteTokens = observed.CacheWriteTokens
-	}
-	if observed.ReasoningTokens != 0 {
-		stats.ReasoningTokens = observed.ReasoningTokens
-	}
-	if observed.ActualCostPicoUSD != nil {
-		stats.ActualCostPicoUSD = observed.ActualCostPicoUSD
-	}
-	stats.Raw = observed.Raw
-	typ, _ := envelope["type"].(string)
-	return typ == "message_stop" || typ == "response.completed" || typ == "response.failed" || typ == "response.incomplete"
 }
 
 func persistUsage(ctx context.Context, repos *repositories.Repositories, requestID string, stats usage.Stats, expectedCost, officialExpectedCost int64, price, officialPrice matcher.Price) {
@@ -989,13 +804,6 @@ func persistUsage(ctx context.Context, repos *repositories.Repositories, request
 	}
 	raw, _ := json.Marshal(stats.Raw)
 	_ = repos.RequestUsage.Upsert(ctx, models.RequestUsage{RequestID: requestID, InputTokens: stats.InputTokens, OutputTokens: stats.OutputTokens, TotalTokens: stats.TotalTokens, CachedReadTokens: stats.CachedReadTokens, CacheWriteTokens: stats.CacheWriteTokens, ReasoningTokens: stats.ReasoningTokens, EstimatedCostPico: expectedCost, OfficialCostPico: officialCost, ActualCostPico: actualCost, DiscountPico: discountPico, DiscountBPS: discountBPS, RawUsageJSON: string(raw)})
-}
-
-func streamFinalizeContext(ctx context.Context) (context.Context, context.CancelFunc) {
-	if ctx.Err() == nil {
-		return ctx, func() {}
-	}
-	return context.WithTimeout(context.Background(), 2*time.Second)
 }
 
 func officialPricing(ranked []matcher.RankedRoute) (matcher.Price, int64) {

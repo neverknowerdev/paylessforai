@@ -15,10 +15,10 @@ func (responsesAdapter) DecodeRequest(body []byte) (*Request, error) {
 }
 func (responsesAdapter) EncodeRequest(req *Request) ([]byte, error) { return encodeResponses(req) }
 func (responsesAdapter) DecodeResponse(resp *http.Response) (EventStream, error) {
-	return decodeResponseFor(FormatResponses, resp, decodeResponsesResponsePayload, decodeResponsesStreamDelta)
+	return decodeResponseFor(FormatResponses, resp, decodeResponsesResponsePayload)
 }
 func (responsesAdapter) EncodeResponse(events EventStream, dst http.ResponseWriter) error {
-	return encodeResponseFor(FormatResponses, events, dst, encodeResponsesResponse, encodeResponsesStreamEvent)
+	return encodeResponseFor(FormatResponses, events, dst, encodeResponsesResponse)
 }
 
 func decodeResponsesOptions(payload map[string]json.RawMessage) (RequestOptions, error) {
@@ -395,7 +395,7 @@ func decodeResponsesStreamDelta(payload map[string]json.RawMessage) *Event {
 		arguments := stringValue(payload["delta"])
 		return &Event{Type: EventToolCallDelta, ToolCall: &ToolCall{ID: stringValue(payload["item_id"]), Arguments: json.RawMessage(arguments)}}
 	}
-	if strings.Contains(typ, "reasoning") {
+	if typ == "response.reasoning_text.delta" || typ == "response.reasoning_summary_text.delta" {
 		return &Event{Type: EventReasoningDelta, Reasoning: stringValue(payload["delta"])}
 	}
 	if typ != "" && typ != "response.output_text.delta" {
@@ -439,8 +439,8 @@ func encodeResponsesStreamEvent(event Event) any {
 		return map[string]any{"type": "error", "error": map[string]any{"message": event.Error.Message, "code": event.Error.Code}}
 	}
 	if event.Type == EventUsage {
-		return map[string]any{"type": "response.completed", "response": map[string]any{"status": "completed", "usage": map[string]any{"input_tokens": event.Usage.InputTokens, "output_tokens": event.Usage.OutputTokens, "total_tokens": event.Usage.TotalTokens}}}
-	}
+		return nil
+	} // Included in the final response snapshot.
 	if event.Type == EventComplete {
 		return map[string]any{"type": "response.completed"}
 	}

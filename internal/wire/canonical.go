@@ -1,7 +1,6 @@
 package wire
 
 import (
-	"bufio"
 	"bytes"
 	"encoding/base64"
 	"encoding/json"
@@ -11,154 +10,6 @@ import (
 	"net/http"
 	"strings"
 )
-
-// StreamResponse incrementally decodes an SSE response. The callback is
-// invoked as soon as each semantic event is available; the response body is
-// never buffered in memory. It is intended for proxy pumps where the caller
-// owns downstream encoding and flushing.
-func StreamResponse(format Format, response *http.Response, onEvent func(Event) error) (int, error) {
-	if response == nil || response.Body == nil {
-		return 0, &MalformedResponseError{Format: format, Err: errors.New("empty response")}
-	}
-	defer response.Body.Close()
-	if response.StatusCode < 200 || response.StatusCode >= 300 {
-		return 0, fmt.Errorf("upstream status %d", response.StatusCode)
-	}
-	if !strings.Contains(strings.ToLower(response.Header.Get("Content-Type")), "text/event-stream") {
-		return 0, &MalformedResponseError{Format: format, Err: errors.New("response is not server-sent events")}
-	}
-	if _, err := CodecFor(format); err != nil {
-		return 0, err
-	}
-	count := 0
-	terminal := false
-	eventName := ""
-	dataLines := make([]string, 0, 1)
-	scanner := bufio.NewScanner(response.Body)
-	scanner.Buffer(make([]byte, 64<<10), 1<<20)
-	dispatch := func() error {
-		if len(dataLines) == 0 {
-			eventName = ""
-			return nil
-		}
-		data := strings.TrimSpace(strings.Join(dataLines, "\n"))
-		dataLines = dataLines[:0]
-		if data == "" || data == "[DONE]" {
-			if data == "[DONE]" && format == FormatChatCompletions {
-				terminal = true
-			}
-			eventName = ""
-			return nil
-		}
-		var payload map[string]json.RawMessage
-		if json.Unmarshal([]byte(data), &payload) != nil {
-			eventName = ""
-			return &MalformedResponseError{Format: format, Err: errors.New("invalid SSE JSON data")}
-		}
-		typ := stringValue(payload["type"])
-		if typ == "error" || eventName == "error" || len(payload["error"]) > 0 {
-			message := stringValue(payload["message"])
-			if message == "" {
-				message = stringValue(payload["error"])
-			}
-			if nested, ok := rawObject(payload["error"]); ok && message == "" {
-				message = stringValue(nested["message"])
-			}
-			if err := onEvent(Event{Type: EventError, Error: &ProviderError{Type: typ, Message: message}}); err != nil {
-				return err
-			}
-			count++
-			eventName = ""
-			return fmt.Errorf("provider stream error: %s", message)
-		}
-		if eventName == "response.completed" || eventName == "response.failed" || eventName == "response.incomplete" || typ == "response.completed" || typ == "message_stop" || eventName == "message_stop" {
-			terminal = true
-		}
-		if len(payload["usage"]) > 0 {
-			var usage Usage
-			decodeUsage(payload, &usage)
-			if err := onEvent(Event{Type: EventUsage, Usage: &usage}); err != nil {
-				return err
-			}
-			count++
-		}
-		var event *Event
-		switch format {
-		case FormatChatCompletions:
-			event = decodeChatStreamDelta(payload)
-		case FormatResponses:
-			event = decodeResponsesStreamDelta(payload)
-		case FormatAnthropicMessages:
-			event = decodeAnthropicStreamDelta(payload)
-		}
-		if event == nil {
-			if decoded, decodeErr := decodeStreamResponseEvent(format, payload); decodeErr == nil {
-				event = decoded
-			}
-		}
-		if event == nil {
-			eventName = ""
-			return nil
-		}
-		if err := onEvent(*event); err != nil {
-			return err
-		}
-		count++
-		eventName = ""
-		return nil
-	}
-	for scanner.Scan() {
-		line := strings.TrimSuffix(scanner.Text(), "\r")
-		if line == "" {
-			if err := dispatch(); err != nil {
-				return count, err
-			}
-			continue
-		}
-		if strings.HasPrefix(line, "event:") {
-			eventName = strings.TrimSpace(strings.TrimPrefix(line, "event:"))
-			continue
-		}
-		if strings.HasPrefix(line, "data:") {
-			dataLines = append(dataLines, strings.TrimPrefix(line, "data:"))
-		}
-	}
-	if err := dispatch(); err != nil {
-		return count, err
-	}
-	if err := scanner.Err(); err != nil {
-		if count > 0 {
-			return count, &PartialResponseError{Err: err}
-		}
-		return 0, err
-	}
-	if count == 0 {
-		return 0, &MalformedResponseError{Format: format, Err: errors.New("no valid semantic event")}
-	}
-	if !terminal {
-		return count, &PartialResponseError{Err: errors.New("stream ended before terminal event")}
-	}
-	return count, nil
-}
-
-func decodeStreamResponseEvent(format Format, payload map[string]json.RawMessage) (*Event, error) {
-	var decoded Response
-	var err error
-	switch format {
-	case FormatChatCompletions:
-		decoded, err = decodeChatResponsePayload(payload)
-	case FormatResponses:
-		decoded, err = decodeResponsesResponsePayload(payload)
-	case FormatAnthropicMessages:
-		decoded, err = decodeAnthropicResponsePayload(payload)
-	default:
-		return nil, errors.New("unsupported stream format")
-	}
-	if err != nil {
-		return nil, err
-	}
-	return &Event{Type: EventResponse, Response: &decoded}, nil
-}
 
 type Role string
 
@@ -618,23 +469,23 @@ func DecodeResponse(format Format, response *http.Response) (EventStream, error)
 }
 
 type responsePayloadDecoder func(map[string]json.RawMessage) (Response, error)
-type responseStreamDecoder func(map[string]json.RawMessage) *Event
 
-func decodeResponseFor(format Format, response *http.Response, payloadDecoder responsePayloadDecoder, streamDecoder responseStreamDecoder) (EventStream, error) {
+func decodeResponseFor(format Format, response *http.Response, payloadDecoder responsePayloadDecoder) (EventStream, error) {
 	if response == nil || response.Body == nil {
 		return EventStream{}, &MalformedResponseError{Format: format, Err: errors.New("empty response")}
+	}
+	if IsStreamResponse(response) {
+		events := EventStream{Stream: true}
+		_, err := StreamResponse(format, response, func(event Event) error {
+			events.Events = append(events.Events, event)
+			return nil
+		})
+		return events, err
 	}
 	defer response.Body.Close()
 	body, readErr := io.ReadAll(response.Body)
 	if response.StatusCode < 200 || response.StatusCode >= 300 {
 		return EventStream{}, fmt.Errorf("upstream status %d", response.StatusCode)
-	}
-	if strings.Contains(strings.ToLower(response.Header.Get("Content-Type")), "text/event-stream") {
-		events, err := decodeSSEFor(format, body, payloadDecoder, streamDecoder)
-		if readErr != nil && len(events.Events) > 0 {
-			return events, &PartialResponseError{Err: readErr}
-		}
-		return events, err
 	}
 	if readErr != nil {
 		return EventStream{}, readErr
@@ -731,59 +582,6 @@ func rawObject(value json.RawMessage) (map[string]json.RawMessage, bool) {
 	}
 	return result, true
 }
-func decodeSSEFor(format Format, body []byte, payloadDecoder responsePayloadDecoder, streamDecoder responseStreamDecoder) (EventStream, error) {
-	lines := strings.Split(string(body), "\n")
-	events := make([]Event, 0)
-	valid := false
-	terminal := false
-	for _, line := range lines {
-		line = strings.TrimSpace(line)
-		if !strings.HasPrefix(line, "data:") {
-			continue
-		}
-		data := strings.TrimSpace(strings.TrimPrefix(line, "data:"))
-		if data == "" || data == "[DONE]" {
-			if data == "[DONE]" && format == FormatChatCompletions {
-				terminal = true
-			}
-			continue
-		}
-		var payload map[string]json.RawMessage
-		if json.Unmarshal([]byte(data), &payload) != nil {
-			continue
-		}
-		typ := stringValue(payload["type"])
-		if typ == "response.completed" || typ == "message_stop" {
-			terminal = true
-		}
-		if hasUsage(payload) {
-			var usage Usage
-			decodeUsage(payload, &usage)
-			events = append(events, Event{Type: EventUsage, Usage: &usage})
-		}
-		if delta := streamDecoder(payload); delta != nil {
-			events = append(events, *delta)
-			valid = true
-			continue
-		}
-		if decoded, err := payloadDecoder(payload); err == nil {
-			events = append(events, Event{Type: EventResponse, Response: &decoded})
-			valid = true
-		} else if text := stringValue(payload["text"]); text != "" {
-			events = append(events, Event{Type: EventTextDelta, Text: text})
-			valid = true
-		}
-	}
-	if !valid {
-		return EventStream{}, &MalformedResponseError{Format: format, Err: errors.New("no valid semantic event")}
-	}
-	if !terminal {
-		return EventStream{Events: events, Stream: true}, &PartialResponseError{Err: errors.New("stream ended before terminal event")}
-	}
-	return EventStream{Events: events, Stream: true}, nil
-}
-
-// EncodeResponse emits a response in the requested client format.
 func EncodeResponse(format Format, events EventStream, w http.ResponseWriter) error {
 	codec, err := CodecFor(format)
 	if err != nil {
@@ -792,144 +590,7 @@ func EncodeResponse(format Format, events EventStream, w http.ResponseWriter) er
 	return codec.EncodeResponse(events, w)
 }
 
-// StartStream initializes a downstream SSE response.
-func StartStream(format Format, w http.ResponseWriter) (http.Flusher, error) {
-	if err := format.Validate(); err != nil {
-		return nil, err
-	}
-	w.Header().Set("Content-Type", "text/event-stream")
-	w.Header().Set("Cache-Control", "no-cache")
-	w.WriteHeader(http.StatusOK)
-	flusher, _ := w.(http.Flusher)
-	if format == FormatResponses {
-		if err := writeSSEFrame(w, flusher, "response.created", map[string]any{"type": "response.created", "response": map[string]any{"id": "resp-translation", "object": "response", "status": "in_progress"}}); err != nil {
-			return flusher, err
-		}
-		if err := writeSSEFrame(w, flusher, "response.output_item.added", map[string]any{"type": "response.output_item.added", "item": map[string]any{"id": "item-translation", "type": "message", "role": "assistant"}}); err != nil {
-			return flusher, err
-		}
-		if err := writeSSEFrame(w, flusher, "response.content_part.added", map[string]any{"type": "response.content_part.added", "item_id": "item-translation", "part": map[string]any{"type": "output_text", "text": ""}}); err != nil {
-			return flusher, err
-		}
-	}
-	if format == FormatAnthropicMessages {
-		if err := writeSSEFrame(w, flusher, "message_start", map[string]any{"type": "message_start", "message": map[string]any{"id": "msg-translation", "type": "message", "role": "assistant", "content": []any{}, "model": "translation"}}); err != nil {
-			return flusher, err
-		}
-		if err := writeSSEFrame(w, flusher, "content_block_start", map[string]any{"type": "content_block_start", "index": 0, "content_block": map[string]any{"type": "text", "text": ""}}); err != nil {
-			return flusher, err
-		}
-	}
-	return flusher, nil
-}
-
-// EncodeStreamEvent writes one protocol-specific SSE event and flushes it.
-func EncodeStreamEvent(format Format, event Event, w http.ResponseWriter, flusher http.Flusher) error {
-	var payload any
-	switch format {
-	case FormatChatCompletions:
-		payload = encodeChatStreamEvent(event)
-	case FormatResponses:
-		payload = encodeResponsesStreamEvent(event)
-	case FormatAnthropicMessages:
-		payload = encodeAnthropicStreamEvent(event)
-	default:
-		return format.Validate()
-	}
-	encoded, err := json.Marshal(payload)
-	if err != nil {
-		return err
-	}
-	return writeSSEFrame(w, flusher, streamEventName(format, event), json.RawMessage(encoded))
-}
-
-func writeSSEFrame(w io.Writer, flusher http.Flusher, event string, payload any) error {
-	encoded, err := json.Marshal(payload)
-	if raw, ok := payload.(json.RawMessage); ok {
-		encoded = raw
-	}
-	if err != nil {
-		return err
-	}
-	frame := ""
-	if event != "" {
-		frame += "event: " + event + "\n"
-	}
-	frame += "data: " + string(encoded) + "\n\n"
-	if _, err := io.WriteString(w, frame); err != nil {
-		return err
-	}
-	if flusher != nil {
-		flusher.Flush()
-	}
-	return nil
-}
-
-func streamEventName(format Format, event Event) string {
-	switch format {
-	case FormatResponses:
-		switch event.Type {
-		case EventTextDelta:
-			return "response.output_text.delta"
-		case EventReasoningDelta:
-			return "response.reasoning.delta"
-		case EventToolCallDelta:
-			return "response.function_call_arguments.delta"
-		case EventUsage:
-			return "response.completed"
-		case EventComplete:
-			return "response.completed"
-		case EventResponse:
-			return "response.completed"
-		}
-	case FormatAnthropicMessages:
-		switch event.Type {
-		case EventTextDelta, EventReasoningDelta, EventToolCallDelta:
-			return "content_block_delta"
-		case EventUsage:
-			return "message_delta"
-		case EventComplete:
-			return "message_stop"
-		}
-	}
-	return ""
-}
-
-// EndStream emits the protocol terminal marker. Chat uses the conventional
-// [DONE] sentinel; the other protocols use a typed terminal event.
-func EndStream(format Format, w http.ResponseWriter, flusher http.Flusher) error {
-	if format == FormatChatCompletions {
-		if _, err := io.WriteString(w, "data: [DONE]\n\n"); err != nil {
-			return err
-		}
-		if flusher != nil {
-			flusher.Flush()
-		}
-		return nil
-	}
-	if format == FormatAnthropicMessages {
-		if err := writeSSEFrame(w, flusher, "content_block_stop", map[string]any{"type": "content_block_stop", "index": 0}); err != nil {
-			return err
-		}
-		if err := writeSSEFrame(w, flusher, "message_delta", map[string]any{"type": "message_delta", "delta": map[string]any{"stop_reason": "end_turn"}}); err != nil {
-			return err
-		}
-	}
-	if format == FormatResponses {
-		if err := writeSSEFrame(w, flusher, "response.output_text.done", map[string]any{"type": "response.output_text.done", "item_id": "item-translation", "text": ""}); err != nil {
-			return err
-		}
-		if err := writeSSEFrame(w, flusher, "response.content_part.done", map[string]any{"type": "response.content_part.done", "item_id": "item-translation"}); err != nil {
-			return err
-		}
-		if err := writeSSEFrame(w, flusher, "response.output_item.done", map[string]any{"type": "response.output_item.done", "item": map[string]any{"id": "item-translation", "type": "message", "role": "assistant"}}); err != nil {
-			return err
-		}
-	}
-	return EncodeStreamEvent(format, Event{Type: EventComplete}, w, flusher)
-}
-
-func encodeResponseFor(format Format, events EventStream, w http.ResponseWriter, responseEncoder func(Response) any, streamEncoder func(Event) any) error {
+func encodeResponseFor(format Format, events EventStream, w http.ResponseWriter, responseEncoder func(Response) any) error {
 	if err := format.Validate(); err != nil {
 		return err
 	}
@@ -947,7 +608,7 @@ func encodeResponseFor(format Format, events EventStream, w http.ResponseWriter,
 		response.Text = blocksText(response.Messages[0].Content)
 	}
 	if events.Stream {
-		return encodeStreamFor(events, w, streamEncoder)
+		return encodeStreamFor(format, events, w)
 	}
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusOK)
@@ -969,19 +630,4 @@ func usageMap(usage Usage) map[string]any {
 		result["completion_tokens_details"] = map[string]any{"reasoning_tokens": usage.ReasoningTokens}
 	}
 	return result
-}
-func encodeStreamFor(events EventStream, w http.ResponseWriter, streamEncoder func(Event) any) error {
-	w.Header().Set("Content-Type", "text/event-stream")
-	w.WriteHeader(http.StatusOK)
-	flusher, _ := w.(http.Flusher)
-	for _, event := range events.Events {
-		payload := streamEncoder(event)
-		encoded, _ := json.Marshal(payload)
-		_, _ = io.WriteString(w, "data: "+string(encoded)+"\n\n")
-		if flusher != nil {
-			flusher.Flush()
-		}
-	}
-	_, _ = io.WriteString(w, "data: [DONE]\n\n")
-	return nil
 }

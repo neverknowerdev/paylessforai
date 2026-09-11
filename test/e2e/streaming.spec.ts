@@ -96,6 +96,7 @@ test('streams real SSE incrementally for Chat, Responses, and Anthropic clients'
 
     const response = await fetch(`http://127.0.0.1:19477${testCase.path}`, {
       method: 'POST',
+      signal: AbortSignal.timeout(20_000),
       headers: { Authorization: `Bearer ${secret}`, 'Content-Type': 'application/json' },
       body: JSON.stringify(testCase.body),
     });
@@ -125,12 +126,17 @@ test('streams real SSE incrementally for Chat, Responses, and Anthropic clients'
       const frame = await readUntilFrame(reader, decoder, pending);
       if (frame === null) break;
       frames.push(frame);
-      if (frame.includes('[DONE]') || frame.includes('message_stop') || frame.includes('response.completed')) break;
     }
     const body = frames.join('\n\n');
     expect(frames.map(textDelta).join('')).toBe('streaming works');
     if (testCase.name === 'chat') expect(body).toContain('[DONE]');
-    if (testCase.name === 'responses') expect(body).toContain('response.completed');
+    if (testCase.name === 'responses') {
+      const completed = frames.map(dataPayload).filter((payload) =>
+        payload && typeof payload !== 'string' && payload.type === 'response.completed');
+      expect(completed).toHaveLength(1);
+      expect(completed[0]).toMatchObject({ response: { output_text: 'streaming works', usage: { input_tokens: 7, output_tokens: 3 } } });
+      expect(dataPayload(frames.at(-1)!)).toMatchObject({ type: 'response.completed' });
+    }
     if (testCase.name === 'anthropic') expect(body).toContain('message_stop');
     await reader.cancel();
   }

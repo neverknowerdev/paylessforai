@@ -1,8 +1,9 @@
+import { join } from 'node:path';
 import { execFileSync } from 'node:child_process';
 import { expect, test, type APIRequestContext } from '@playwright/test';
 
 const model = 'translation-matrix-model';
-const databasePath = '/tmp/paylessforai-e2e/paylessforai.db';
+const databasePath = join(process.env.PAYLESSFORAI_E2E_DATA_DIR || '/tmp/paylessforai-e2e', 'paylessforai.db');
 const formats = {
   chat: 'openai_chat_completions',
   free: 'openai_responses',

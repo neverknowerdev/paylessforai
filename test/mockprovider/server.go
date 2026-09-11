@@ -38,6 +38,7 @@ type Scenario struct {
 	FailureMessage         string  `json:"failure_message"`
 	Stream                 bool    `json:"stream"`
 	StreamDisconnect       bool    `json:"stream_disconnect"`
+	StreamWait             bool    `json:"stream_wait"`
 	InputTokens            int64   `json:"input_tokens"`
 	OutputTokens           int64   `json:"output_tokens"`
 	CachedReadTokens       int64   `json:"cached_read_tokens"`
@@ -68,10 +69,11 @@ type Server struct {
 	fixtureDir    string
 	fixtureNames  []string
 	fixtureOffset int
+	streamRelease chan struct{}
 }
 
 func New(scenario Scenario) *Server {
-	return &Server{scenario: normalizeScenario(scenario)}
+	return &Server{scenario: normalizeScenario(scenario), streamRelease: make(chan struct{})}
 }
 
 func NewWithFixtureDir(scenario Scenario, fixtureDir string) *Server {
@@ -151,7 +153,7 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if scenario.Stream || requestStream(body) {
-		s.writeStream(w, scenario)
+		s.writeStream(w, r.URL.Path, scenario)
 		return
 	}
 	s.writeInference(w, r.URL.Path, scenario)
@@ -208,6 +210,12 @@ func (s *Server) handleControl(w http.ResponseWriter, r *http.Request, body []by
 		s.scenario = scenario
 		s.mu.Unlock()
 		s.writeGeneric(w, r.URL.Path, map[string]any{"updated": true})
+	case "/__mock/stream/release":
+		s.mu.Lock()
+		close(s.streamRelease)
+		s.streamRelease = make(chan struct{})
+		s.mu.Unlock()
+		s.writeGeneric(w, r.URL.Path, map[string]any{"released": true})
 	case "/__mock/requests":
 		s.mu.Lock()
 		requests := append([]Request(nil), s.requests...)
@@ -239,19 +247,59 @@ func (s *Server) writeGeneric(w http.ResponseWriter, _ string, value any) {
 	_ = json.NewEncoder(w).Encode(value)
 }
 
-func (s *Server) writeStream(w http.ResponseWriter, scenario Scenario) {
+func (s *Server) writeStream(w http.ResponseWriter, path string, scenario Scenario) {
 	w.Header().Set("Content-Type", "text/event-stream")
+	w.Header().Set("Cache-Control", "no-cache")
 	w.WriteHeader(http.StatusOK)
 	flusher, _ := w.(http.Flusher)
-	_, _ = fmt.Fprintf(w, "data: %s\n\n", `{"choices":[{"delta":{"content":"`+scenario.ResponseText+`"}}]}`)
-	if flusher != nil {
-		flusher.Flush()
+	chunks := splitStreamText(scenario.ResponseText)
+	for index, chunk := range chunks {
+		if strings.HasSuffix(path, "/responses") {
+			writeSSE(w, flusher, "response.output_text.delta", map[string]any{"type": "response.output_text.delta", "delta": chunk})
+		} else if strings.HasSuffix(path, "/messages") {
+			writeSSE(w, flusher, "content_block_delta", map[string]any{"type": "content_block_delta", "index": 0, "delta": map[string]any{"type": "text_delta", "text": chunk}})
+		} else {
+			writeSSE(w, flusher, "", map[string]any{"choices": []any{map[string]any{"index": 0, "delta": map[string]any{"content": chunk}}}})
+		}
+		if index == 0 && scenario.StreamWait {
+			s.mu.Lock()
+			release := s.streamRelease
+			s.mu.Unlock()
+			<-release
+		}
 	}
 	if scenario.StreamDisconnect {
 		return
 	}
-	usage := fmt.Sprintf(`{"usage":{"prompt_tokens":%d,"completion_tokens":%d,"total_tokens":%d,"prompt_tokens_details":{"cached_tokens":%d},"completion_tokens_details":{"reasoning_tokens":%d},"cost":%g}}`, scenario.InputTokens, scenario.OutputTokens, scenario.InputTokens+scenario.OutputTokens, scenario.CachedReadTokens, scenario.ReasoningTokens, scenario.Cost)
-	_, _ = fmt.Fprintf(w, "data: %s\n\ndata: [DONE]\n\n", usage)
+	usage := map[string]any{"input_tokens": scenario.InputTokens, "output_tokens": scenario.OutputTokens, "total_tokens": scenario.InputTokens + scenario.OutputTokens}
+	if strings.HasSuffix(path, "/messages") {
+		writeSSE(w, flusher, "message_delta", map[string]any{"type": "message_delta", "delta": map[string]any{"stop_reason": "end_turn"}, "usage": usage})
+		writeSSE(w, flusher, "message_stop", map[string]any{"type": "message_stop"})
+	} else if strings.HasSuffix(path, "/responses") {
+		writeSSE(w, flusher, "response.completed", map[string]any{"type": "response.completed", "response": map[string]any{"status": "completed", "usage": usage}})
+	} else {
+		writeSSE(w, flusher, "", map[string]any{"usage": map[string]any{"prompt_tokens": scenario.InputTokens, "completion_tokens": scenario.OutputTokens, "total_tokens": scenario.InputTokens + scenario.OutputTokens, "prompt_tokens_details": map[string]any{"cached_tokens": scenario.CachedReadTokens}, "completion_tokens_details": map[string]any{"reasoning_tokens": scenario.ReasoningTokens}, "cost": scenario.Cost}})
+		_, _ = io.WriteString(w, "data: [DONE]\n\n")
+		if flusher != nil {
+			flusher.Flush()
+		}
+	}
+}
+
+func splitStreamText(text string) []string {
+	if len(text) < 2 {
+		return []string{text}
+	}
+	middle := len(text) / 2
+	return []string{text[:middle], text[middle:]}
+}
+
+func writeSSE(w io.Writer, flusher http.Flusher, event string, payload any) {
+	encoded, _ := json.Marshal(payload)
+	if event != "" {
+		_, _ = fmt.Fprintf(w, "event: %s\n", event)
+	}
+	_, _ = fmt.Fprintf(w, "data: %s\n\n", encoded)
 	if flusher != nil {
 		flusher.Flush()
 	}

@@ -94,3 +94,20 @@ func TestStatsRepositoryGroupStatsAggregatesResolvedGroup(t *testing.T) {
 }
 
 func ptrInt64(value int64) *int64 { return &value }
+
+func TestStatsRepositoryIntegrationPreservesOverallErrorMessage(t *testing.T) {
+	i := newIntegrationDB(t)
+	if err := i.repos.ProxyRequests.Create(i.ctx, "failed-request", "", "chat.completions", "model"); err != nil {
+		t.Fatal(err)
+	}
+	if err := i.repos.ProxyRequests.Complete(i.ctx, "failed-request", "failed", "model_not_found", "all provider attempts failed"); err != nil {
+		t.Fatal(err)
+	}
+	items, err := i.repos.Stats.ListRequestStats(i.ctx, 10)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(items) != 1 || items[0].ErrorMessage == nil || *items[0].ErrorMessage != "all provider attempts failed" || items[0].ErrorCode == nil || *items[0].ErrorCode != "model_not_found" {
+		t.Fatalf("lost overall failure or terminal classification: %#v", items)
+	}
+}

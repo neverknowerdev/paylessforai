@@ -513,6 +513,7 @@ func requestStatFromBob(request *bobmodels.ProxyRequest, usage *bobmodels.Reques
 	item := RequestStat{ID: request.ID, SessionID: stringPointer(request.SessionID), Protocol: request.Protocol, Model: request.LogicalModel, State: request.State, ReceivedAt: request.ReceivedAt, Attempts: request.AttemptCount}
 	item.CompletedAt = stringPointer(request.CompletedAt)
 	item.ErrorCode = stringPointer(request.ErrorCode)
+	item.ErrorMessage = stringPointer(request.ErrorMessage)
 	item.DurationMS = int64Pointer(request.DurationMS)
 	item.Provider = stringValue(request.SelectedProvider)
 	item.UpstreamModel = stringValue(request.SelectedUpstreamModel)

@@ -29,25 +29,27 @@ type Model struct {
 }
 
 type Scenario struct {
-	Models           []Model `json:"models"`
-	ResponseText     string  `json:"response_text"`
-	Status           int     `json:"status"`
-	FailureCount     int     `json:"failure_count"`
-	FailureStatus    int     `json:"failure_status"`
-	FailureMessage   string  `json:"failure_message"`
-	Stream           bool    `json:"stream"`
-	StreamDisconnect bool    `json:"stream_disconnect"`
-	InputTokens      int64   `json:"input_tokens"`
-	OutputTokens     int64   `json:"output_tokens"`
-	CachedReadTokens int64   `json:"cached_read_tokens"`
-	ReasoningTokens  int64   `json:"reasoning_tokens"`
-	Cost             float64 `json:"cost"`
+	RequireOpenCodeSession bool    `json:"require_opencode_session"`
+	Models                 []Model `json:"models"`
+	ResponseText           string  `json:"response_text"`
+	Status                 int     `json:"status"`
+	FailureCount           int     `json:"failure_count"`
+	FailureStatus          int     `json:"failure_status"`
+	FailureMessage         string  `json:"failure_message"`
+	Stream                 bool    `json:"stream"`
+	StreamDisconnect       bool    `json:"stream_disconnect"`
+	InputTokens            int64   `json:"input_tokens"`
+	OutputTokens           int64   `json:"output_tokens"`
+	CachedReadTokens       int64   `json:"cached_read_tokens"`
+	ReasoningTokens        int64   `json:"reasoning_tokens"`
+	Cost                   float64 `json:"cost"`
 }
 
 type Request struct {
-	Method string `json:"method"`
-	Path   string `json:"path"`
-	Body   string `json:"body"`
+	OpenCodeSession string `json:"opencode_session,omitempty"`
+	Method          string `json:"method"`
+	Path            string `json:"path"`
+	Body            string `json:"body"`
 }
 
 // Fixture is a complete response for one inference request. Fixture files
@@ -97,7 +99,7 @@ func normalizeScenario(scenario Scenario) Scenario {
 func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	body, _ := io.ReadAll(io.LimitReader(r.Body, 32<<20))
 	s.mu.Lock()
-	s.requests = append(s.requests, Request{Method: r.Method, Path: r.URL.Path, Body: string(body)})
+	s.requests = append(s.requests, Request{Method: r.Method, Path: r.URL.Path, Body: string(body), OpenCodeSession: r.Header.Get("x-opencode-session")})
 	scenario := s.scenario
 	if scenario.FailureCount > 0 && isInference(r.URL.Path) {
 		s.scenario.FailureCount--
@@ -123,6 +125,11 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 	if !isInference(r.URL.Path) {
 		w.WriteHeader(http.StatusNotFound)
+		return
+	}
+	if scenario.RequireOpenCodeSession && strings.TrimSpace(r.Header.Get("x-opencode-session")) == "" {
+		w.WriteHeader(http.StatusBadRequest)
+		_, _ = io.WriteString(w, `{"error":{"message":"Request is missing x-opencode-session and cannot be routed efficiently.","type":"invalid_request"}}`)
 		return
 	}
 	if fixture, ok, err := s.nextFixture(); err != nil {

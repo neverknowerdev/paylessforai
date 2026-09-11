@@ -670,11 +670,7 @@ func encodeChat(request *Request) ([]byte, error) {
 	if len(request.ResponseFormat) > 0 {
 		payload["response_format"] = jsonRawValue(request.ResponseFormat)
 	}
-	for key, value := range request.Metadata {
-		if _, exists := payload[key]; !exists {
-			payload[key] = jsonRawValue(value)
-		}
-	}
+	addFormatMetadata(payload, request.Metadata, FormatChatCompletions)
 	return json.Marshal(payload)
 }
 
@@ -722,11 +718,7 @@ func encodeResponses(request *Request) ([]byte, error) {
 		payload["text"] = map[string]any{"format": structuredFormat(request.ResponseFormat)}
 	}
 	addCommon(payload, request, "max_output_tokens")
-	for key, value := range request.Metadata {
-		if _, exists := payload[key]; !exists {
-			payload[key] = jsonRawValue(value)
-		}
-	}
+	addFormatMetadata(payload, request.Metadata, FormatResponses)
 	return json.Marshal(payload)
 }
 
@@ -789,12 +781,49 @@ func encodeAnthropic(request *Request) ([]byte, error) {
 	if len(request.ResponseFormat) > 0 {
 		payload["output_config"] = map[string]any{"format": structuredFormat(request.ResponseFormat)}
 	}
-	for key, value := range request.Metadata {
+	addFormatMetadata(payload, request.Metadata, FormatAnthropicMessages)
+	return json.Marshal(payload)
+}
+
+// addFormatMetadata copies provider-specific request options while translating
+// the reasoning option between the OpenAI-compatible dialects. OpenCode sends
+// reasoning_effort on its Chat Completions requests, but the Responses API
+// only accepts that value under reasoning.effort.
+func addFormatMetadata(payload map[string]any, metadata map[string]json.RawMessage, format Format) {
+	if format == FormatResponses {
+		if raw, ok := metadata["reasoning"]; ok {
+			payload["reasoning"] = jsonRawValue(raw)
+		}
+		if raw, ok := metadata["reasoning_effort"]; ok {
+			reasoning, ok := payload["reasoning"].(map[string]any)
+			if !ok {
+				reasoning = make(map[string]any)
+			}
+			reasoning["effort"] = jsonRawValue(raw)
+			payload["reasoning"] = reasoning
+		}
+	}
+	if format == FormatChatCompletions {
+		if raw, ok := metadata["reasoning_effort"]; ok {
+			payload["reasoning_effort"] = jsonRawValue(raw)
+		} else if raw, ok := metadata["reasoning"]; ok {
+			var reasoning map[string]json.RawMessage
+			if json.Unmarshal(raw, &reasoning) == nil {
+				if effort, ok := reasoning["effort"]; ok {
+					payload["reasoning_effort"] = jsonRawValue(effort)
+				}
+			}
+		}
+	}
+
+	for key, value := range metadata {
+		if key == "reasoning" || key == "reasoning_effort" {
+			continue
+		}
 		if _, exists := payload[key]; !exists {
 			payload[key] = jsonRawValue(value)
 		}
 	}
-	return json.Marshal(payload)
 }
 
 func addCommon(payload map[string]any, request *Request, maxName string) {

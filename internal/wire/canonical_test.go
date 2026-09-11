@@ -1,6 +1,7 @@
 package wire
 
 import (
+	"encoding/json"
 	"errors"
 	"io"
 	"net/http"
@@ -43,6 +44,47 @@ func TestRequestConversionPreservesMultimodalToolsAndOptions(t *testing.T) {
 	}
 	if _, err := EncodeRequest(FormatAnthropicMessages, request); !IsIncompatibility(err) {
 		t.Fatalf("unsupported audio was silently represented: %v", err)
+	}
+}
+
+func TestRequestConversionMapsReasoningEffortAcrossOpenAIDialects(t *testing.T) {
+	request, err := DecodeRequest(FormatChatCompletions, []byte(`{"model":"source","messages":[{"role":"user","content":"think"}],"reasoning_effort":"high"}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	encoded, err := EncodeRequest(FormatResponses, request)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var responses map[string]any
+	if err := json.Unmarshal(encoded, &responses); err != nil {
+		t.Fatal(err)
+	}
+	if _, exists := responses["reasoning_effort"]; exists {
+		t.Fatalf("Responses request leaked Chat Completions option: %s", encoded)
+	}
+	reasoning, ok := responses["reasoning"].(map[string]any)
+	if !ok || reasoning["effort"] != "high" {
+		t.Fatalf("Responses request did not map reasoning effort: %s", encoded)
+	}
+
+	reverse, err := DecodeRequest(FormatResponses, []byte(`{"model":"source","input":"think","reasoning":{"effort":"low"}}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	encoded, err = EncodeRequest(FormatChatCompletions, reverse)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var chat map[string]any
+	if err := json.Unmarshal(encoded, &chat); err != nil {
+		t.Fatal(err)
+	}
+	if chat["reasoning_effort"] != "low" {
+		t.Fatalf("Chat Completions request did not map reasoning effort: %s", encoded)
+	}
+	if _, exists := chat["reasoning"]; exists {
+		t.Fatalf("Chat Completions request leaked Responses option: %s", encoded)
 	}
 }
 

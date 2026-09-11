@@ -31,26 +31,54 @@ func StreamResponse(format Format, response *http.Response, onEvent func(Event) 
 		return 0, err
 	}
 	count := 0
+	terminal := false
+	eventName := ""
+	dataLines := make([]string, 0, 1)
 	scanner := bufio.NewScanner(response.Body)
 	scanner.Buffer(make([]byte, 64<<10), 1<<20)
-	for scanner.Scan() {
-		line := strings.TrimSpace(scanner.Text())
-		if !strings.HasPrefix(line, "data:") {
-			continue
+	dispatch := func() error {
+		if len(dataLines) == 0 {
+			eventName = ""
+			return nil
 		}
-		data := strings.TrimSpace(strings.TrimPrefix(line, "data:"))
+		data := strings.TrimSpace(strings.Join(dataLines, "\n"))
+		dataLines = dataLines[:0]
 		if data == "" || data == "[DONE]" {
-			continue
+			if data == "[DONE]" && format == FormatChatCompletions {
+				terminal = true
+			}
+			eventName = ""
+			return nil
 		}
 		var payload map[string]json.RawMessage
 		if json.Unmarshal([]byte(data), &payload) != nil {
-			continue
+			eventName = ""
+			return &MalformedResponseError{Format: format, Err: errors.New("invalid SSE JSON data")}
+		}
+		typ := stringValue(payload["type"])
+		if typ == "error" || eventName == "error" || len(payload["error"]) > 0 {
+			message := stringValue(payload["message"])
+			if message == "" {
+				message = stringValue(payload["error"])
+			}
+			if nested, ok := rawObject(payload["error"]); ok && message == "" {
+				message = stringValue(nested["message"])
+			}
+			if err := onEvent(Event{Type: EventError, Error: &ProviderError{Type: typ, Message: message}}); err != nil {
+				return err
+			}
+			count++
+			eventName = ""
+			return fmt.Errorf("provider stream error: %s", message)
+		}
+		if eventName == "response.completed" || eventName == "response.failed" || eventName == "response.incomplete" || typ == "response.completed" || typ == "message_stop" || eventName == "message_stop" {
+			terminal = true
 		}
 		if len(payload["usage"]) > 0 {
 			var usage Usage
 			decodeUsage(payload, &usage)
 			if err := onEvent(Event{Type: EventUsage, Usage: &usage}); err != nil {
-				return count, err
+				return err
 			}
 			count++
 		}
@@ -69,12 +97,34 @@ func StreamResponse(format Format, response *http.Response, onEvent func(Event) 
 			}
 		}
 		if event == nil {
-			continue
+			eventName = ""
+			return nil
 		}
 		if err := onEvent(*event); err != nil {
-			return count, err
+			return err
 		}
 		count++
+		eventName = ""
+		return nil
+	}
+	for scanner.Scan() {
+		line := strings.TrimSuffix(scanner.Text(), "\r")
+		if line == "" {
+			if err := dispatch(); err != nil {
+				return count, err
+			}
+			continue
+		}
+		if strings.HasPrefix(line, "event:") {
+			eventName = strings.TrimSpace(strings.TrimPrefix(line, "event:"))
+			continue
+		}
+		if strings.HasPrefix(line, "data:") {
+			dataLines = append(dataLines, strings.TrimPrefix(line, "data:"))
+		}
+	}
+	if err := dispatch(); err != nil {
+		return count, err
 	}
 	if err := scanner.Err(); err != nil {
 		if count > 0 {
@@ -84,6 +134,9 @@ func StreamResponse(format Format, response *http.Response, onEvent func(Event) 
 	}
 	if count == 0 {
 		return 0, &MalformedResponseError{Format: format, Err: errors.New("no valid semantic event")}
+	}
+	if !terminal {
+		return count, &PartialResponseError{Err: errors.New("stream ended before terminal event")}
 	}
 	return count, nil
 }
@@ -682,6 +735,7 @@ func decodeSSEFor(format Format, body []byte, payloadDecoder responsePayloadDeco
 	lines := strings.Split(string(body), "\n")
 	events := make([]Event, 0)
 	valid := false
+	terminal := false
 	for _, line := range lines {
 		line = strings.TrimSpace(line)
 		if !strings.HasPrefix(line, "data:") {
@@ -689,11 +743,18 @@ func decodeSSEFor(format Format, body []byte, payloadDecoder responsePayloadDeco
 		}
 		data := strings.TrimSpace(strings.TrimPrefix(line, "data:"))
 		if data == "" || data == "[DONE]" {
+			if data == "[DONE]" && format == FormatChatCompletions {
+				terminal = true
+			}
 			continue
 		}
 		var payload map[string]json.RawMessage
 		if json.Unmarshal([]byte(data), &payload) != nil {
 			continue
+		}
+		typ := stringValue(payload["type"])
+		if typ == "response.completed" || typ == "message_stop" {
+			terminal = true
 		}
 		if hasUsage(payload) {
 			var usage Usage
@@ -716,6 +777,9 @@ func decodeSSEFor(format Format, body []byte, payloadDecoder responsePayloadDeco
 	if !valid {
 		return EventStream{}, &MalformedResponseError{Format: format, Err: errors.New("no valid semantic event")}
 	}
+	if !terminal {
+		return EventStream{Events: events, Stream: true}, &PartialResponseError{Err: errors.New("stream ended before terminal event")}
+	}
 	return EventStream{Events: events, Stream: true}, nil
 }
 
@@ -737,6 +801,19 @@ func StartStream(format Format, w http.ResponseWriter) (http.Flusher, error) {
 	w.Header().Set("Cache-Control", "no-cache")
 	w.WriteHeader(http.StatusOK)
 	flusher, _ := w.(http.Flusher)
+	if format == FormatResponses {
+		if err := writeSSEFrame(w, flusher, "response.created", map[string]any{"type": "response.created", "response": map[string]any{"id": "resp-translation", "object": "response", "status": "in_progress"}}); err != nil {
+			return flusher, err
+		}
+	}
+	if format == FormatAnthropicMessages {
+		if err := writeSSEFrame(w, flusher, "message_start", map[string]any{"type": "message_start", "message": map[string]any{"id": "msg-translation", "type": "message", "role": "assistant", "content": []any{}, "model": "translation"}}); err != nil {
+			return flusher, err
+		}
+		if err := writeSSEFrame(w, flusher, "content_block_start", map[string]any{"type": "content_block_start", "index": 0, "content_block": map[string]any{"type": "text", "text": ""}}); err != nil {
+			return flusher, err
+		}
+	}
 	return flusher, nil
 }
 
@@ -757,9 +834,20 @@ func EncodeStreamEvent(format Format, event Event, w http.ResponseWriter, flushe
 	if err != nil {
 		return err
 	}
+	return writeSSEFrame(w, flusher, streamEventName(format, event), json.RawMessage(encoded))
+}
+
+func writeSSEFrame(w io.Writer, flusher http.Flusher, event string, payload any) error {
+	encoded, err := json.Marshal(payload)
+	if raw, ok := payload.(json.RawMessage); ok {
+		encoded = raw
+	}
+	if err != nil {
+		return err
+	}
 	frame := ""
-	if name := streamEventName(format, event); name != "" {
-		frame += "event: " + name + "\n"
+	if event != "" {
+		frame += "event: " + event + "\n"
 	}
 	frame += "data: " + string(encoded) + "\n\n"
 	if _, err := io.WriteString(w, frame); err != nil {
@@ -784,6 +872,8 @@ func streamEventName(format Format, event Event) string {
 		case EventUsage:
 			return "response.completed"
 		case EventComplete:
+			return "response.completed"
+		case EventResponse:
 			return "response.completed"
 		}
 	case FormatAnthropicMessages:
@@ -810,6 +900,14 @@ func EndStream(format Format, w http.ResponseWriter, flusher http.Flusher) error
 			flusher.Flush()
 		}
 		return nil
+	}
+	if format == FormatAnthropicMessages {
+		if err := writeSSEFrame(w, flusher, "content_block_stop", map[string]any{"type": "content_block_stop", "index": 0}); err != nil {
+			return err
+		}
+		if err := writeSSEFrame(w, flusher, "message_delta", map[string]any{"type": "message_delta", "delta": map[string]any{"stop_reason": "end_turn"}}); err != nil {
+			return err
+		}
 	}
 	return EncodeStreamEvent(format, Event{Type: EventComplete}, w, flusher)
 }

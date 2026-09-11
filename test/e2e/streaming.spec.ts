@@ -106,17 +106,21 @@ test('streams real SSE incrementally for Chat, Responses, and Anthropic clients'
     const reader = response.body.getReader();
     const decoder = new TextDecoder();
     const pending = { value: '' };
-    const firstFrame = await readUntilFrame(reader, decoder, pending);
-    expect(firstFrame).toBeTruthy();
-    const firstPayload = dataPayload(firstFrame!);
-    expect(JSON.stringify(firstPayload)).toContain('stream');
+    const frames: string[] = [];
+    let firstFrame: string | null = null;
+    while (!firstFrame) {
+      const frame = await readUntilFrame(reader, decoder, pending);
+      expect(frame).toBeTruthy();
+      frames.push(frame!);
+      if (textDelta(frame!)) firstFrame = frame;
+    }
+    expect(textDelta(firstFrame)).toContain('stream');
 
     // The mock provider waits after flushing its first chunk. Receiving this
     // frame proves the gateway did not buffer the upstream response.
     const release = await request.post(`http://127.0.0.1:${mockPort}/__mock/stream/release`);
     expect(release.ok()).toBeTruthy();
 
-    const frames: string[] = [firstFrame!];
     for (;;) {
       const frame = await readUntilFrame(reader, decoder, pending);
       if (frame === null) break;

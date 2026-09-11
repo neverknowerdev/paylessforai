@@ -228,6 +228,7 @@ func TestStreamResponseDeliversBeforeUpstreamCompletes(t *testing.T) {
 	go func() {
 		_, _ = io.WriteString(writer, "data: {\"choices\":[{\"delta\":{\"content\":\"first\"}}]}\n\n")
 		<-release
+		_, _ = io.WriteString(writer, "data: [DONE]\n\n")
 		_ = writer.Close()
 	}()
 	response := &http.Response{StatusCode: http.StatusOK, Header: http.Header{"Content-Type": []string{"text/event-stream"}}, Body: reader}

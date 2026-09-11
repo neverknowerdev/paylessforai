@@ -390,6 +390,17 @@ func decodeResponsesResponsePayload(payload map[string]json.RawMessage) (Respons
 }
 
 func decodeResponsesStreamDelta(payload map[string]json.RawMessage) *Event {
+	typ := stringValue(payload["type"])
+	if typ == "response.function_call_arguments.delta" {
+		arguments := stringValue(payload["delta"])
+		return &Event{Type: EventToolCallDelta, ToolCall: &ToolCall{ID: stringValue(payload["item_id"]), Arguments: json.RawMessage(arguments)}}
+	}
+	if strings.Contains(typ, "reasoning") {
+		return &Event{Type: EventReasoningDelta, Reasoning: stringValue(payload["delta"])}
+	}
+	if typ != "" && typ != "response.output_text.delta" {
+		return nil
+	}
 	if text := stringValue(payload["delta"]); text != "" {
 		return &Event{Type: EventTextDelta, Text: text}
 	}
@@ -421,11 +432,23 @@ func encodeResponsesResponse(response Response) any {
 }
 
 func encodeResponsesStreamEvent(event Event) any {
+	if event.Type == EventResponse && event.Response != nil {
+		return map[string]any{"type": "response.completed", "response": encodeResponsesResponse(*event.Response)}
+	}
+	if event.Type == EventError && event.Error != nil {
+		return map[string]any{"type": "error", "error": map[string]any{"message": event.Error.Message, "code": event.Error.Code}}
+	}
 	if event.Type == EventUsage {
 		return map[string]any{"type": "response.completed", "response": map[string]any{"status": "completed", "usage": map[string]any{"input_tokens": event.Usage.InputTokens, "output_tokens": event.Usage.OutputTokens, "total_tokens": event.Usage.TotalTokens}}}
 	}
 	if event.Type == EventComplete {
 		return map[string]any{"type": "response.completed"}
+	}
+	if event.Type == EventToolCallDelta && event.ToolCall != nil {
+		return map[string]any{"type": "response.function_call_arguments.delta", "delta": string(event.ToolCall.Arguments), "item_id": event.ToolCall.ID}
+	}
+	if event.Type == EventReasoningDelta {
+		return map[string]any{"type": "response.reasoning.delta", "delta": event.Reasoning}
 	}
 	return map[string]any{"type": "response.output_text.delta", "delta": event.Text}
 }

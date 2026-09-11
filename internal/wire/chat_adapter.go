@@ -414,6 +414,18 @@ func decodeChatStreamDelta(payload map[string]json.RawMessage) *Event {
 	if text := stringValue(delta["reasoning_content"]); text != "" {
 		return &Event{Type: EventReasoningDelta, Reasoning: text}
 	}
+	var calls []struct {
+		ID       string `json:"id"`
+		Index    int    `json:"index"`
+		Function struct {
+			Name      string `json:"name"`
+			Arguments string `json:"arguments"`
+		} `json:"function"`
+	}
+	if json.Unmarshal(delta["tool_calls"], &calls) == nil && len(calls) > 0 {
+		call := calls[0]
+		return &Event{Type: EventToolCallDelta, ToolCall: &ToolCall{ID: call.ID, Name: call.Function.Name, Arguments: json.RawMessage(call.Function.Arguments)}}
+	}
 	return nil
 }
 
@@ -431,11 +443,17 @@ func encodeChatResponse(response Response) any {
 }
 
 func encodeChatStreamEvent(event Event) any {
+	if event.Type == EventError && event.Error != nil {
+		return map[string]any{"error": map[string]any{"message": event.Error.Message, "type": valueOr(event.Error.Type, "upstream_error")}}
+	}
 	if event.Type == EventUsage {
 		return map[string]any{"id": "chatcmpl-translation", "object": "chat.completion.chunk", "choices": []any{}, "usage": usageMap(*event.Usage)}
 	}
 	if event.Type == EventReasoningDelta {
 		return map[string]any{"id": "chatcmpl-translation", "object": "chat.completion.chunk", "choices": []any{map[string]any{"index": 0, "delta": map[string]any{"reasoning_content": event.Reasoning}, "finish_reason": nil}}}
+	}
+	if event.Type == EventToolCallDelta && event.ToolCall != nil {
+		return map[string]any{"id": "chatcmpl-translation", "object": "chat.completion.chunk", "choices": []any{map[string]any{"index": 0, "delta": map[string]any{"tool_calls": []any{map[string]any{"id": event.ToolCall.ID, "type": "function", "function": map[string]any{"name": event.ToolCall.Name, "arguments": string(event.ToolCall.Arguments)}}}}}}}
 	}
 	return map[string]any{"id": "chatcmpl-translation", "object": "chat.completion.chunk", "choices": []any{map[string]any{"index": 0, "delta": map[string]any{"role": "assistant", "content": event.Text}, "finish_reason": nil}}}
 }

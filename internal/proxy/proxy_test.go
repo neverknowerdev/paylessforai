@@ -576,6 +576,28 @@ func TestProxyLearnsUpstreamFormatAndTranslatesResponse(t *testing.T) {
 			http.NotFound(w, r)
 			return
 		}
+		var body struct {
+			Input []struct {
+				Role    string
+				Content []struct {
+					Type string
+					Text string
+				}
+			}
+		}
+		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+			t.Error(err)
+			http.Error(w, "invalid JSON", http.StatusBadRequest)
+			return
+		}
+		for _, message := range body.Input {
+			for _, content := range message.Content {
+				if message.Role == "assistant" && content.Type != "output_text" {
+					http.Error(w, "content type input_text is not valid on assistant messages", http.StatusBadRequest)
+					return
+				}
+			}
+		}
 		w.Header().Set("Content-Type", "application/json")
 		_, _ = io.WriteString(w, `{"id":"resp-1","model":"upstream","status":"completed","output_text":"translated","output":[{"type":"message","role":"assistant","content":[{"type":"output_text","text":"translated"}]}],"usage":{"input_tokens":2,"output_tokens":1,"total_tokens":3}}`)
 	}))
@@ -583,7 +605,7 @@ func TestProxyLearnsUpstreamFormatAndTranslatesResponse(t *testing.T) {
 	provider := &translatingProvider{HTTPClient: providers.NewHTTPClient("translated", server.URL+"/v1", "secret"), models: []providers.Model{model("model-a", 1, 1)}}
 	proxy, db, secret := testProxy(t, provider)
 	defer db.Close()
-	request := httptest.NewRequest(http.MethodPost, "/v1/chat/completions", strings.NewReader(`{"model":"model-a","messages":[{"role":"user","content":"hello"}]}`))
+	request := httptest.NewRequest(http.MethodPost, "/v1/chat/completions", strings.NewReader(`{"model":"model-a","messages":[{"role":"user","content":"hello"},{"role":"assistant","content":"hello back"},{"role":"user","content":"continue"}]}`))
 	request.Header.Set("Authorization", "Bearer "+secret)
 	response := httptest.NewRecorder()
 	proxy.ServeHTTP(response, request, matcher.ProtocolChatCompletions)

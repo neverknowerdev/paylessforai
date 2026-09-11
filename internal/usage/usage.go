@@ -60,6 +60,11 @@ func FromEnvelope(envelope map[string]any) Stats {
 	if details, ok := usage["completion_tokens_details"].(map[string]any); ok {
 		stats.ReasoningTokens = integer(details, "reasoning_tokens")
 	}
+	if details, ok := usage["output_tokens_details"].(map[string]any); ok {
+		if stats.ReasoningTokens == 0 {
+			stats.ReasoningTokens = integer(details, "reasoning_tokens", "thinking_tokens")
+		}
+	}
 	if stats.ReasoningTokens == 0 {
 		stats.ReasoningTokens = integer(usage, "reasoning_tokens")
 	}

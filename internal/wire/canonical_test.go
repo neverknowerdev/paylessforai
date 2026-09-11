@@ -88,6 +88,118 @@ func TestRequestConversionMapsReasoningEffortAcrossOpenAIDialects(t *testing.T) 
 	}
 }
 
+func TestFormatAdaptersTranslateCanonicalOptionsWithoutLeakingSourceFields(t *testing.T) {
+	body := []byte(`{"model":"source","messages":[{"role":"user","content":"hello"}],"reasoning_effort":"high","verbosity":"low","max_completion_tokens":42,"response_format":{"type":"json_schema","json_schema":{"name":"answer","schema":{"type":"object"},"strict":true}},"tool_choice":{"type":"function","function":{"name":"lookup"}},"parallel_tool_calls":false,"store":true}`)
+	request, err := DecodeRequest(FormatChatCompletions, body)
+	if err != nil {
+		t.Fatal(err)
+	}
+	encoded, err := EncodeRequest(FormatResponses, request)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var responses map[string]any
+	if err := json.Unmarshal(encoded, &responses); err != nil {
+		t.Fatal(err)
+	}
+	if responses["max_output_tokens"] != float64(42) {
+		t.Fatalf("wrong Responses token option: %s", encoded)
+	}
+	if _, exists := responses["max_completion_tokens"]; exists {
+		t.Fatalf("Chat token option leaked into Responses: %s", encoded)
+	}
+	if _, exists := responses["reasoning_effort"]; exists {
+		t.Fatalf("reasoning_effort leaked into Responses: %s", encoded)
+	}
+	if _, exists := responses["verbosity"]; exists {
+		t.Fatalf("verbosity leaked into Responses: %s", encoded)
+	}
+	if _, exists := responses["store"]; exists {
+		t.Fatalf("source extension leaked into Responses: %s", encoded)
+	}
+	textOptions, ok := responses["text"].(map[string]any)
+	if !ok || textOptions["verbosity"] != "low" {
+		t.Fatalf("missing Responses text verbosity: %s", encoded)
+	}
+	reasoning, ok := responses["reasoning"].(map[string]any)
+	if !ok || reasoning["effort"] != "high" {
+		t.Fatalf("missing Responses reasoning effort: %s", encoded)
+	}
+	choice, ok := responses["tool_choice"].(map[string]any)
+	if !ok || choice["type"] != "function" || choice["name"] != "lookup" {
+		t.Fatalf("wrong Responses tool choice: %s", encoded)
+	}
+	format, ok := textOptions["format"].(map[string]any)
+	if !ok || format["type"] != "json_schema" || format["strict"] != true {
+		t.Fatalf("wrong Responses structured output: %s", encoded)
+	}
+}
+
+func TestFormatAdaptersTranslateAnthropicOptionsToChat(t *testing.T) {
+	body := []byte(`{"model":"source","messages":[{"role":"user","content":"hello"}],"max_tokens":42,"stop_sequences":["DONE"],"output_config":{"effort":"medium","format":{"type":"json_schema","schema":{"type":"object"}}},"tool_choice":{"type":"tool","name":"lookup","disable_parallel_tool_use":true}}`)
+	request, err := DecodeRequest(FormatAnthropicMessages, body)
+	if err != nil {
+		t.Fatal(err)
+	}
+	encoded, err := EncodeRequest(FormatChatCompletions, request)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var chat map[string]any
+	if err := json.Unmarshal(encoded, &chat); err != nil {
+		t.Fatal(err)
+	}
+	if chat["max_completion_tokens"] != float64(42) || chat["stop"].([]any)[0] != "DONE" || chat["reasoning_effort"] != "medium" {
+		t.Fatalf("Anthropic options were not translated to Chat: %s", encoded)
+	}
+	if _, exists := chat["max_tokens"]; exists {
+		t.Fatalf("deprecated Chat token option emitted: %s", encoded)
+	}
+	if _, exists := chat["stop_sequences"]; exists {
+		t.Fatalf("Anthropic stop option leaked into Chat: %s", encoded)
+	}
+	choice, ok := chat["tool_choice"].(map[string]any)
+	if !ok || choice["type"] != "function" || choice["function"].(map[string]any)["name"] != "lookup" {
+		t.Fatalf("wrong Chat tool choice: %s", encoded)
+	}
+}
+
+func TestFormatAdaptersRejectOptionsWithoutSemanticEquivalent(t *testing.T) {
+	request, err := DecodeRequest(FormatChatCompletions, []byte(`{"model":"source","messages":[{"role":"user","content":"hello"}],"verbosity":"low"}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := EncodeRequest(FormatAnthropicMessages, request); !IsIncompatibility(err) {
+		t.Fatalf("Anthropic accepted unsupported verbosity: %v", err)
+	}
+	request, err = DecodeRequest(FormatChatCompletions, []byte(`{"model":"source","messages":[{"role":"user","content":"hello"}],"stop":["DONE"]}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := EncodeRequest(FormatResponses, request); !IsIncompatibility(err) {
+		t.Fatalf("Responses accepted unsupported stop sequences: %v", err)
+	}
+	request, err = DecodeRequest(FormatAnthropicMessages, []byte(`{"model":"source","max_tokens":10,"messages":[{"role":"user","content":"hello"}],"thinking":{"type":"adaptive"}}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := EncodeRequest(FormatChatCompletions, request); !IsIncompatibility(err) {
+		t.Fatalf("Chat accepted Anthropic thinking without an equivalent: %v", err)
+	}
+}
+
+func TestCodecForReturnsFormatSpecificAdapters(t *testing.T) {
+	for _, format := range []Format{FormatChatCompletions, FormatResponses, FormatAnthropicMessages} {
+		codec, err := CodecFor(format)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if codec.Format() != format {
+			t.Fatalf("adapter format = %s, want %s", codec.Format(), format)
+		}
+	}
+}
+
 func TestResponseConversionAndMalformedValidation(t *testing.T) {
 	response := &http.Response{StatusCode: http.StatusOK, Header: http.Header{"Content-Type": []string{"application/json"}}, Body: io.NopCloser(strings.NewReader(`{"id":"r1","model":"m","choices":[{"message":{"role":"assistant","content":"hello"},"finish_reason":"stop"}],"usage":{"prompt_tokens":2,"completion_tokens":1}}`))}
 	events, err := DecodeResponse(FormatChatCompletions, response)

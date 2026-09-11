@@ -60,6 +60,7 @@ type Tool struct {
 	Name        string          `json:"name"`
 	Description string          `json:"description,omitempty"`
 	Parameters  json.RawMessage `json:"parameters,omitempty"`
+	Strict      *bool           `json:"strict,omitempty"`
 }
 
 type Usage struct {
@@ -72,19 +73,12 @@ type Usage struct {
 }
 
 type Request struct {
-	Model            string
-	Messages         []Message
-	Tools            []Tool
-	ToolChoice       json.RawMessage
-	ParallelToolCall *bool
-	ResponseFormat   json.RawMessage
-	Temperature      *float64
-	TopP             *float64
-	Stop             json.RawMessage
-	MaxOutputTokens  *int64
-	Stream           bool
-	Modalities       []string
-	Metadata         map[string]json.RawMessage
+	SourceFormat Format
+	Model        string
+	Messages     []Message
+	Tools        []Tool
+	Options      RequestOptions
+	Extensions   map[string]json.RawMessage
 }
 
 type Response struct {
@@ -326,6 +320,14 @@ func ensureJSONObject(value json.RawMessage) json.RawMessage {
 
 // DecodeRequest selects a codec and decodes a client request exactly once.
 func DecodeRequest(format Format, body []byte) (*Request, error) {
+	codec, err := CodecFor(format)
+	if err != nil {
+		return nil, err
+	}
+	return codec.DecodeRequest(body)
+}
+
+func decodeRequest(format Format, body []byte) (*Request, error) {
 	if err := format.Validate(); err != nil {
 		return nil, err
 	}
@@ -333,23 +335,15 @@ func DecodeRequest(format Format, body []byte) (*Request, error) {
 	if err != nil {
 		return nil, err
 	}
-	request := &Request{Metadata: make(map[string]json.RawMessage)}
+	options, err := decodeOptions(format, payload)
+	if err != nil {
+		return nil, err
+	}
+	request := &Request{SourceFormat: format, Options: options, Extensions: make(map[string]json.RawMessage)}
 	if err := json.Unmarshal(payload["model"], &request.Model); err != nil || strings.TrimSpace(request.Model) == "" {
 		return nil, errors.New("model is required")
 	}
 	request.Model = strings.TrimSpace(request.Model)
-	request.Stream = boolField(payload, "stream")
-	request.ResponseFormat = rawCopy(payload["response_format"])
-	request.ToolChoice = rawCopy(payload["tool_choice"])
-	request.Stop = rawCopy(payload["stop"])
-	request.ParallelToolCall = boolPointer(payload, "parallel_tool_calls")
-	request.Temperature = floatPointer(payload, "temperature")
-	request.TopP = floatPointer(payload, "top_p")
-	request.MaxOutputTokens = intPointer(payload, "max_tokens", "max_completion_tokens", "max_output_tokens")
-	if raw := payload["modalities"]; len(raw) > 0 {
-		_ = json.Unmarshal(raw, &request.Modalities)
-	}
-
 	switch format {
 	case FormatChatCompletions:
 		if len(payload["messages"]) == 0 {
@@ -388,12 +382,11 @@ func DecodeRequest(format Format, body []byte) (*Request, error) {
 			return nil, err
 		}
 		decodeAnthropicTools(payload["tools"], request)
-		request.MaxOutputTokens = intPointer(payload, "max_tokens", "max_output_tokens")
 	}
-	known := map[string]bool{"model": true, "messages": true, "input": true, "instructions": true, "system": true, "tools": true, "tool_choice": true, "parallel_tool_calls": true, "response_format": true, "temperature": true, "top_p": true, "stop": true, "max_tokens": true, "max_completion_tokens": true, "max_output_tokens": true, "stream": true, "modalities": true}
+	known := knownOptionKeys(format)
 	for key, value := range payload {
 		if !known[key] {
-			request.Metadata[key] = rawCopy(value)
+			request.Extensions[key] = rawCopy(value)
 		}
 	}
 	return request, nil
@@ -479,7 +472,7 @@ func decodeResponsesInput(raw json.RawMessage, request *Request) error {
 			_ = json.Unmarshal(item["id"], &call.ID)
 			_ = json.Unmarshal(item["name"], &call.Name)
 			call.Type = typ
-			call.Arguments = rawCopy(item["arguments"])
+			call.Arguments = jsonArgument(item["arguments"])
 			request.Messages = append(request.Messages, Message{Role: RoleAssistant, ToolCalls: []ToolCall{call}})
 		case "function_call_output", "custom_tool_call_output":
 			var id string
@@ -505,11 +498,16 @@ func decodeAnthropicMessages(raw json.RawMessage, request *Request) error {
 		if err != nil {
 			return err
 		}
-		message := Message{Role: Role(role), Content: blocks}
+		message := Message{Role: Role(role)}
 		for _, block := range blocks {
 			if block.Type == "tool_call" {
 				message.ToolCalls = append(message.ToolCalls, ToolCall{ID: block.ID, Name: block.Name, Arguments: block.Arguments, Type: "function"})
+				continue
 			}
+			if block.Type == "tool_result" && message.ToolCallID == "" {
+				message.ToolCallID = block.ID
+			}
+			message.Content = append(message.Content, block)
 		}
 		request.Messages = append(request.Messages, message)
 	}
@@ -530,10 +528,22 @@ func decodeTools(raw json.RawMessage, request *Request) {
 				_ = json.Unmarshal(fn["name"], &tool.Name)
 				_ = json.Unmarshal(fn["description"], &tool.Description)
 				tool.Parameters = ensureJSONObject(fn["parameters"])
+				if raw := fn["strict"]; len(raw) > 0 {
+					var strict bool
+					if json.Unmarshal(raw, &strict) == nil {
+						tool.Strict = &strict
+					}
+				}
 			}
 		} else {
 			_ = json.Unmarshal(value["name"], &tool.Name)
 			tool.Parameters = ensureJSONObject(value["parameters"])
+			if raw := value["strict"]; len(raw) > 0 {
+				var strict bool
+				if json.Unmarshal(raw, &strict) == nil {
+					tool.Strict = &strict
+				}
+			}
 		}
 		request.Tools = append(request.Tools, tool)
 	}
@@ -549,6 +559,12 @@ func decodeAnthropicTools(raw json.RawMessage, request *Request) {
 		_ = json.Unmarshal(value["name"], &tool.Name)
 		_ = json.Unmarshal(value["description"], &tool.Description)
 		tool.Parameters = ensureJSONObject(value["input_schema"])
+		if raw := value["strict"]; len(raw) > 0 {
+			var strict bool
+			if json.Unmarshal(raw, &strict) == nil {
+				tool.Strict = &strict
+			}
+		}
 		request.Tools = append(request.Tools, tool)
 	}
 }
@@ -598,22 +614,15 @@ func EncodeRequest(format Format, request *Request) ([]byte, error) {
 	if request == nil {
 		return nil, errors.New("canonical request is nil")
 	}
-	if err := format.Validate(); err != nil {
+	codec, err := CodecFor(format)
+	if err != nil {
 		return nil, err
 	}
-	switch format {
-	case FormatChatCompletions:
-		return encodeChat(request)
-	case FormatResponses:
-		return encodeResponses(request)
-	case FormatAnthropicMessages:
-		return encodeAnthropic(request)
-	}
-	return nil, format.Validate()
+	return codec.EncodeRequest(request)
 }
 
 func encodeChat(request *Request) ([]byte, error) {
-	payload := map[string]any{"model": request.Model, "messages": make([]any, 0, len(request.Messages)), "stream": request.Stream}
+	payload := map[string]any{"model": request.Model, "messages": make([]any, 0, len(request.Messages)), "stream": request.Options.Stream}
 	for _, message := range request.Messages {
 		item := map[string]any{"role": string(message.Role)}
 		if message.Name != "" {
@@ -653,29 +662,25 @@ func encodeChat(request *Request) ([]byte, error) {
 		}
 		payload["messages"] = append(payload["messages"].([]any), item)
 	}
-	addCommon(payload, request, "max_tokens")
+	if err := writeChatOptions(payload, request); err != nil {
+		return nil, err
+	}
 	if len(request.Tools) > 0 {
 		tools := make([]any, 0, len(request.Tools))
 		for _, tool := range request.Tools {
-			tools = append(tools, map[string]any{"type": "function", "function": map[string]any{"name": tool.Name, "description": tool.Description, "parameters": jsonOrEmpty(tool.Parameters)}})
+			function := map[string]any{"name": tool.Name, "description": tool.Description, "parameters": jsonOrEmpty(tool.Parameters)}
+			if tool.Strict != nil {
+				function["strict"] = *tool.Strict
+			}
+			tools = append(tools, map[string]any{"type": "function", "function": function})
 		}
 		payload["tools"] = tools
 	}
-	if len(request.ToolChoice) > 0 {
-		payload["tool_choice"] = jsonRawValue(request.ToolChoice)
-	}
-	if request.ParallelToolCall != nil {
-		payload["parallel_tool_calls"] = *request.ParallelToolCall
-	}
-	if len(request.ResponseFormat) > 0 {
-		payload["response_format"] = jsonRawValue(request.ResponseFormat)
-	}
-	addFormatMetadata(payload, request.Metadata, FormatChatCompletions)
 	return json.Marshal(payload)
 }
 
 func encodeResponses(request *Request) ([]byte, error) {
-	payload := map[string]any{"model": request.Model, "input": make([]any, 0), "stream": request.Stream}
+	payload := map[string]any{"model": request.Model, "input": make([]any, 0), "stream": request.Options.Stream}
 	input := payload["input"].([]any)
 	for _, message := range request.Messages {
 		if message.Role == RoleSystem || message.Role == RoleDeveloper || message.Role == RoleUser || message.Role == RoleAssistant {
@@ -704,26 +709,22 @@ func encodeResponses(request *Request) ([]byte, error) {
 	if len(request.Tools) > 0 {
 		tools := make([]any, 0, len(request.Tools))
 		for _, tool := range request.Tools {
-			tools = append(tools, map[string]any{"type": "function", "name": tool.Name, "description": tool.Description, "parameters": jsonOrEmpty(tool.Parameters)})
+			item := map[string]any{"type": "function", "name": tool.Name, "description": tool.Description, "parameters": jsonOrEmpty(tool.Parameters)}
+			if tool.Strict != nil {
+				item["strict"] = *tool.Strict
+			}
+			tools = append(tools, item)
 		}
 		payload["tools"] = tools
 	}
-	if len(request.ToolChoice) > 0 {
-		payload["tool_choice"] = jsonRawValue(request.ToolChoice)
+	if err := writeResponsesOptions(payload, request); err != nil {
+		return nil, err
 	}
-	if request.ParallelToolCall != nil {
-		payload["parallel_tool_calls"] = *request.ParallelToolCall
-	}
-	if len(request.ResponseFormat) > 0 {
-		payload["text"] = map[string]any{"format": structuredFormat(request.ResponseFormat)}
-	}
-	addCommon(payload, request, "max_output_tokens")
-	addFormatMetadata(payload, request.Metadata, FormatResponses)
 	return json.Marshal(payload)
 }
 
 func encodeAnthropic(request *Request) ([]byte, error) {
-	payload := map[string]any{"model": request.Model, "messages": make([]any, 0), "stream": request.Stream}
+	payload := map[string]any{"model": request.Model, "messages": make([]any, 0), "stream": request.Options.Stream}
 	messages := payload["messages"].([]any)
 	system := []ContentBlock{}
 	for _, message := range request.Messages {
@@ -762,84 +763,21 @@ func encodeAnthropic(request *Request) ([]byte, error) {
 	}
 	tools := make([]any, 0, len(request.Tools))
 	for _, tool := range request.Tools {
-		tools = append(tools, map[string]any{"name": tool.Name, "description": tool.Description, "input_schema": jsonOrEmpty(tool.Parameters)})
+		item := map[string]any{"name": tool.Name, "description": tool.Description, "input_schema": jsonOrEmpty(tool.Parameters)}
+		if tool.Strict != nil {
+			item["strict"] = *tool.Strict
+		}
+		tools = append(tools, item)
 	}
 	if len(tools) > 0 {
 		payload["tools"] = tools
 	}
-	if len(request.ToolChoice) > 0 {
-		payload["tool_choice"] = jsonRawValue(request.ToolChoice)
+	if err := writeAnthropicOptions(payload, request); err != nil {
+		return nil, err
 	}
-	if request.ParallelToolCall != nil {
-		payload["parallel_tool_calls"] = *request.ParallelToolCall
-	}
-	addCommon(payload, request, "max_tokens")
-	if len(request.Stop) > 0 {
-		delete(payload, "stop")
-		payload["stop_sequences"] = jsonRawValue(request.Stop)
-	}
-	if len(request.ResponseFormat) > 0 {
-		payload["output_config"] = map[string]any{"format": structuredFormat(request.ResponseFormat)}
-	}
-	addFormatMetadata(payload, request.Metadata, FormatAnthropicMessages)
 	return json.Marshal(payload)
 }
 
-// addFormatMetadata copies provider-specific request options while translating
-// the reasoning option between the OpenAI-compatible dialects. OpenCode sends
-// reasoning_effort on its Chat Completions requests, but the Responses API
-// only accepts that value under reasoning.effort.
-func addFormatMetadata(payload map[string]any, metadata map[string]json.RawMessage, format Format) {
-	if format == FormatResponses {
-		if raw, ok := metadata["reasoning"]; ok {
-			payload["reasoning"] = jsonRawValue(raw)
-		}
-		if raw, ok := metadata["reasoning_effort"]; ok {
-			reasoning, ok := payload["reasoning"].(map[string]any)
-			if !ok {
-				reasoning = make(map[string]any)
-			}
-			reasoning["effort"] = jsonRawValue(raw)
-			payload["reasoning"] = reasoning
-		}
-	}
-	if format == FormatChatCompletions {
-		if raw, ok := metadata["reasoning_effort"]; ok {
-			payload["reasoning_effort"] = jsonRawValue(raw)
-		} else if raw, ok := metadata["reasoning"]; ok {
-			var reasoning map[string]json.RawMessage
-			if json.Unmarshal(raw, &reasoning) == nil {
-				if effort, ok := reasoning["effort"]; ok {
-					payload["reasoning_effort"] = jsonRawValue(effort)
-				}
-			}
-		}
-	}
-
-	for key, value := range metadata {
-		if key == "reasoning" || key == "reasoning_effort" {
-			continue
-		}
-		if _, exists := payload[key]; !exists {
-			payload[key] = jsonRawValue(value)
-		}
-	}
-}
-
-func addCommon(payload map[string]any, request *Request, maxName string) {
-	if request.MaxOutputTokens != nil {
-		payload[maxName] = *request.MaxOutputTokens
-	}
-	if request.Temperature != nil {
-		payload["temperature"] = *request.Temperature
-	}
-	if request.TopP != nil {
-		payload["top_p"] = *request.TopP
-	}
-	if len(request.Stop) > 0 {
-		payload["stop"] = jsonRawValue(request.Stop)
-	}
-}
 func encodeChatContent(blocks []ContentBlock, format Format) (any, error) {
 	if len(blocks) == 1 && blocks[0].Type == "text" {
 		return blocks[0].Text, nil
@@ -965,6 +903,14 @@ func jsonRawValue(value json.RawMessage) any {
 	}
 	return string(value)
 }
+
+func jsonArgument(value json.RawMessage) json.RawMessage {
+	var encoded string
+	if json.Unmarshal(value, &encoded) == nil {
+		return json.RawMessage(encoded)
+	}
+	return rawCopy(value)
+}
 func jsonObject(value json.RawMessage) any {
 	if len(value) == 0 {
 		return map[string]any{}
@@ -978,40 +924,17 @@ func jsonOrEmpty(value json.RawMessage) any {
 	return jsonRawValue(value)
 }
 
-func structuredFormat(value json.RawMessage) any {
-	var source map[string]json.RawMessage
-	if json.Unmarshal(value, &source) != nil {
-		return jsonRawValue(value)
-	}
-	var typ string
-	_ = json.Unmarshal(source["type"], &typ)
-	if typ != "json_schema" {
-		return jsonRawValue(value)
-	}
-	var schema map[string]json.RawMessage
-	if json.Unmarshal(source["json_schema"], &schema) != nil {
-		return jsonRawValue(value)
-	}
-	result := map[string]any{"type": "json_schema"}
-	var name, strict, schemaValue any
-	_ = json.Unmarshal(schema["name"], &name)
-	_ = json.Unmarshal(schema["schema"], &schemaValue)
-	_ = json.Unmarshal(schema["strict"], &strict)
-	if name != nil {
-		result["name"] = name
-	}
-	if schemaValue != nil {
-		result["schema"] = schemaValue
-	}
-	if strict != nil {
-		result["strict"] = strict
-	}
-	return result
-}
-
 // DecodeResponse consumes the body so callers can validate an upstream
 // response before writing any bytes to the client.
 func DecodeResponse(format Format, response *http.Response) (EventStream, error) {
+	codec, err := CodecFor(format)
+	if err != nil {
+		return EventStream{}, err
+	}
+	return codec.DecodeResponse(response)
+}
+
+func decodeResponse(format Format, response *http.Response) (EventStream, error) {
 	if response == nil || response.Body == nil {
 		return EventStream{}, &MalformedResponseError{Format: format, Err: errors.New("empty response")}
 	}
@@ -1150,9 +1073,31 @@ func decodeUsage(payload map[string]json.RawMessage, usage *Usage) {
 	_ = json.Unmarshal(value["output_tokens"], &usage.OutputTokens)
 	_ = json.Unmarshal(value["total_tokens"], &usage.TotalTokens)
 	_ = json.Unmarshal(value["reasoning_tokens"], &usage.ReasoningTokens)
+	if details, ok := rawObject(value["completion_tokens_details"]); ok {
+		_ = json.Unmarshal(details["reasoning_tokens"], &usage.ReasoningTokens)
+	}
+	if details, ok := rawObject(value["output_tokens_details"]); ok {
+		if raw := details["reasoning_tokens"]; len(raw) > 0 {
+			_ = json.Unmarshal(raw, &usage.ReasoningTokens)
+		}
+		if raw := details["thinking_tokens"]; len(raw) > 0 {
+			_ = json.Unmarshal(raw, &usage.ReasoningTokens)
+		}
+	}
 	if usage.TotalTokens == 0 {
 		usage.TotalTokens = usage.InputTokens + usage.OutputTokens
 	}
+}
+
+func rawObject(value json.RawMessage) (map[string]json.RawMessage, bool) {
+	if len(value) == 0 {
+		return nil, false
+	}
+	var result map[string]json.RawMessage
+	if json.Unmarshal(value, &result) != nil {
+		return nil, false
+	}
+	return result, true
 }
 func decodeSSE(format Format, body []byte) (EventStream, error) {
 	lines := strings.Split(string(body), "\n")
@@ -1226,6 +1171,14 @@ func streamDelta(format Format, payload map[string]json.RawMessage) *Event {
 
 // EncodeResponse emits a response in the requested client format.
 func EncodeResponse(format Format, events EventStream, w http.ResponseWriter) error {
+	codec, err := CodecFor(format)
+	if err != nil {
+		return err
+	}
+	return codec.EncodeResponse(events, w)
+}
+
+func encodeResponse(format Format, events EventStream, w http.ResponseWriter) error {
 	if err := format.Validate(); err != nil {
 		return err
 	}

@@ -27,3 +27,18 @@ func TestFromJSONParsesExactProviderCostShapes(t *testing.T) {
 		t.Fatalf("unexpected cost details: %#v", stats)
 	}
 }
+
+func TestFromJSONReadsNestedReasoningUsageAcrossFormats(t *testing.T) {
+	chat := FromJSON([]byte(`{"usage":{"prompt_tokens":10,"completion_tokens":4,"completion_tokens_details":{"reasoning_tokens":3}}}`))
+	if chat.ReasoningTokens != 3 {
+		t.Fatalf("Chat reasoning usage = %d", chat.ReasoningTokens)
+	}
+	responses := FromJSON([]byte(`{"usage":{"input_tokens":10,"output_tokens":4,"output_tokens_details":{"reasoning_tokens":5}}}`))
+	if responses.ReasoningTokens != 5 {
+		t.Fatalf("Responses reasoning usage = %d", responses.ReasoningTokens)
+	}
+	anthropic := FromJSON([]byte(`{"usage":{"input_tokens":10,"output_tokens":4,"output_tokens_details":{"thinking_tokens":6}}}`))
+	if anthropic.ReasoningTokens != 6 {
+		t.Fatalf("Anthropic reasoning usage = %d", anthropic.ReasoningTokens)
+	}
+}

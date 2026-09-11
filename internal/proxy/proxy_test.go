@@ -499,12 +499,41 @@ func TestHumanErrorMessageExtractsNestedProviderDetail(t *testing.T) {
 }
 
 func TestParseRequestDetectsInputAndOutputModalities(t *testing.T) {
-	request, err := parseRequest([]byte(`{"model":"model-a","messages":[{"role":"user","content":[{"type":"text","text":"describe"},{"type":"image_url","image_url":{"url":"data:image/png;base64,abc"}},{"type":"input_audio","input_audio":{"data":"abc"}}]}],"modalities":["text"]}`), matcher.ProtocolChatCompletions)
+	body := []byte(`{"model":"model-a","messages":[{"role":"user","content":[{"type":"text","text":"describe"},{"type":"image_url","image_url":{"url":"data:image/png;base64,abc"}},{"type":"input_audio","input_audio":{"data":"abc"}}]}],"modalities":["text"]}`)
+	canonical, err := wire.DecodeRequest(wire.FormatChatCompletions, body)
+	if err != nil {
+		t.Fatal(err)
+	}
+	request, err := parseRequest(body, matcher.ProtocolChatCompletions, canonical)
 	if err != nil {
 		t.Fatal(err)
 	}
 	if strings.Join(request.RequiredInputModalities, ",") != "text,image,audio" || strings.Join(request.RequiredOutputModalities, ",") != "text" {
 		t.Fatalf("unexpected modalities: %#v", request)
+	}
+}
+
+func TestParseRequestDetectsStructuredOutputInAllFormats(t *testing.T) {
+	for _, test := range []struct {
+		format   wire.Format
+		protocol matcher.Protocol
+		body     []byte
+	}{
+		{wire.FormatChatCompletions, matcher.ProtocolChatCompletions, []byte(`{"model":"m","messages":[{"role":"user","content":"hello"}],"response_format":{"type":"json_object"}}`)},
+		{wire.FormatResponses, matcher.ProtocolResponses, []byte(`{"model":"m","input":"hello","text":{"format":{"type":"json_schema","name":"answer","schema":{"type":"object"}}}}`)},
+		{wire.FormatAnthropicMessages, matcher.ProtocolAnthropic, []byte(`{"model":"m","max_tokens":10,"messages":[{"role":"user","content":"hello"}],"output_config":{"format":{"type":"json_schema","schema":{"type":"object"}}}}`)},
+	} {
+		canonical, err := wire.DecodeRequest(test.format, test.body)
+		if err != nil {
+			t.Fatal(err)
+		}
+		request, err := parseRequest(test.body, test.protocol, canonical)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if !request.RequireStructured {
+			t.Fatalf("structured output was not detected for %s", test.format)
+		}
 	}
 }
 

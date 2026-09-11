@@ -555,6 +555,67 @@ func (p *Proxy) executeTranslatedRoute(ctx context.Context, writer http.Response
 			formatFailure = true
 			continue
 		}
+		if request.Stream && strings.Contains(strings.ToLower(response.Header.Get("Content-Type")), "text/event-stream") {
+			var stats usage.Stats
+			var flusher http.Flusher
+			committed := false
+			streamErrCount, streamErr := wire.StreamResponse(candidate, response, func(event wire.Event) error {
+				if !committed {
+					var startErr error
+					flusher, startErr = wire.StartStream(clientFormat, writer)
+					if startErr != nil {
+						return startErr
+					}
+					committed = true
+				}
+				if event.Usage != nil {
+					mergeWireUsage(&stats, *event.Usage)
+				}
+				if event.Response != nil {
+					mergeWireUsage(&stats, event.Response.Usage)
+				}
+				// Terminal response snapshots carry usage/status; text was already
+				// delivered by preceding deltas and must not be duplicated.
+				if event.Type == wire.EventResponse {
+					return nil
+				}
+				return wire.EncodeStreamEvent(clientFormat, event, writer, flusher)
+			})
+			if streamErr != nil {
+				if committed || streamErrCount > 0 {
+					persistUsage(ctx, p.Repositories, requestID, stats, entry.ExpectedCost, officialExpectedCost, route.Price, officialPrice)
+					if p.Repositories != nil {
+						_ = p.Repositories.ProxyRequests.Complete(ctx, requestID, "partial", "stream_error", sanitize(streamErr.Error()))
+					}
+					p.recordTranslatedAttempt(ctx, requestID, attempt, route, entry, clientFormat, candidate, "partial", "stream_error", streamErr)
+					return &partialStreamError{err: streamErr}, true, used
+				}
+				lastErr = streamErr
+				p.recordTranslatedAttempt(ctx, requestID, attempt, route, entry, clientFormat, candidate, "failed", "malformed_response", streamErr)
+				if !shouldTryNextFormat(streamErr, !formatKnown) {
+					break
+				}
+				formatFailure = true
+				continue
+			}
+			if committed {
+				if err := wire.EndStream(clientFormat, writer, flusher); err != nil {
+					return &partialStreamError{err: err}, true, used
+				}
+			}
+			if p.Repositories != nil {
+				_ = persistLearnedFormat(ctx, p.Repositories, route, candidate)
+			}
+			if p.Catalog != nil {
+				p.Catalog.LearnFormat(route.ID, candidate)
+			}
+			persistUsage(ctx, p.Repositories, requestID, stats, entry.ExpectedCost, officialExpectedCost, route.Price, officialPrice)
+			if p.Repositories != nil {
+				_ = p.Repositories.ProxyRequests.Complete(ctx, requestID, "succeeded", "", "")
+			}
+			p.recordTranslatedAttempt(ctx, requestID, attempt, route, entry, clientFormat, candidate, "succeeded", "", nil)
+			return nil, true, used
+		}
 		events, decodeErr := wire.DecodeResponse(candidate, response)
 		if decodeErr != nil {
 			var partial *wire.PartialResponseError

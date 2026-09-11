@@ -1,6 +1,7 @@
 package wire
 
 import (
+	"bufio"
 	"bytes"
 	"encoding/base64"
 	"encoding/json"
@@ -10,6 +11,101 @@ import (
 	"net/http"
 	"strings"
 )
+
+// StreamResponse incrementally decodes an SSE response. The callback is
+// invoked as soon as each semantic event is available; the response body is
+// never buffered in memory. It is intended for proxy pumps where the caller
+// owns downstream encoding and flushing.
+func StreamResponse(format Format, response *http.Response, onEvent func(Event) error) (int, error) {
+	if response == nil || response.Body == nil {
+		return 0, &MalformedResponseError{Format: format, Err: errors.New("empty response")}
+	}
+	defer response.Body.Close()
+	if response.StatusCode < 200 || response.StatusCode >= 300 {
+		return 0, fmt.Errorf("upstream status %d", response.StatusCode)
+	}
+	if !strings.Contains(strings.ToLower(response.Header.Get("Content-Type")), "text/event-stream") {
+		return 0, &MalformedResponseError{Format: format, Err: errors.New("response is not server-sent events")}
+	}
+	if _, err := CodecFor(format); err != nil {
+		return 0, err
+	}
+	count := 0
+	scanner := bufio.NewScanner(response.Body)
+	scanner.Buffer(make([]byte, 64<<10), 1<<20)
+	for scanner.Scan() {
+		line := strings.TrimSpace(scanner.Text())
+		if !strings.HasPrefix(line, "data:") {
+			continue
+		}
+		data := strings.TrimSpace(strings.TrimPrefix(line, "data:"))
+		if data == "" || data == "[DONE]" {
+			continue
+		}
+		var payload map[string]json.RawMessage
+		if json.Unmarshal([]byte(data), &payload) != nil {
+			continue
+		}
+		if len(payload["usage"]) > 0 {
+			var usage Usage
+			decodeUsage(payload, &usage)
+			if err := onEvent(Event{Type: EventUsage, Usage: &usage}); err != nil {
+				return count, err
+			}
+			count++
+		}
+		var event *Event
+		switch format {
+		case FormatChatCompletions:
+			event = decodeChatStreamDelta(payload)
+		case FormatResponses:
+			event = decodeResponsesStreamDelta(payload)
+		case FormatAnthropicMessages:
+			event = decodeAnthropicStreamDelta(payload)
+		}
+		if event == nil {
+			if decoded, decodeErr := decodeStreamResponseEvent(format, payload); decodeErr == nil {
+				event = decoded
+			}
+		}
+		if event == nil {
+			continue
+		}
+		if err := onEvent(*event); err != nil {
+			return count, err
+		}
+		count++
+	}
+	if err := scanner.Err(); err != nil {
+		if count > 0 {
+			return count, &PartialResponseError{Err: err}
+		}
+		return 0, err
+	}
+	if count == 0 {
+		return 0, &MalformedResponseError{Format: format, Err: errors.New("no valid semantic event")}
+	}
+	return count, nil
+}
+
+func decodeStreamResponseEvent(format Format, payload map[string]json.RawMessage) (*Event, error) {
+	var decoded Response
+	var err error
+	switch format {
+	case FormatChatCompletions:
+		decoded, err = decodeChatResponsePayload(payload)
+	case FormatResponses:
+		decoded, err = decodeResponsesResponsePayload(payload)
+	case FormatAnthropicMessages:
+		decoded, err = decodeAnthropicResponsePayload(payload)
+	default:
+		return nil, errors.New("unsupported stream format")
+	}
+	if err != nil {
+		return nil, err
+	}
+	return &Event{Type: EventResponse, Response: &decoded}, nil
+}
 
 type Role string
 
@@ -630,6 +726,92 @@ func EncodeResponse(format Format, events EventStream, w http.ResponseWriter) er
 		return err
 	}
 	return codec.EncodeResponse(events, w)
+}
+
+// StartStream initializes a downstream SSE response.
+func StartStream(format Format, w http.ResponseWriter) (http.Flusher, error) {
+	if err := format.Validate(); err != nil {
+		return nil, err
+	}
+	w.Header().Set("Content-Type", "text/event-stream")
+	w.Header().Set("Cache-Control", "no-cache")
+	w.WriteHeader(http.StatusOK)
+	flusher, _ := w.(http.Flusher)
+	return flusher, nil
+}
+
+// EncodeStreamEvent writes one protocol-specific SSE event and flushes it.
+func EncodeStreamEvent(format Format, event Event, w http.ResponseWriter, flusher http.Flusher) error {
+	var payload any
+	switch format {
+	case FormatChatCompletions:
+		payload = encodeChatStreamEvent(event)
+	case FormatResponses:
+		payload = encodeResponsesStreamEvent(event)
+	case FormatAnthropicMessages:
+		payload = encodeAnthropicStreamEvent(event)
+	default:
+		return format.Validate()
+	}
+	encoded, err := json.Marshal(payload)
+	if err != nil {
+		return err
+	}
+	frame := ""
+	if name := streamEventName(format, event); name != "" {
+		frame += "event: " + name + "\n"
+	}
+	frame += "data: " + string(encoded) + "\n\n"
+	if _, err := io.WriteString(w, frame); err != nil {
+		return err
+	}
+	if flusher != nil {
+		flusher.Flush()
+	}
+	return nil
+}
+
+func streamEventName(format Format, event Event) string {
+	switch format {
+	case FormatResponses:
+		switch event.Type {
+		case EventTextDelta:
+			return "response.output_text.delta"
+		case EventReasoningDelta:
+			return "response.reasoning.delta"
+		case EventToolCallDelta:
+			return "response.function_call_arguments.delta"
+		case EventUsage:
+			return "response.completed"
+		case EventComplete:
+			return "response.completed"
+		}
+	case FormatAnthropicMessages:
+		switch event.Type {
+		case EventTextDelta, EventReasoningDelta, EventToolCallDelta:
+			return "content_block_delta"
+		case EventUsage:
+			return "message_delta"
+		case EventComplete:
+			return "message_stop"
+		}
+	}
+	return ""
+}
+
+// EndStream emits the protocol terminal marker. Chat uses the conventional
+// [DONE] sentinel; the other protocols use a typed terminal event.
+func EndStream(format Format, w http.ResponseWriter, flusher http.Flusher) error {
+	if format == FormatChatCompletions {
+		if _, err := io.WriteString(w, "data: [DONE]\n\n"); err != nil {
+			return err
+		}
+		if flusher != nil {
+			flusher.Flush()
+		}
+		return nil
+	}
+	return EncodeStreamEvent(format, Event{Type: EventComplete}, w, flusher)
 }
 
 func encodeResponseFor(format Format, events EventStream, w http.ResponseWriter, responseEncoder func(Response) any, streamEncoder func(Event) any) error {

@@ -421,5 +421,11 @@ func encodeResponsesResponse(response Response) any {
 }
 
 func encodeResponsesStreamEvent(event Event) any {
+	if event.Type == EventUsage {
+		return map[string]any{"type": "response.completed", "response": map[string]any{"status": "completed", "usage": map[string]any{"input_tokens": event.Usage.InputTokens, "output_tokens": event.Usage.OutputTokens, "total_tokens": event.Usage.TotalTokens}}}
+	}
+	if event.Type == EventComplete {
+		return map[string]any{"type": "response.completed"}
+	}
 	return map[string]any{"type": "response.output_text.delta", "delta": event.Text}
 }

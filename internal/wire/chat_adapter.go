@@ -431,5 +431,11 @@ func encodeChatResponse(response Response) any {
 }
 
 func encodeChatStreamEvent(event Event) any {
+	if event.Type == EventUsage {
+		return map[string]any{"id": "chatcmpl-translation", "object": "chat.completion.chunk", "choices": []any{}, "usage": usageMap(*event.Usage)}
+	}
+	if event.Type == EventReasoningDelta {
+		return map[string]any{"id": "chatcmpl-translation", "object": "chat.completion.chunk", "choices": []any{map[string]any{"index": 0, "delta": map[string]any{"reasoning_content": event.Reasoning}, "finish_reason": nil}}}
+	}
 	return map[string]any{"id": "chatcmpl-translation", "object": "chat.completion.chunk", "choices": []any{map[string]any{"index": 0, "delta": map[string]any{"role": "assistant", "content": event.Text}, "finish_reason": nil}}}
 }

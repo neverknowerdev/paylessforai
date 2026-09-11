@@ -389,5 +389,11 @@ func encodeAnthropicResponse(response Response) any {
 }
 
 func encodeAnthropicStreamEvent(event Event) any {
+	if event.Type == EventUsage {
+		return map[string]any{"type": "message_delta", "delta": map[string]any{}, "usage": map[string]any{"input_tokens": event.Usage.InputTokens, "output_tokens": event.Usage.OutputTokens}}
+	}
+	if event.Type == EventComplete {
+		return map[string]any{"type": "message_stop"}
+	}
 	return map[string]any{"type": "content_block_delta", "delta": map[string]any{"type": "text_delta", "text": event.Text}}
 }

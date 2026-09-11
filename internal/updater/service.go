@@ -348,7 +348,7 @@ func (s *Service) Install(ctx context.Context, version string) error {
 	}
 	s.log(PhaseDownloading, "Starting update download")
 
-	response, err := s.client.Get(artifact.URL)
+	response, err := s.get(ctx, artifact.URL)
 	if err != nil {
 		return s.failInstall(state, PhaseDownloading, fmt.Errorf("download update: %w", err))
 	}
@@ -444,6 +444,18 @@ func (s *Service) log(phase Phase, message string) {
 	_ = s.journal.AppendLog(s.journal.Snapshot().OperationID, phase, message)
 }
 
+// get keeps all updater network requests bound to the caller's context. This
+// matters during shutdown and rollback: an in-flight GitHub or artifact
+// request must not keep the update goroutine alive after its parent operation
+// has been canceled.
+func (s *Service) get(ctx context.Context, url string) (*http.Response, error) {
+	request, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
+	if err != nil {
+		return nil, err
+	}
+	return s.client.Do(request)
+}
+
 func (s *Service) failInstall(state State, phase Phase, cause error) error {
 	if cause == nil {
 		cause = errors.New("update failed")
@@ -512,7 +524,10 @@ func sortReleasesNewestFirst(releases []githubRelease) {
 }
 
 func (s *Service) fetchManifest(ctx context.Context, baseURL, channel string) (Manifest, []byte, error) {
-	req, _ := http.NewRequestWithContext(ctx, http.MethodGet, baseURL, nil)
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, baseURL, nil)
+	if err != nil {
+		return Manifest{}, nil, fmt.Errorf("check updates: %w", err)
+	}
 	req.Header.Set("Accept", "application/vnd.github+json")
 	response, err := s.client.Do(req)
 	if err != nil {
@@ -547,9 +562,13 @@ func (s *Service) fetchManifest(ctx context.Context, baseURL, channel string) (M
 		if manifestAsset.URL == "" {
 			continue
 		}
-		manifestResponse, err := s.client.Get(manifestAsset.URL)
+		manifestResponse, err := s.get(ctx, manifestAsset.URL)
 		if err != nil {
 			return Manifest{}, nil, err
+		}
+		if manifestResponse.StatusCode != http.StatusOK {
+			manifestResponse.Body.Close()
+			return Manifest{}, nil, fmt.Errorf("download update manifest: HTTP %d", manifestResponse.StatusCode)
 		}
 		body, readErr := io.ReadAll(io.LimitReader(manifestResponse.Body, 1<<20))
 		manifestResponse.Body.Close()
@@ -562,9 +581,13 @@ func (s *Service) fetchManifest(ctx context.Context, baseURL, channel string) (M
 		}
 		var signature []byte
 		if signatureAsset.URL != "" {
-			signatureResponse, err := s.client.Get(signatureAsset.URL)
+			signatureResponse, err := s.get(ctx, signatureAsset.URL)
 			if err != nil {
 				return Manifest{}, nil, err
+			}
+			if signatureResponse.StatusCode != http.StatusOK {
+				signatureResponse.Body.Close()
+				return Manifest{}, nil, fmt.Errorf("download update manifest signature: HTTP %d", signatureResponse.StatusCode)
 			}
 			sigBody, readErr := io.ReadAll(io.LimitReader(signatureResponse.Body, 1<<20))
 			signatureResponse.Body.Close()

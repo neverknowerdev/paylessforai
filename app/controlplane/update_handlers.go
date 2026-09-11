@@ -67,7 +67,10 @@ func (s *Server) handleUpdateInstall(w http.ResponseWriter, r *http.Request) {
 	var body struct {
 		Version string `json:"version"`
 	}
-	_ = json.NewDecoder(r.Body).Decode(&body)
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]any{"error": "invalid install request"})
+		return
+	}
 	go func() { _ = s.credentials.Updates.Install(context.Background(), body.Version) }()
 	writeJSON(w, http.StatusAccepted, map[string]any{"accepted": true})
 }

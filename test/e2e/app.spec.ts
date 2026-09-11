@@ -619,6 +619,7 @@ test('shows live update progress, logs, and a reload action through completion',
   });
   await page.route('**/api/updates/install', async (route) => {
     installing = true;
+    expect(route.request().postDataJSON()).toMatchObject({ version: 'main-new' });
     await route.fulfill({ status: 202, contentType: 'application/json', body: JSON.stringify({ accepted: true }) });
   });
   await page.goto('/#settings');
@@ -633,12 +634,20 @@ test('shows live update progress, logs, and a reload action through completion',
   await expect(modal.locator('progress')).toHaveCount(1);
   await expect(page.locator('#update-overall-progress')).toHaveCount(0);
   await expect(modal.locator('.update-target-primary')).toContainText('main-new');
+  await expect(page.locator('#update-progress-current')).toHaveText('main-old');
+  await expect(page.locator('#update-version-jump-value')).toHaveText('1 snapshot update');
   await expect(modal.locator('.update-step-count')).toContainText('Current step');
+  await expect(page.locator('#update-progress-step-current')).toHaveText('1');
   await expect(page.locator('#update-progress-step-total')).toHaveText('9');
+  await expect(page.locator('#update-live-log')).toContainText('Applying database migrations');
+  await expect(page.locator('#update-progress-step-current')).toHaveText('6');
   await expect(page.locator('#update-result-title')).toHaveText('Update successful', { timeout: 8_000 });
   await expect(page.locator('#update-result-message')).toContainText('Reload the page');
   await expect(page.locator('#update-reload')).toBeVisible();
   await expect(page.locator('#update-progress-close')).toBeEnabled();
+  await page.reload();
+  await expect(page.locator('#update-progress-modal')).toBeVisible();
+  await expect(page.locator('#update-result-title')).toHaveText('Update successful');
   await Promise.all([page.waitForLoadState('domcontentloaded'), page.locator('#update-reload').click()]);
   await expect(page).toHaveURL(/#settings$/);
   await expect(page.locator('#update-progress-modal')).toBeHidden();
@@ -673,7 +682,11 @@ test('shows active update status outside Settings and restores open details afte
   await expect(banner).toContainText('main-new');
   await expect(banner).toContainText('Step 6 of 9');
 
-  await banner.locator('#active-update-view').click();
+  await page.reload();
+  await expect(page.locator('#active-update-banner')).toBeVisible();
+  await expect(page.locator('#update-progress-modal')).toBeHidden();
+
+  await page.locator('#active-update-view').click();
   await expect(page).toHaveURL(/#settings$/);
   await expect(page.locator('#update-status-card')).toBeVisible();
   await expect(page.locator('#update-status-card')).toContainText('main-new');
@@ -701,6 +714,9 @@ test('keeps update failure details visible and allows closing the terminal modal
   await expect(page.locator('#update-result-message')).toContainText('candidate failed health check');
   await expect(page.locator('#update-warning')).toContainText('candidate failed health check');
   await expect(page.locator('#update-reload')).toBeHidden();
+  await page.reload();
+  await expect(page.locator('#update-progress-modal')).toBeVisible();
+  await expect(page.locator('#update-result-title')).toHaveText('Update failed');
   await page.locator('#update-result-close').click();
   await expect(page.locator('#update-progress-modal')).toBeHidden();
 });

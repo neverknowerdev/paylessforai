@@ -43,3 +43,24 @@ func TestUpdateSettingsAPI(t *testing.T) {
 		t.Fatalf("bad settings status: %d", bad.Code)
 	}
 }
+
+func TestUpdateInstallAPIRejectsMalformedRequest(t *testing.T) {
+	db, err := dbpkg.Open(context.Background(), filepath.Join(t.TempDir(), "payless.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	service, err := updater.NewService(t.TempDir(), db.Settings, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	server, err := NewWithDeps("127.0.0.1:0", time.Second, time.Second, db, nil, nil, CredentialDeps{Updates: service})
+	if err != nil {
+		t.Fatal(err)
+	}
+	response := httptest.NewRecorder()
+	server.httpServer.Handler.ServeHTTP(response, httptest.NewRequest(http.MethodPost, "/api/updates/install", strings.NewReader("not-json")))
+	if response.Code != http.StatusBadRequest || !strings.Contains(response.Body.String(), "invalid install request") {
+		t.Fatalf("malformed install request: %d %s", response.Code, response.Body.String())
+	}
+}

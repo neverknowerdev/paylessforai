@@ -805,6 +805,12 @@ func StartStream(format Format, w http.ResponseWriter) (http.Flusher, error) {
 		if err := writeSSEFrame(w, flusher, "response.created", map[string]any{"type": "response.created", "response": map[string]any{"id": "resp-translation", "object": "response", "status": "in_progress"}}); err != nil {
 			return flusher, err
 		}
+		if err := writeSSEFrame(w, flusher, "response.output_item.added", map[string]any{"type": "response.output_item.added", "item": map[string]any{"id": "item-translation", "type": "message", "role": "assistant"}}); err != nil {
+			return flusher, err
+		}
+		if err := writeSSEFrame(w, flusher, "response.content_part.added", map[string]any{"type": "response.content_part.added", "item_id": "item-translation", "part": map[string]any{"type": "output_text", "text": ""}}); err != nil {
+			return flusher, err
+		}
 	}
 	if format == FormatAnthropicMessages {
 		if err := writeSSEFrame(w, flusher, "message_start", map[string]any{"type": "message_start", "message": map[string]any{"id": "msg-translation", "type": "message", "role": "assistant", "content": []any{}, "model": "translation"}}); err != nil {
@@ -906,6 +912,17 @@ func EndStream(format Format, w http.ResponseWriter, flusher http.Flusher) error
 			return err
 		}
 		if err := writeSSEFrame(w, flusher, "message_delta", map[string]any{"type": "message_delta", "delta": map[string]any{"stop_reason": "end_turn"}}); err != nil {
+			return err
+		}
+	}
+	if format == FormatResponses {
+		if err := writeSSEFrame(w, flusher, "response.output_text.done", map[string]any{"type": "response.output_text.done", "item_id": "item-translation", "text": ""}); err != nil {
+			return err
+		}
+		if err := writeSSEFrame(w, flusher, "response.content_part.done", map[string]any{"type": "response.content_part.done", "item_id": "item-translation"}); err != nil {
+			return err
+		}
+		if err := writeSSEFrame(w, flusher, "response.output_item.done", map[string]any{"type": "response.output_item.done", "item": map[string]any{"id": "item-translation", "type": "message", "role": "assistant"}}); err != nil {
 			return err
 		}
 	}

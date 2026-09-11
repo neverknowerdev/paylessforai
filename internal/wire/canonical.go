@@ -469,23 +469,23 @@ func DecodeResponse(format Format, response *http.Response) (EventStream, error)
 }
 
 type responsePayloadDecoder func(map[string]json.RawMessage) (Response, error)
-type responseStreamDecoder func(map[string]json.RawMessage) *Event
 
-func decodeResponseFor(format Format, response *http.Response, payloadDecoder responsePayloadDecoder, streamDecoder responseStreamDecoder) (EventStream, error) {
+func decodeResponseFor(format Format, response *http.Response, payloadDecoder responsePayloadDecoder) (EventStream, error) {
 	if response == nil || response.Body == nil {
 		return EventStream{}, &MalformedResponseError{Format: format, Err: errors.New("empty response")}
+	}
+	if IsStreamResponse(response) {
+		events := EventStream{Stream: true}
+		_, err := StreamResponse(format, response, func(event Event) error {
+			events.Events = append(events.Events, event)
+			return nil
+		})
+		return events, err
 	}
 	defer response.Body.Close()
 	body, readErr := io.ReadAll(response.Body)
 	if response.StatusCode < 200 || response.StatusCode >= 300 {
 		return EventStream{}, fmt.Errorf("upstream status %d", response.StatusCode)
-	}
-	if strings.Contains(strings.ToLower(response.Header.Get("Content-Type")), "text/event-stream") {
-		events, err := decodeSSEFor(format, body, payloadDecoder, streamDecoder)
-		if readErr != nil && len(events.Events) > 0 {
-			return events, &PartialResponseError{Err: readErr}
-		}
-		return events, err
 	}
 	if readErr != nil {
 		return EventStream{}, readErr
@@ -582,48 +582,6 @@ func rawObject(value json.RawMessage) (map[string]json.RawMessage, bool) {
 	}
 	return result, true
 }
-func decodeSSEFor(format Format, body []byte, payloadDecoder responsePayloadDecoder, streamDecoder responseStreamDecoder) (EventStream, error) {
-	lines := strings.Split(string(body), "\n")
-	events := make([]Event, 0)
-	valid := false
-	for _, line := range lines {
-		line = strings.TrimSpace(line)
-		if !strings.HasPrefix(line, "data:") {
-			continue
-		}
-		data := strings.TrimSpace(strings.TrimPrefix(line, "data:"))
-		if data == "" || data == "[DONE]" {
-			continue
-		}
-		var payload map[string]json.RawMessage
-		if json.Unmarshal([]byte(data), &payload) != nil {
-			continue
-		}
-		if hasUsage(payload) {
-			var usage Usage
-			decodeUsage(payload, &usage)
-			events = append(events, Event{Type: EventUsage, Usage: &usage})
-		}
-		if delta := streamDecoder(payload); delta != nil {
-			events = append(events, *delta)
-			valid = true
-			continue
-		}
-		if decoded, err := payloadDecoder(payload); err == nil {
-			events = append(events, Event{Type: EventResponse, Response: &decoded})
-			valid = true
-		} else if text := stringValue(payload["text"]); text != "" {
-			events = append(events, Event{Type: EventTextDelta, Text: text})
-			valid = true
-		}
-	}
-	if !valid {
-		return EventStream{}, &MalformedResponseError{Format: format, Err: errors.New("no valid semantic event")}
-	}
-	return EventStream{Events: events, Stream: true}, nil
-}
-
-// EncodeResponse emits a response in the requested client format.
 func EncodeResponse(format Format, events EventStream, w http.ResponseWriter) error {
 	codec, err := CodecFor(format)
 	if err != nil {
@@ -632,7 +590,7 @@ func EncodeResponse(format Format, events EventStream, w http.ResponseWriter) er
 	return codec.EncodeResponse(events, w)
 }
 
-func encodeResponseFor(format Format, events EventStream, w http.ResponseWriter, responseEncoder func(Response) any, streamEncoder func(Event) any) error {
+func encodeResponseFor(format Format, events EventStream, w http.ResponseWriter, responseEncoder func(Response) any) error {
 	if err := format.Validate(); err != nil {
 		return err
 	}
@@ -650,7 +608,7 @@ func encodeResponseFor(format Format, events EventStream, w http.ResponseWriter,
 		response.Text = blocksText(response.Messages[0].Content)
 	}
 	if events.Stream {
-		return encodeStreamFor(events, w, streamEncoder)
+		return encodeStreamFor(format, events, w)
 	}
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusOK)
@@ -672,19 +630,4 @@ func usageMap(usage Usage) map[string]any {
 		result["completion_tokens_details"] = map[string]any{"reasoning_tokens": usage.ReasoningTokens}
 	}
 	return result
-}
-func encodeStreamFor(events EventStream, w http.ResponseWriter, streamEncoder func(Event) any) error {
-	w.Header().Set("Content-Type", "text/event-stream")
-	w.WriteHeader(http.StatusOK)
-	flusher, _ := w.(http.Flusher)
-	for _, event := range events.Events {
-		payload := streamEncoder(event)
-		encoded, _ := json.Marshal(payload)
-		_, _ = io.WriteString(w, "data: "+string(encoded)+"\n\n")
-		if flusher != nil {
-			flusher.Flush()
-		}
-	}
-	_, _ = io.WriteString(w, "data: [DONE]\n\n")
-	return nil
 }

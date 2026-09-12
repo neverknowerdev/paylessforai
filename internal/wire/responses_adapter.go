@@ -3,8 +3,6 @@ package wire
 import (
 	"encoding/json"
 	"errors"
-	"fmt"
-	"io"
 	"net/http"
 	"strings"
 )
@@ -17,13 +15,10 @@ func (responsesAdapter) DecodeRequest(body []byte) (*Request, error) {
 }
 func (responsesAdapter) EncodeRequest(req *Request) ([]byte, error) { return encodeResponses(req) }
 func (responsesAdapter) DecodeResponse(resp *http.Response) (EventStream, error) {
-	if resp != nil && resp.Body != nil && strings.Contains(strings.ToLower(resp.Header.Get("Content-Type")), "text/event-stream") {
-		return decodeResponsesStream(resp)
-	}
-	return decodeResponseFor(FormatResponses, resp, decodeResponsesResponsePayload, decodeResponsesStreamDelta)
+	return decodeResponseFor(FormatResponses, resp, decodeResponsesResponsePayload)
 }
 func (responsesAdapter) EncodeResponse(events EventStream, dst http.ResponseWriter) error {
-	return encodeResponseFor(FormatResponses, events, dst, encodeResponsesResponse, encodeResponsesStreamEvent)
+	return encodeResponseFor(FormatResponses, events, dst, encodeResponsesResponse)
 }
 
 func decodeResponsesOptions(payload map[string]json.RawMessage) (RequestOptions, error) {
@@ -373,7 +368,7 @@ func decodeResponsesResponsePayload(payload map[string]json.RawMessage) (Respons
 					}
 					name := stringValue(item["name"])
 					if strings.TrimSpace(name) == "" {
-						return result, fmt.Errorf("responses tool call %s has no function name", id)
+						return result, errors.New("responses tool call has no function name")
 					}
 					assistant.ToolCalls = append(assistant.ToolCalls, ToolCall{ID: id, Type: "function", Name: name, Arguments: jsonArgument(item["arguments"])})
 					continue
@@ -413,172 +408,18 @@ func responsesFinishReason(status string) string {
 	}
 }
 
-type responsesToolState struct {
-	itemID  string
-	call    ToolCall
-	args    string
-	emitted int
-}
-
-// decodeResponsesStream joins Responses lifecycle events by output item ID.
-// The item ID is the key used by argument deltas; call.ID is the stable ID
-// exposed to the downstream protocol.
-func decodeResponsesStream(resp *http.Response) (EventStream, error) {
-	defer resp.Body.Close()
-	body, err := io.ReadAll(resp.Body)
-	if err != nil {
-		return EventStream{}, &PartialResponseError{Err: err}
-	}
-	states := make(map[string]*responsesToolState)
-	events := make([]Event, 0)
-	var completed *Response
-	valid := false
-	terminal := false
-	nextToolIndex := 0
-	emitTool := func(state *responsesToolState) {
-		if state.call.Name == "" || state.call.ID == "" || state.emitted > len(state.args) {
-			return
-		}
-		fragment := state.args[state.emitted:]
-		events = append(events, Event{Type: EventToolCallDelta, ToolCall: &ToolCall{ID: state.call.ID, Type: "function", Name: state.call.Name, Arguments: json.RawMessage(fragment)}})
-		state.emitted = len(state.args)
-		valid = true
-	}
-	for _, line := range strings.Split(string(body), "\n") {
-		line = strings.TrimSpace(line)
-		if !strings.HasPrefix(line, "data:") {
-			continue
-		}
-		data := strings.TrimSpace(strings.TrimPrefix(line, "data:"))
-		if data == "" || data == "[DONE]" {
-			continue
-		}
-		var payload map[string]json.RawMessage
-		if json.Unmarshal([]byte(data), &payload) != nil {
-			continue
-		}
-		typ := stringValue(payload["type"])
-		switch typ {
-		case "response.output_text.delta":
-			if delta := stringValue(payload["delta"]); delta != "" {
-				events = append(events, Event{Type: EventTextDelta, Text: delta})
-				valid = true
-			}
-		case "response.output_item.added", "response.output_item.done":
-			item, ok := rawObject(payload["item"])
-			if !ok {
-				continue
-			}
-			if itemType := stringValue(item["type"]); itemType != "function_call" && itemType != "custom_tool_call" {
-				continue
-			}
-			itemID := stringValue(item["id"])
-			if itemID == "" {
-				itemID = stringValue(payload["item_id"])
-			}
-			if itemID == "" {
-				continue
-			}
-			state := states[itemID]
-			if state == nil {
-				state = &responsesToolState{itemID: itemID, call: ToolCall{Index: nextToolIndex}}
-				nextToolIndex++
-				states[itemID] = state
-			}
-			if callID := stringValue(item["call_id"]); callID != "" {
-				state.call.ID = callID
-			}
-			if state.call.ID == "" {
-				state.call.ID = itemID
-			}
-			state.call.Type = "function"
-			if name := stringValue(item["name"]); name != "" {
-				state.call.Name = name
-			}
-			if raw := item["arguments"]; len(raw) > 0 {
-				full := jsonArgument(raw)
-				if len(full) > 0 {
-					reconcileResponseArguments(state, string(full))
-				}
-			}
-			if typ == "response.output_item.added" {
-				emitTool(state)
-			}
-			if typ == "response.output_item.done" {
-				emitTool(state)
-			}
-			if typ == "response.output_item.done" && state.call.Name == "" {
-				return EventStream{}, fmt.Errorf("responses tool item %s has no function name", itemID)
-			}
-		case "response.function_call_arguments.delta":
-			itemID := stringValue(payload["item_id"])
-			if itemID == "" {
-				continue
-			}
-			state := states[itemID]
-			if state == nil {
-				state = &responsesToolState{itemID: itemID, call: ToolCall{Index: nextToolIndex}}
-				nextToolIndex++
-				states[itemID] = state
-			}
-			fragment := stringValue(payload["delta"])
-			state.args += fragment
-			if state.call.ID == "" {
-				state.call.ID = itemID
-			}
-			emitTool(state)
-		case "response.function_call_arguments.done":
-			itemID := stringValue(payload["item_id"])
-			state := states[itemID]
-			if state != nil {
-				reconcileResponseArguments(state, string(jsonArgument(payload["arguments"])))
-				emitTool(state)
-			}
-		case "response.completed":
-			value, err := decodeResponsesResponsePayload(payload)
-			if err != nil {
-				return EventStream{Events: events, Stream: true}, &MalformedResponseError{Format: FormatResponses, Err: err}
-			}
-			completed = &value
-			events = append(events, Event{Type: EventResponse, Response: completed})
-			valid = true
-			terminal = true
-		case "response.incomplete":
-			value, err := decodeResponsesResponsePayload(payload)
-			if err != nil {
-				return EventStream{Events: events, Stream: true}, &MalformedResponseError{Format: FormatResponses, Err: err}
-			}
-			completed = &value
-			events = append(events, Event{Type: EventResponse, Response: completed})
-			valid = true
-			terminal = true
-		case "response.failed", "error":
-			return EventStream{}, fmt.Errorf("responses upstream event %s", typ)
-		}
-	}
-	if !valid {
-		return EventStream{}, &MalformedResponseError{Format: FormatResponses, Err: errors.New("no valid semantic event")}
-	}
-	if !terminal {
-		return EventStream{Events: events, Stream: true}, &PartialResponseError{Err: errors.New("responses stream ended before terminal event")}
-	}
-	return EventStream{Events: events, Stream: true}, nil
-}
-
-func reconcileResponseArguments(state *responsesToolState, snapshot string) {
-	if snapshot == "" {
-		return
-	}
-	if state.args == snapshot || strings.HasPrefix(snapshot, state.args) {
-		state.args = snapshot
-		return
-	}
-	if state.args == "" {
-		state.args = snapshot
-	}
-}
-
 func decodeResponsesStreamDelta(payload map[string]json.RawMessage) *Event {
+	typ := stringValue(payload["type"])
+	if typ == "response.function_call_arguments.delta" {
+		arguments := stringValue(payload["delta"])
+		return &Event{Type: EventToolCallDelta, ToolCall: &ToolCall{ID: stringValue(payload["item_id"]), Arguments: json.RawMessage(arguments)}}
+	}
+	if typ == "response.reasoning_text.delta" || typ == "response.reasoning_summary_text.delta" {
+		return &Event{Type: EventReasoningDelta, Reasoning: stringValue(payload["delta"])}
+	}
+	if typ != "" && typ != "response.output_text.delta" {
+		return nil
+	}
 	if text := stringValue(payload["delta"]); text != "" {
 		return &Event{Type: EventTextDelta, Text: text}
 	}
@@ -587,8 +428,8 @@ func decodeResponsesStreamDelta(payload map[string]json.RawMessage) *Event {
 
 func encodeResponsesResponse(response Response) any {
 	output := []any{map[string]any{"type": "message", "role": "assistant", "content": []any{map[string]any{"type": "output_text", "text": response.Text}}}}
-	for _, message := range response.Messages {
-		for _, call := range message.ToolCalls {
+	if len(response.Messages) > 0 {
+		for _, call := range response.Messages[0].ToolCalls {
 			output = append(output, map[string]any{"type": "function_call", "call_id": call.ID, "name": call.Name, "arguments": string(call.Arguments)})
 		}
 	}
@@ -610,5 +451,23 @@ func encodeResponsesResponse(response Response) any {
 }
 
 func encodeResponsesStreamEvent(event Event) any {
+	if event.Type == EventResponse && event.Response != nil {
+		return map[string]any{"type": "response.completed", "response": encodeResponsesResponse(*event.Response)}
+	}
+	if event.Type == EventError && event.Error != nil {
+		return map[string]any{"type": "error", "error": map[string]any{"message": event.Error.Message, "code": event.Error.Code}}
+	}
+	if event.Type == EventUsage {
+		return nil
+	} // Included in the final response snapshot.
+	if event.Type == EventComplete {
+		return map[string]any{"type": "response.completed"}
+	}
+	if event.Type == EventToolCallDelta && event.ToolCall != nil {
+		return map[string]any{"type": "response.function_call_arguments.delta", "delta": string(event.ToolCall.Arguments), "item_id": event.ToolCall.ID}
+	}
+	if event.Type == EventReasoningDelta {
+		return map[string]any{"type": "response.reasoning.delta", "delta": event.Reasoning}
+	}
 	return map[string]any{"type": "response.output_text.delta", "delta": event.Text}
 }

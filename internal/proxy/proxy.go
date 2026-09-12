@@ -1,7 +1,6 @@
 package proxy
 
 import (
-	"bufio"
 	"context"
 	"encoding/json"
 	"errors"
@@ -417,12 +416,15 @@ func (p *Proxy) execute(ctx context.Context, writer http.ResponseWriter, request
 			if request.Stream || strings.Contains(strings.ToLower(response.Header.Get("Content-Type")), "text/event-stream") {
 				streamErr := p.stream(ctx, writer, requestID, response, entry.ExpectedCost, officialExpectedCost, route.Price, officialPrice)
 				if p.Repositories != nil {
-					state, code, message := "succeeded", "", ""
+					state, code := streamOutcome(streamErr)
+					message := ""
 					raw := ""
 					if streamErr != nil {
-						state, code, message, raw = "partial", "stream_error", humanErrorMessage(streamErr), sanitize(streamErr.Error())
+						message, raw = humanErrorMessage(streamErr), sanitize(streamErr.Error())
 					}
-					_ = recordProxyAttemptRoute(ctx, p.Repositories, requestID, totalAttempts, route.ID, route.CredentialID, entry.StageID, strings.Join(entry.StagePath, " / "), route.Provider, route.UpstreamModel, state, code, message, httpStatusPointer(response.StatusCode), raw)
+					finalCtx, cancel := streamFinalizeContext(ctx)
+					_ = recordProxyAttemptRoute(finalCtx, p.Repositories, requestID, totalAttempts, route.ID, route.CredentialID, entry.StageID, strings.Join(entry.StagePath, " / "), route.Provider, route.UpstreamModel, state, code, message, httpStatusPointer(response.StatusCode), raw)
+					cancel()
 				}
 				return streamErr
 			}
@@ -555,18 +557,31 @@ func (p *Proxy) executeTranslatedRoute(ctx context.Context, writer http.Response
 			formatFailure = true
 			continue
 		}
+		if request.Stream && wire.IsStreamResponse(response) {
+			result := pumpTranslatedStream(writer, clientFormat, candidate, response)
+			if result.err != nil && !result.committed {
+				lastErr = result.err
+				p.recordTranslatedAttempt(ctx, requestID, attempt, route, entry, clientFormat, candidate, "failed", "malformed_response", result.err)
+				if !shouldTryNextFormat(result.err, !formatKnown) {
+					break
+				}
+				formatFailure = true
+				continue
+			}
+			streamErr := p.finalizeStream(ctx, requestID, result.stats, entry.ExpectedCost, officialExpectedCost, route.Price, officialPrice, result.err)
+			if streamErr == nil {
+				p.learnTranslatedFormat(ctx, route, candidate)
+			}
+			p.recordTranslatedStreamAttempt(ctx, requestID, attempt, route, entry, clientFormat, candidate, streamErr)
+			return streamErr, true, used
+		}
 		events, decodeErr := wire.DecodeResponse(candidate, response)
 		if decodeErr != nil {
 			var partial *wire.PartialResponseError
 			if errors.As(decodeErr, &partial) && len(events.Events) > 0 {
-				if request.Stream {
-					_ = wire.EncodeResponse(clientFormat, events, writer)
-				}
-				if p.Repositories != nil {
-					_ = p.Repositories.ProxyRequests.Complete(ctx, requestID, "partial", "stream_error", sanitize(decodeErr.Error()))
-				}
-				p.recordTranslatedAttempt(ctx, requestID, attempt, route, entry, clientFormat, candidate, "partial", "stream_error", decodeErr)
-				return &partialStreamError{err: decodeErr}, true, used
+				streamErr := p.completeTranslatedStream(ctx, writer, requestID, events, entry.ExpectedCost, officialExpectedCost, route.Price, officialPrice, clientFormat, decodeErr)
+				p.recordTranslatedStreamAttempt(ctx, requestID, attempt, route, entry, clientFormat, candidate, streamErr)
+				return streamErr, true, used
 			}
 			lastErr = decodeErr
 			p.recordTranslatedAttempt(ctx, requestID, attempt, route, entry, clientFormat, candidate, "failed", "malformed_response", decodeErr)
@@ -576,19 +591,11 @@ func (p *Proxy) executeTranslatedRoute(ctx context.Context, writer http.Response
 			formatFailure = true
 			continue
 		}
-		// EventStream.Stream describes the upstream transport. The client
-		// request is authoritative for the downstream transport, so an SSE
-		// provider response can be reduced to JSON and vice versa.
-		events.Stream = request.Stream
-		if p.Repositories != nil {
-			if err := persistLearnedFormat(ctx, p.Repositories, route, candidate); err != nil {
-				// A valid upstream response is still useful. Persistence errors
-				// are intentionally observable but do not discard that response.
-				lastErr = err
-			}
-		}
-		if p.Catalog != nil {
-			p.Catalog.LearnFormat(route.ID, candidate)
+		p.learnTranslatedFormat(ctx, route, candidate)
+		if request.Stream {
+			streamErr := p.completeTranslatedStream(ctx, writer, requestID, events, entry.ExpectedCost, officialExpectedCost, route.Price, officialPrice, clientFormat, nil)
+			p.recordTranslatedStreamAttempt(ctx, requestID, attempt, route, entry, clientFormat, candidate, streamErr)
+			return streamErr, true, used
 		}
 		completeErr := p.completeTranslated(ctx, writer, requestID, events, entry.ExpectedCost, officialExpectedCost, route.Price, officialPrice, clientFormat)
 		if completeErr != nil {
@@ -723,7 +730,7 @@ func mergeWireUsage(dst *usage.Stats, src wire.Usage) {
 	if src.OutputTokens != 0 {
 		dst.OutputTokens = src.OutputTokens
 	}
-	if src.TotalTokens != 0 {
+	if src.TotalTokens >= src.InputTokens+src.OutputTokens && src.TotalTokens >= dst.TotalTokens {
 		dst.TotalTokens = src.TotalTokens
 	}
 	if src.CachedReadTokens != 0 {
@@ -738,6 +745,11 @@ func mergeWireUsage(dst *usage.Stats, src wire.Usage) {
 	if src.InputTokensNetOfCache {
 		dst.InputTokensNetOfCache = true
 	}
+	total := dst.InputTokens + dst.OutputTokens
+	if dst.InputTokensNetOfCache {
+		total += dst.CachedReadTokens + dst.CacheWriteTokens
+	}
+	dst.TotalTokens = max(dst.TotalTokens, total)
 }
 
 func (p *Proxy) complete(ctx context.Context, writer http.ResponseWriter, requestID string, response *http.Response, expectedCost, officialExpectedCost int64, price, officialPrice matcher.Price) error {
@@ -754,78 +766,6 @@ func (p *Proxy) complete(ctx context.Context, writer http.ResponseWriter, reques
 		_ = p.Repositories.ProxyRequests.Complete(ctx, requestID, "succeeded", "", "")
 	}
 	return nil
-}
-
-func (p *Proxy) stream(ctx context.Context, writer http.ResponseWriter, requestID string, response *http.Response, expectedCost, officialExpectedCost int64, price, officialPrice matcher.Price) error {
-	defer response.Body.Close()
-	copyHeaders(writer.Header(), response.Header)
-	writer.WriteHeader(response.StatusCode)
-	flusher, _ := writer.(http.Flusher)
-	reader := bufio.NewReaderSize(response.Body, 64<<10)
-	stats := usage.Stats{}
-	for {
-		line, err := reader.ReadBytes('\n')
-		if len(line) > 0 {
-			if _, writeErr := writer.Write(line); writeErr != nil {
-				return writeErr
-			}
-			if flusher != nil {
-				flusher.Flush()
-			}
-			observeSSE(line, &stats)
-		}
-		if err != nil {
-			if errors.Is(err, io.EOF) {
-				persistUsage(ctx, p.Repositories, requestID, stats, expectedCost, officialExpectedCost, price, officialPrice)
-				if p.Repositories != nil {
-					_ = p.Repositories.ProxyRequests.Complete(ctx, requestID, "succeeded", "", "")
-				}
-				return nil
-			}
-			if p.Repositories != nil {
-				_ = p.Repositories.ProxyRequests.Complete(ctx, requestID, "partial", "stream_error", sanitize(err.Error()))
-			}
-			return &partialStreamError{err: err}
-		}
-	}
-}
-
-func observeSSE(line []byte, stats *usage.Stats) {
-	trimmed := strings.TrimSpace(string(line))
-	if !strings.HasPrefix(trimmed, "data:") {
-		return
-	}
-	data := strings.TrimSpace(strings.TrimPrefix(trimmed, "data:"))
-	if data == "" || data == "[DONE]" {
-		return
-	}
-	var envelope map[string]any
-	if json.Unmarshal([]byte(data), &envelope) != nil {
-		return
-	}
-	observed := usage.FromEnvelope(envelope)
-	if observed.InputTokens != 0 {
-		stats.InputTokens = observed.InputTokens
-	}
-	if observed.OutputTokens != 0 {
-		stats.OutputTokens = observed.OutputTokens
-	}
-	if observed.TotalTokens != 0 {
-		stats.TotalTokens = observed.TotalTokens
-	}
-	if observed.CachedReadTokens != 0 {
-		stats.CachedReadTokens = observed.CachedReadTokens
-	}
-	if observed.CacheWriteTokens != 0 {
-		stats.CacheWriteTokens = observed.CacheWriteTokens
-	}
-	if observed.ReasoningTokens != 0 {
-		stats.ReasoningTokens = observed.ReasoningTokens
-	}
-	if observed.ActualCostPicoUSD != nil {
-		stats.ActualCostPicoUSD = observed.ActualCostPicoUSD
-	}
-	stats.Raw = observed.Raw
 }
 
 func persistUsage(ctx context.Context, repos *repositories.Repositories, requestID string, stats usage.Stats, expectedCost, officialExpectedCost int64, price, officialPrice matcher.Price) {

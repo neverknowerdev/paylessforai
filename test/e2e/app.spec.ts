@@ -596,6 +596,131 @@ test('shows an error and restores the update button when the check request times
   await expect(checkButton).toHaveText('Check for updates');
 });
 
+test('shows live update progress, logs, and a reload action through completion', async ({ page }) => {
+  let installing = false;
+  let poll = 0;
+  const phases = [
+    { phase: 'downloading', download_bytes: 250, download_total_bytes: 1000, overall_progress: 17, message: 'Downloading release archive' },
+    { phase: 'verified', download_bytes: 1000, download_total_bytes: 1000, message: 'Archive checksum verified' },
+    { phase: 'migrating', download_bytes: 1000, download_total_bytes: 1000, message: 'Applying database migrations' },
+    { phase: 'promoted', download_bytes: 1000, download_total_bytes: 1000, message: 'New version promoted successfully' },
+  ];
+  const payload = (state: Record<string, unknown>) => ({
+    build: { version: 'main-old', channel: 'main', commit: 'old-commit', os: 'darwin', arch: 'arm64' },
+    settings: { enabled: true, channel: 'main', interval_seconds: 900 },
+    available: { version: 'main-new', channel: 'main', commit: 'new-commit' },
+    state: { operation_id: 'operation-e2e', candidate_version: 'main-new', candidate_channel: 'main', candidate_commit: 'new-commit', ...state },
+    logs: [{ at: '2026-09-07T10:00:00Z', phase: String(state.phase), message: state.message }],
+    history: [],
+  });
+  await page.route('**/api/updates', async (route) => {
+    const state = installing ? phases[Math.min(poll++, phases.length - 1)] : { phase: 'available', message: 'Update is ready to install' };
+    await route.fulfill({ contentType: 'application/json', body: JSON.stringify(payload(state)) });
+  });
+  await page.route('**/api/updates/install', async (route) => {
+    installing = true;
+    expect(route.request().postDataJSON()).toMatchObject({ version: 'main-new' });
+    await route.fulfill({ status: 202, contentType: 'application/json', body: JSON.stringify({ accepted: true }) });
+  });
+  await page.goto('/#settings');
+  await page.locator('#updates-install').click();
+  const modal = page.locator('#update-progress-modal');
+  await expect(modal).toBeVisible();
+  await expect(modal).toContainText('main-new');
+  await expect(page.locator('#update-progress-channel')).toHaveText('Channel main');
+  await expect(page.locator('#update-progress-commit')).toHaveText('Commit new-commit');
+  await expect(page.locator('#update-live-log')).toContainText('Downloading release archive');
+  await expect(page.locator('#update-download-progress')).toHaveAttribute('aria-valuenow', '25');
+  await expect(modal.locator('progress')).toHaveCount(1);
+  await expect(page.locator('#update-overall-progress')).toHaveCount(0);
+  await expect(modal.locator('.update-target-primary')).toContainText('main-new');
+  await expect(page.locator('#update-progress-current')).toHaveText('main-old');
+  await expect(page.locator('#update-version-jump-value')).toHaveText('1 snapshot update');
+  await expect(modal.locator('.update-step-count')).toContainText('Current step');
+  await expect(page.locator('#update-progress-step-current')).toHaveText('1');
+  await expect(page.locator('#update-progress-step-total')).toHaveText('9');
+  await expect(page.locator('#update-live-log')).toContainText('Applying database migrations');
+  await expect(page.locator('#update-progress-step-current')).toHaveText('6');
+  await expect(page.locator('#update-result-title')).toHaveText('Update successful', { timeout: 8_000 });
+  await expect(page.locator('#update-result-message')).toContainText('Reload the page');
+  await expect(page.locator('#update-reload')).toBeVisible();
+  await expect(page.locator('#update-progress-close')).toBeEnabled();
+  await page.reload();
+  await expect(page.locator('#update-progress-modal')).toBeVisible();
+  await expect(page.locator('#update-result-title')).toHaveText('Update successful');
+  await Promise.all([page.waitForLoadState('domcontentloaded'), page.locator('#update-reload').click()]);
+  await expect(page).toHaveURL(/#settings$/);
+  await expect(page.locator('#update-progress-modal')).toBeHidden();
+});
+
+test('shows active update status outside Settings and restores open details after reload', async ({ page }) => {
+  const payload = {
+    build: { version: 'main-old', channel: 'main', commit: 'old-commit', os: 'darwin', arch: 'arm64' },
+    settings: { enabled: true, channel: 'main', interval_seconds: 900 },
+    available: null,
+    state: {
+      operation_id: 'active-operation-e2e',
+      phase: 'migrating',
+      candidate_version: 'main-new',
+      candidate_channel: 'main',
+      candidate_commit: 'new-commit',
+      download_bytes: 750,
+      download_total_bytes: 1000,
+      overall_progress: 82,
+    },
+    logs: [{ phase: 'migrating', message: 'Applying database migrations' }],
+    history: [],
+  };
+  await page.route('**/api/updates', async (route) => {
+    await route.fulfill({ contentType: 'application/json', body: JSON.stringify(payload) });
+  });
+  await page.goto('/#overview');
+
+  const banner = page.locator('#active-update-banner');
+  await expect(banner).toBeVisible();
+  await expect(banner).toContainText('Updating to main-new');
+  await expect(banner).toContainText('main-new');
+  await expect(banner).toContainText('Step 6 of 9');
+
+  await page.reload();
+  await expect(page.locator('#active-update-banner')).toBeVisible();
+  await expect(page.locator('#update-progress-modal')).toBeHidden();
+
+  await page.locator('#active-update-view').click();
+  await expect(page).toHaveURL(/#settings$/);
+  await expect(page.locator('#update-status-card')).toBeVisible();
+  await expect(page.locator('#update-status-card')).toContainText('main-new');
+  await page.locator('#update-status-view').click();
+  await expect(page.locator('#update-progress-modal')).toBeVisible();
+  await expect(page.locator('#update-progress-target')).toHaveText('main-new');
+
+  await page.reload();
+  await expect(page).toHaveURL(/#settings$/);
+  await expect(page.locator('#update-progress-modal')).toBeVisible();
+  await expect(page.locator('#update-progress-target')).toHaveText('main-new');
+  await expect(page.locator('#update-live-log')).toContainText('Applying database migrations');
+});
+
+test('keeps update failure details visible and allows closing the terminal modal', async ({ page }) => {
+  let installing = false;
+  await page.route('**/api/updates', async (route) => {
+    const state: Record<string, unknown> = installing ? { operation_id: 'failed-operation-e2e', phase: 'failed', candidate_version: 'v9.9.9', error: 'candidate failed health check', failed_phase: 'stabilizing' } : { operation_id: 'previous-operation-e2e', phase: 'available' };
+    await route.fulfill({ contentType: 'application/json', body: JSON.stringify({ build: { version: 'v1.0.0' }, settings: { enabled: true, channel: 'releases', interval_seconds: 900 }, available: { version: 'v9.9.9', channel: 'releases', commit: 'bad-commit' }, state, logs: [{ phase: state.phase, message: state.error || 'ready' }], history: [] }) });
+  });
+  await page.route('**/api/updates/install', async (route) => { installing = true; await route.fulfill({ status: 202, contentType: 'application/json', body: JSON.stringify({ accepted: true }) }); });
+  await page.goto('/#settings');
+  await page.locator('#updates-install').click();
+  await expect(page.locator('#update-result-title')).toHaveText('Update failed', { timeout: 8_000 });
+  await expect(page.locator('#update-result-message')).toContainText('candidate failed health check');
+  await expect(page.locator('#update-warning')).toContainText('candidate failed health check');
+  await expect(page.locator('#update-reload')).toBeHidden();
+  await page.reload();
+  await expect(page.locator('#update-progress-modal')).toBeVisible();
+  await expect(page.locator('#update-result-title')).toHaveText('Update failed');
+  await page.locator('#update-result-close').click();
+  await expect(page.locator('#update-progress-modal')).toBeHidden();
+});
+
 test('switches remote access modes with direct Tailscale auth and a running-server stop confirmation', async ({ page }) => {
   let mode = 'disabled';
   let phase = 'disabled';

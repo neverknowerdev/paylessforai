@@ -327,6 +327,23 @@ func (m *Manager) ClearFormat(routeID string) {
 	}
 }
 
+// LearnStructuredOutput updates the in-memory capability after a request-time
+// probe. Durable persistence is handled by the proxy repository.
+func (m *Manager) LearnStructuredOutput(routeID string, supported bool) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	for index := range m.current.Routes {
+		if m.current.Routes[index].ID != routeID {
+			continue
+		}
+		m.current.Routes[index].Capabilities.StructuredOutput = supported
+		if m.current.Routes[index].Capabilities.Parameters == nil {
+			m.current.Routes[index].Capabilities.Parameters = make(map[string]bool)
+		}
+		m.current.Routes[index].Capabilities.Parameters["response_format"] = supported
+	}
+}
+
 var hyphenatedVersion = regexp.MustCompile(`([0-9]+)-([0-9]+)`)
 
 // logicalModel produces a provider-neutral, stable public slug. Namespaces

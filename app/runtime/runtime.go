@@ -290,6 +290,14 @@ func (c credentialClient) CredentialID() string               { return c.id }
 func (c credentialClient) AccountLabel() string               { return c.account }
 func (c credentialClient) BillingClass() matcher.BillingClass { return c.billing }
 
+func (c credentialClient) ProbeStructuredOutput(ctx context.Context, model providers.Model) error {
+	prober, ok := c.Client.(providers.StructuredOutputProber)
+	if !ok {
+		return fmt.Errorf("structured output probing is unavailable")
+	}
+	return prober.ProbeStructuredOutput(ctx, model)
+}
+
 // TranslationEnabled and the forwarding methods preserve optional
 // translation support through the credential/account wrapper. Embedding the
 // base Client interface alone hides methods implemented by the concrete

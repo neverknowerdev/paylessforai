@@ -15,6 +15,16 @@ type fakeClient struct {
 	models []providers.Model
 }
 
+type probeCountingClient struct {
+	fakeClient
+	probes int
+}
+
+func (c *probeCountingClient) ProbeStructuredOutput(context.Context, providers.Model) error {
+	c.probes++
+	return nil
+}
+
 func (f fakeClient) Name() string                                        { return f.name }
 func (f fakeClient) Discover(context.Context) ([]providers.Model, error) { return f.models, nil }
 func (f fakeClient) Do(context.Context, matcher.Protocol, string, []byte, string) (*http.Response, error) {
@@ -33,6 +43,17 @@ func TestRefreshMergesOpenRouterAndSurplusAliases(t *testing.T) {
 	snapshot := manager.Snapshot()
 	if len(snapshot.Routes) != 2 || snapshot.Routes[0].LogicalModel != "model-a" || snapshot.Routes[1].LogicalModel != "model-a" {
 		t.Fatalf("unexpected snapshot: %#v", snapshot)
+	}
+}
+
+func TestRefreshDoesNotProbeModelsWithoutStructuredOutputMetadata(t *testing.T) {
+	client := &probeCountingClient{fakeClient: fakeClient{name: "opencode-go", models: []providers.Model{{ID: "unknown"}}}}
+	manager := New([]providers.Client{client})
+	if err := manager.Refresh(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	if client.probes != 0 {
+		t.Fatalf("catalog refresh probed %d models, want zero", client.probes)
 	}
 }
 

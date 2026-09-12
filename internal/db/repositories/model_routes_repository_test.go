@@ -23,6 +23,21 @@ func TestModelRoutesRepositoryIntegration(t *testing.T) {
 	if got, ok, err := i.repos.ModelRoutes.GetFormat(i.ctx, route.ID); err != nil || !ok || got != wire.FormatResponses {
 		t.Fatalf("learned format was not loaded: %v %v %v", got, ok, err)
 	}
+	if supported, known, err := i.repos.ModelRoutes.GetStructuredOutputCapability(i.ctx, route.ID); err != nil || known || supported {
+		t.Fatalf("structured output should start unknown: %v %v %v", supported, known, err)
+	}
+	if err := i.repos.ModelRoutes.SetStructuredOutputCapability(i.ctx, route.ID, true); err != nil {
+		t.Fatal(err)
+	}
+	if supported, known, err := i.repos.ModelRoutes.GetStructuredOutputCapability(i.ctx, route.ID); err != nil || !known || !supported {
+		t.Fatalf("structured output result was not persisted: %v %v %v", supported, known, err)
+	}
+	if err := i.repos.ModelRoutes.SetStructuredOutputCapability(i.ctx, route.ID, false); err != nil {
+		t.Fatal(err)
+	}
+	if supported, known, err := i.repos.ModelRoutes.GetStructuredOutputCapability(i.ctx, route.ID); err != nil || !known || supported {
+		t.Fatalf("negative structured output result was not persisted: %v %v %v", supported, known, err)
+	}
 	if err := i.repos.ModelRoutes.ClearFormat(i.ctx, route.ID); err != nil {
 		t.Fatal(err)
 	}

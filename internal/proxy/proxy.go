@@ -137,11 +137,22 @@ func (p *Proxy) ServeHTTP(w http.ResponseWriter, r *http.Request, protocol match
 		return
 	}
 	snapshot := p.Catalog.Snapshot()
-	plan := routing.BuildDirect(request.MatchRequest(protocol), snapshot.Routes, time.Now().UTC())
+	matchRequest := request.MatchRequest(protocol)
+	if request.RequireStructured {
+		// Structured capability is resolved lazily for the exact route below.
+		// Keep unknown routes in the initial ranking so a request can probe only
+		// the candidates it actually needs instead of the whole catalog.
+		matchRequest.RequireStructured = false
+		matchRequest.RequiredParameters = withoutStructuredOutputParameter(matchRequest.RequiredParameters)
+	}
+	plan := routing.BuildDirect(matchRequest, snapshot.Routes, time.Now().UTC())
 	if p.Groups != nil {
 		if definition, ok := p.Groups.FindBySlug(request.Model); ok {
-			plan = routing.BuildGroup(request.MatchRequest(protocol), definition, p.Groups.DefinitionsByID(), snapshot.Routes, time.Now().UTC(), routing.DefaultLimits())
+			plan = routing.BuildGroup(matchRequest, definition, p.Groups.DefinitionsByID(), snapshot.Routes, time.Now().UTC(), routing.DefaultLimits())
 		}
+	}
+	if request.RequireStructured {
+		plan = p.resolveStructuredPlan(r.Context(), plan)
 	}
 	if p.Repositories != nil {
 		// Persist the complete plan even when every route was rejected. The
@@ -176,6 +187,142 @@ func (p *Proxy) ServeHTTP(w http.ResponseWriter, r *http.Request, protocol match
 		}
 		writeError(w, statusFor(err), errorCode(err), sanitize(err.Error()))
 	}
+}
+
+func withoutStructuredOutputParameter(parameters []string) []string {
+	result := make([]string, 0, len(parameters))
+	for _, parameter := range parameters {
+		if strings.EqualFold(strings.TrimSpace(parameter), "response_format") || strings.EqualFold(strings.TrimSpace(parameter), "structured_outputs") {
+			continue
+		}
+		result = append(result, parameter)
+	}
+	return result
+}
+
+// resolveStructuredPlan performs request-time capability discovery only for
+// routes that survived normal model and policy ranking. Probe outcomes are
+// persisted per route, so later requests use the database marker directly.
+func (p *Proxy) resolveStructuredPlan(ctx context.Context, plan routing.Plan) routing.Plan {
+	resolved := plan
+	resolved.Entries = nil
+	deferUnknown := false
+	for _, entry := range plan.Entries {
+		if deferUnknown {
+			// Keep fallback candidates in the plan without probing them now. If
+			// the selected route fails, execute() verifies the next candidate
+			// immediately before sending its first real request.
+			resolved.Entries = append(resolved.Entries, entry)
+			continue
+		}
+		supported, known, err := p.ensureStructuredOutput(ctx, entry.Route)
+		if err != nil {
+			resolved.Rejections = append(resolved.Rejections, matcher.RouteRejection{RouteID: entry.Route.ID, Code: "structured_output_probe_failed", Detail: err.Error()})
+			continue
+		}
+		if !known || !supported {
+			code, detail := "structured_output_unsupported", "route does not support structured output"
+			if !known {
+				code, detail = "structured_output_unknown", "route structured output capability could not be verified"
+			}
+			resolved.Rejections = append(resolved.Rejections, matcher.RouteRejection{RouteID: entry.Route.ID, Code: code, Detail: detail})
+			continue
+		}
+		entry.Route.Capabilities.StructuredOutput = true
+		if entry.Route.Capabilities.Parameters == nil {
+			entry.Route.Capabilities.Parameters = make(map[string]bool)
+		}
+		entry.Route.Capabilities.Parameters["response_format"] = true
+		resolved.Entries = append(resolved.Entries, entry)
+		deferUnknown = true
+	}
+	if len(resolved.Entries) == 0 {
+		resolved.Error = &matcher.MatchError{Code: "no_eligible_route", Message: "no healthy compatible route is available"}
+	}
+	return resolved
+}
+
+func (p *Proxy) ensureStructuredOutput(ctx context.Context, route matcher.Route) (supported, known bool, err error) {
+	if p.Repositories != nil {
+		if value, exists, lookupErr := p.Repositories.ModelRoutes.GetStructuredOutputCapability(ctx, route.ID); lookupErr == nil && exists {
+			return value, true, nil
+		}
+	}
+	if route.Capabilities.StructuredOutput {
+		return true, true, nil
+	}
+	client := p.Catalog.ClientForRoute(route)
+	prober, ok := client.(providers.StructuredOutputProber)
+	if !ok {
+		return false, false, nil
+	}
+	lock := p.routeFormatLock(route.ID)
+	lock.Lock()
+	defer lock.Unlock()
+	// Another request may have completed the probe while this request waited.
+	if p.Repositories != nil {
+		if value, exists, lookupErr := p.Repositories.ModelRoutes.GetStructuredOutputCapability(ctx, route.ID); lookupErr == nil && exists {
+			return value, true, nil
+		}
+	}
+	probeCtx, cancel := context.WithTimeout(ctx, 15*time.Second)
+	probeErr := prober.ProbeStructuredOutput(probeCtx, providers.Model{ID: route.UpstreamModel, Format: route.Format})
+	cancel()
+	if probeErr != nil {
+		var unsupported *providers.StructuredOutputUnsupportedError
+		if !errors.As(probeErr, &unsupported) {
+			return false, false, probeErr
+		}
+		p.persistStructuredOutputCapability(ctx, route, false)
+		if p.Catalog != nil {
+			p.Catalog.LearnStructuredOutput(route.ID, false)
+		}
+		return false, true, nil
+	}
+	p.persistStructuredOutputCapability(ctx, route, true)
+	if p.Catalog != nil {
+		p.Catalog.LearnStructuredOutput(route.ID, true)
+	}
+	return true, true, nil
+}
+
+func (p *Proxy) persistStructuredOutputCapability(ctx context.Context, route matcher.Route, supported bool) error {
+	if p.Repositories == nil {
+		return nil
+	}
+	if err := p.Repositories.ModelRoutes.SetStructuredOutputCapability(ctx, route.ID, supported); err == nil {
+		return nil
+	}
+	price, err := json.Marshal(route.Price)
+	if err != nil {
+		return err
+	}
+	route.Capabilities.StructuredOutput = supported
+	if route.Capabilities.Parameters == nil {
+		route.Capabilities.Parameters = make(map[string]bool)
+	}
+	route.Capabilities.Parameters["response_format"] = supported
+	capabilities, err := json.Marshal(route.Capabilities)
+	if err != nil {
+		return err
+	}
+	capabilityFields := map[string]json.RawMessage{}
+	if err := json.Unmarshal(capabilities, &capabilityFields); err != nil {
+		return err
+	}
+	probeMarker, err := json.Marshal(supported)
+	if err != nil {
+		return err
+	}
+	capabilityFields["structured_output_probe"] = probeMarker
+	capabilities, err = json.Marshal(capabilityFields)
+	if err != nil {
+		return err
+	}
+	if err := p.Repositories.Models.Upsert(ctx, models.ModelRecord{ID: route.LogicalModel, DisplayName: route.LogicalModel, ContextLength: route.Capabilities.MaxContext, MaxOutputTokens: route.Capabilities.MaxOutput, MetadataJSON: "{}", ObservedAt: time.Now().UTC().Format(time.RFC3339Nano)}); err != nil {
+		return err
+	}
+	return p.Repositories.ModelRoutes.Upsert(ctx, models.ModelRouteRecord{ID: route.ID, ModelID: route.LogicalModel, Provider: route.Provider, UpstreamModel: route.UpstreamModel, Format: string(route.Format), PriceJSON: string(price), CapabilitiesJSON: string(capabilities), Health: string(route.Health), ObservedAt: time.Now().UTC().Format(time.RFC3339Nano), Trusted: route.Trusted})
 }
 
 type parsedRequest struct {
@@ -329,6 +476,24 @@ func (p *Proxy) execute(ctx context.Context, writer http.ResponseWriter, request
 		route := entry.Route
 		if retriesRemaining < 0 {
 			retriesRemaining = entry.SameRouteRetries
+		}
+		if request.RequireStructured && !route.Capabilities.StructuredOutput {
+			supported, known, probeErr := p.ensureStructuredOutput(ctx, route)
+			if probeErr != nil {
+				lastAttemptErrorCode = "structured_output_probe_failed"
+				providerErrors = append(providerErrors, providerError{Provider: route.Provider, Account: route.Account, Error: probeErr.Error()})
+			}
+			if !known || !supported {
+				current++
+				retriesRemaining = -1
+				continue
+			}
+			route.Capabilities.StructuredOutput = true
+			if route.Capabilities.Parameters == nil {
+				route.Capabilities.Parameters = make(map[string]bool)
+			}
+			route.Capabilities.Parameters["response_format"] = true
+			entry.Route = route
 		}
 		blockKey := route.ExecutionKey
 		if blockKey == "" {

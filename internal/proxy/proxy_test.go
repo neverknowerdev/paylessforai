@@ -32,6 +32,12 @@ type fakeProvider struct {
 	responses  []func(*http.Request) (*http.Response, error)
 }
 
+type proxyRoundTripFunc func(*http.Request) (*http.Response, error)
+
+func (f proxyRoundTripFunc) RoundTrip(request *http.Request) (*http.Response, error) {
+	return f(request)
+}
+
 type metadataProvider struct {
 	*fakeProvider
 	executionKey string
@@ -534,6 +540,73 @@ func TestParseRequestDetectsStructuredOutputInAllFormats(t *testing.T) {
 		if !request.RequireStructured {
 			t.Fatalf("structured output was not detected for %s", test.format)
 		}
+	}
+}
+
+func TestProxyLazilyProbesStructuredOutputAndPersistsResult(t *testing.T) {
+	client := providers.NewHTTPClient("opencode-go", "https://provider.invalid/v1", "key")
+	requests := 0
+	client.Client = &http.Client{Transport: proxyRoundTripFunc(func(r *http.Request) (*http.Response, error) {
+		requests++
+		if requests == 1 {
+			return successResponse(`{"choices":[{"message":{"role":"assistant","content":"{\"value\":\"ok\"}"}}]}`), nil
+		}
+		return successResponse(`{"id":"ok","choices":[{"message":{"role":"assistant","content":"done"}}],"usage":{"prompt_tokens":2,"completion_tokens":1,"total_tokens":3}}`), nil
+	})}
+	provider := &translatingProvider{HTTPClient: client, models: []providers.Model{{ID: "model-a", Format: wire.FormatChatCompletions, Pricing: matcher.Price{InputPicoUSDPerToken: 1, OutputPicoUSDPerToken: 1}, PriceAvailable: true}}}
+	proxy, db, secret := testProxy(t, provider)
+	defer db.Close()
+	body := `{"model":"model-a","messages":[{"role":"user","content":"hello"}],"response_format":{"type":"json_schema","json_schema":{"name":"answer","strict":true,"schema":{"type":"object"}}}}`
+	for attempt := 0; attempt < 2; attempt++ {
+		request := httptest.NewRequest(http.MethodPost, "/v1/chat/completions", strings.NewReader(body))
+		request.Header.Set("Authorization", "Bearer "+secret)
+		response := httptest.NewRecorder()
+		proxy.ServeHTTP(response, request, matcher.ProtocolChatCompletions)
+		if response.Code != http.StatusOK {
+			t.Fatalf("request %d failed: %d %s", attempt+1, response.Code, response.Body.String())
+		}
+	}
+	if requests != 3 {
+		t.Fatalf("expected one probe plus two inference requests, got %d requests", requests)
+	}
+	routeID := "opencode-go:model-a"
+	supported, known, err := db.ModelRoutes.GetStructuredOutputCapability(context.Background(), routeID)
+	if err != nil || !known || !supported {
+		record, recordErr := db.ModelRoutes.Get(context.Background(), routeID)
+		t.Fatalf("probe result was not persisted for %s: supported=%v known=%v err=%v record=%+v recordErr=%v", routeID, supported, known, err, record, recordErr)
+	}
+}
+
+func TestProxyPersistsNegativeStructuredOutputProbeResult(t *testing.T) {
+	client := providers.NewHTTPClient("opencode-go", "https://provider.invalid/v1", "key")
+	requests := 0
+	client.Client = &http.Client{Transport: proxyRoundTripFunc(func(r *http.Request) (*http.Response, error) {
+		requests++
+		return successResponse(`{"choices":[{"message":{"role":"assistant","content":"not json"}}]}`), nil
+	})}
+	provider := &translatingProvider{HTTPClient: client, models: []providers.Model{{ID: "model-a", Format: wire.FormatChatCompletions, Pricing: matcher.Price{InputPicoUSDPerToken: 1, OutputPicoUSDPerToken: 1}, PriceAvailable: true}}}
+	proxy, db, secret := testProxy(t, provider)
+	defer db.Close()
+	body := `{"model":"model-a","messages":[{"role":"user","content":"hello"}],"response_format":{"type":"json_object"}}`
+	firstRequests := 0
+	for attempt := 0; attempt < 2; attempt++ {
+		request := httptest.NewRequest(http.MethodPost, "/v1/chat/completions", strings.NewReader(body))
+		request.Header.Set("Authorization", "Bearer "+secret)
+		response := httptest.NewRecorder()
+		proxy.ServeHTTP(response, request, matcher.ProtocolChatCompletions)
+		if response.Code != http.StatusServiceUnavailable {
+			t.Fatalf("request %d returned %d %s, want 503", attempt+1, response.Code, response.Body.String())
+		}
+		if attempt == 0 {
+			firstRequests = requests
+		}
+	}
+	if firstRequests == 0 || requests != firstRequests {
+		t.Fatalf("negative probe was repeated: first request used %d probes, second raised total to %d", firstRequests, requests)
+	}
+	supported, known, err := db.ModelRoutes.GetStructuredOutputCapability(context.Background(), "opencode-go:model-a")
+	if err != nil || !known || supported {
+		t.Fatalf("negative probe result was not persisted: supported=%v known=%v err=%v", supported, known, err)
 	}
 }
 

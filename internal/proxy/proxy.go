@@ -144,6 +144,11 @@ func (p *Proxy) ServeHTTP(w http.ResponseWriter, r *http.Request, protocol match
 			plan = routing.BuildGroup(request.MatchRequest(protocol), definition, p.Groups.DefinitionsByID(), snapshot.Routes, time.Now().UTC(), routing.DefaultLimits())
 		}
 	}
+	if p.Repositories != nil {
+		// Persist the complete plan even when every route was rejected. The
+		// request detail view uses its rejections to explain skipped routes.
+		_ = recordResolution(r.Context(), p.Repositories, requestID, plan)
+	}
 	if plan.Selected() == nil {
 		message := "no compatible provider route is available"
 		code := "no_eligible_route"
@@ -157,9 +162,6 @@ func (p *Proxy) ServeHTTP(w http.ResponseWriter, r *http.Request, protocol match
 		}
 		writeError(w, status, code, message)
 		return
-	}
-	if p.Repositories != nil {
-		_ = recordResolution(r.Context(), p.Repositories, requestID, plan)
 	}
 	officialPrice, officialExpectedCost := officialPricing(planRanked(plan))
 	if err := p.execute(r.Context(), w, requestID, sessionID, body, request, canonical, clientFormat, plan, officialPrice, officialExpectedCost); err != nil {

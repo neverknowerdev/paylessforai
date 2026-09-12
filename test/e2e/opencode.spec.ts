@@ -124,17 +124,23 @@ test('shows planned routes skipped by request capability rules', async ({ page, 
   });
   expect(response.ok()).toBeFalsy();
   const calls = (await (await request.get(`${upstream}/__mock/requests`)).json()).data.filter((item: { method: string; path: string }) => item.method === 'POST' && !item.path.startsWith('/__mock/'));
-  expect(calls.filter((item: { path: string }) => item.path.startsWith('/zen/go/v1/'))).toHaveLength(0);
+  const probeCalls = calls.filter((item: { path: string }) => item.path.startsWith('/zen/go/v1/'));
+  expect(probeCalls.map((item: { path: string }) => item.path)).toEqual([
+    '/zen/go/v1/chat/completions',
+    '/zen/go/v1/responses',
+    '/zen/go/v1/messages',
+  ]);
+  expect(probeCalls.every((item: { body: string }) => item.body.includes('Return the requested object.'))).toBeTruthy();
   const stats = (await (await request.get('/api/requests?limit=100')).json()).data.find((item: { model: string }) => item.model === model);
   expect(stats, JSON.stringify(stats)).toBeTruthy();
-  expect(stats.skipped_routes, JSON.stringify(stats)).toEqual([expect.objectContaining({ provider: 'opencode-go', upstream_model: model, state: 'skipped', reason_code: 'missing_capability' })]);
+  expect(stats.skipped_routes, JSON.stringify(stats)).toEqual([expect.objectContaining({ provider: 'opencode-go', upstream_model: model, state: 'skipped', reason_code: 'structured_output_unsupported' })]);
 
   await page.goto('/#requests');
   await page.locator('#refresh-button').click();
   await page.locator(`#requests-table-body tr[data-request-id="${stats.id}"]`).click();
   await expect(page.locator('#request-detail')).toContainText('Skipped routes (1)');
   await expect(page.locator('#request-detail .skipped-routes')).toContainText('OpenCode Go');
-  await expect(page.locator('#request-detail .skipped-routes')).toContainText('missing_capability');
+  await expect(page.locator('#request-detail .skipped-routes')).toContainText('structured_output_unsupported');
   await expect(page.locator('#request-detail .skipped-routes')).toContainText('route does not support structured output');
   await expect(page.locator('#request-detail .skipped-routes .state-badge.skipped')).toHaveText('skipped');
 

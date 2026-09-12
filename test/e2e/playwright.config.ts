@@ -13,6 +13,6 @@ export default defineConfig({
     { command: 'go run ../../cmd/mockprovider -listen 127.0.0.1:19474 -fixtures mocks/translation/free', url: 'http://127.0.0.1:19474/healthz', reuseExistingServer: true, timeout: 120_000 },
     { command: 'go run ../../cmd/mockprovider -listen 127.0.0.1:19475 -fixtures mocks/translation/subscription', url: 'http://127.0.0.1:19475/healthz', reuseExistingServer: true, timeout: 120_000 },
     { command: 'go run ../../cmd/mockprovider -listen 127.0.0.1:19476 -fixtures mocks/translation/metered', url: 'http://127.0.0.1:19476/healthz', reuseExistingServer: true, timeout: 120_000 },
-    { command: 'go run ../../cmd/paylessforai-app -data-dir /tmp/paylessforai-e2e -listen 127.0.0.1:19477 -openrouter-base-url http://127.0.0.1:19475/openrouter/api/v1 -surplus-base-url http://127.0.0.1:19476/surplus/v1', url: appURL + '/readyz', reuseExistingServer: true, timeout: 120_000 },
+    { command: 'go run ../../cmd/paylessforai-app -data-dir "$PAYLESSFORAI_E2E_DATA_DIR" -listen 127.0.0.1:19477 -openrouter-base-url http://127.0.0.1:19475/openrouter/api/v1 -surplus-base-url http://127.0.0.1:19476/surplus/v1', env: { PAYLESSFORAI_E2E_DATA_DIR: process.env.PAYLESSFORAI_E2E_DATA_DIR || '/tmp/paylessforai-e2e' }, url: appURL + '/readyz', reuseExistingServer: true, timeout: 120_000 },
   ],
 });

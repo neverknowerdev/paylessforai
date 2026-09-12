@@ -46,6 +46,11 @@ func (c *HTTPClient) ProbeStructuredOutput(ctx context.Context, model Model) err
 	}
 
 	candidates := CandidateFormats(model.Format, c.endpoint.HintedFormat, wire.FormatChatCompletions)
+	if model.Format.Valid() {
+		candidates = []wire.Format{model.Format}
+	} else if c.endpoint.HintedFormat.Valid() {
+		candidates = []wire.Format{c.endpoint.HintedFormat}
+	}
 	var failures []error
 	for _, format := range candidates {
 		encoded, err := wire.EncodeRequest(format, request)

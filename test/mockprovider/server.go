@@ -229,7 +229,7 @@ func (s *Server) handleControl(w http.ResponseWriter, r *http.Request, body []by
 func (s *Server) writeModels(w http.ResponseWriter, scenario Scenario) {
 	data := make([]map[string]any, 0, len(scenario.Models))
 	for _, model := range scenario.Models {
-		data = append(data, map[string]any{"id": model.ID, "name": model.Name, "free": model.Free, "context_length": model.ContextLength, "max_completion_tokens": model.MaxCompletionTokens, "pricing": map[string]string{"prompt": model.PromptPrice, "completion": model.CompletionPrice}, "architecture": map[string]any{"input_modalities": model.InputModalities, "output_modalities": model.OutputModalities}, "supported_features": model.SupportedFeatures, "tags": model.Tags})
+		data = append(data, map[string]any{"id": model.ID, "name": model.Name, "free": model.Free, "context_length": model.ContextLength, "max_completion_tokens": model.MaxCompletionTokens, "pricing": map[string]string{"prompt": model.PromptPrice, "completion": model.CompletionPrice}, "architecture": map[string]any{"input_modalities": model.InputModalities, "output_modalities": model.OutputModalities}, "supported_parameters": model.SupportedParameters, "supported_features": model.SupportedFeatures, "tags": model.Tags})
 	}
 	s.writeGeneric(w, "/models", map[string]any{"data": data})
 }

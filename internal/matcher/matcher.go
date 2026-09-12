@@ -135,9 +135,12 @@ type RankedRoute struct {
 }
 
 type RouteRejection struct {
-	RouteID string `json:"route_id"`
-	Code    string `json:"code"`
-	Detail  string `json:"detail"`
+	RouteID       string `json:"route_id"`
+	Provider      string `json:"provider,omitempty"`
+	LogicalModel  string `json:"logical_model,omitempty"`
+	UpstreamModel string `json:"upstream_model,omitempty"`
+	Code          string `json:"code"`
+	Detail        string `json:"detail"`
 }
 
 type MatchError struct {
@@ -182,11 +185,11 @@ func (Engine) Match(input MatchInput) MatchResult {
 		if !ok {
 			cost, err := expectedCost(input.Request.InputTokens, input.Request.ExpectedOutput, route.Price)
 			if err != nil {
-				result.Rejections = append(result.Rejections, RouteRejection{RouteID: route.ID, Code: "price_overflow", Detail: err.Error()})
+				result.Rejections = append(result.Rejections, rejectionForRoute(route, "price_overflow", err.Error()))
 				continue
 			}
 			if input.Request.MaximumCostPicoUSD != nil && cost > *input.Request.MaximumCostPicoUSD {
-				result.Rejections = append(result.Rejections, RouteRejection{RouteID: route.ID, Code: "over_maximum_cost", Detail: fmt.Sprintf("expected cost %d exceeds limit %d", cost, *input.Request.MaximumCostPicoUSD)})
+				result.Rejections = append(result.Rejections, rejectionForRoute(route, "over_maximum_cost", fmt.Sprintf("expected cost %d exceeds limit %d", cost, *input.Request.MaximumCostPicoUSD)))
 				continue
 			}
 			result.Ranked = append(result.Ranked, RankedRoute{Route: route, ExpectedCost: cost})
@@ -238,7 +241,7 @@ func billingTier(route Route) int {
 
 func rejectRoute(request MatchRequest, route Route, now time.Time, allowed, excluded map[string]struct{}) (RouteRejection, bool) {
 	reject := func(code, detail string) (RouteRejection, bool) {
-		return RouteRejection{RouteID: route.ID, Code: code, Detail: detail}, true
+		return rejectionForRoute(route, code, detail), true
 	}
 	if !modelAllowed(route.LogicalModel, request) {
 		return reject("wrong_model", "route model does not match the requested logical model")
@@ -348,6 +351,10 @@ func rejectRoute(request MatchRequest, route Route, now time.Time, allowed, excl
 		return reject("over_output_price_limit", "route output price exceeds the stage limit")
 	}
 	return RouteRejection{}, false
+}
+
+func rejectionForRoute(route Route, code, detail string) RouteRejection {
+	return RouteRejection{RouteID: route.ID, Provider: route.Provider, LogicalModel: route.LogicalModel, UpstreamModel: route.UpstreamModel, Code: code, Detail: detail}
 }
 
 func requestNeedsPrice(request MatchRequest) bool {

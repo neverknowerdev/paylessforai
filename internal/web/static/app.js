@@ -41,7 +41,7 @@
   const discountLabel = (request) => { const amount = discountAmount(request); return amount == null ? `— · ${discountUnavailableLabel(request)}` : amount === 0 ? '$0' : `${formatUSD(amount)} · ${discountPercent(request.discount_percent_bps)} saved`; };
   const shortID = (value) => value ? `${value.slice(0, 8)}…${value.slice(-4)}` : '—';
   const protocolName = (value) => ({ chat_completions: 'Chat Completions', responses: 'Responses', anthropic_messages: 'Anthropic Messages', openai_chat_completions: 'Chat Completions', openai_responses: 'Responses' }[value] || value || '—');
-  const providerName = (value) => ({ openrouter: 'OpenRouter', surplus: 'Surplus Intelligence', 'opencode-zen': 'OpenCode Zen', 'opencode-go': 'OpenCode Go' }[value] || value || 'Unknown provider');
+  const providerName = (value) => ({ openrouter: 'OpenRouter', surplus: 'Surplus Intelligence', 'opencode-zen': 'OpenCode Zen', 'opencode-go': 'OpenCode Go', 'opencode zen': 'OpenCode Zen', 'opencode go': 'OpenCode Go' }[value] || value || 'Unknown provider');
   const dateValue = (value) => value ? new Date(value).toLocaleString([], { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' }) : '—';
   const formatDuration = (ms) => { if (ms == null || !Number.isFinite(Number(ms))) return '—'; const value = Number(ms); if (value < 1000) return `${Math.max(0, Math.round(value))} ms`; const seconds = value / 1000; return `${seconds.toFixed(seconds < 10 ? 1 : 0)} s`; };
   function tokenBreakdown(input, output, total, cached, reasoning) {
@@ -414,6 +414,19 @@
     });
     if (!request.attempt_details?.length) { const emptyAttempts = document.createElement('p'); emptyAttempts.className = 'attempt-empty'; emptyAttempts.textContent = 'No provider attempts were recorded for this legacy request.'; attempts.append(emptyAttempts); }
     drawer.append(attempts);
+    if (request.skipped_routes?.length) {
+      const skipped = document.createElement('div'); skipped.className = 'attempt-list skipped-routes';
+      const skippedHeading = document.createElement('h5'); skippedHeading.textContent = `Skipped routes (${formatNumber(request.skipped_routes.length)})`; skipped.append(skippedHeading);
+      request.skipped_routes.forEach((route) => {
+        const row = document.createElement('div'); row.className = 'attempt-row skipped';
+        const number = document.createElement('span'); number.className = 'attempt-number'; number.textContent = '—';
+        const main = document.createElement('span'); main.className = 'attempt-main';
+        const title = document.createElement('strong'); title.textContent = `${providerName(route.provider)} · ${route.upstream_model || '—'}`;
+        const detail = document.createElement('small'); detail.textContent = ['skipped', route.reason_code, route.reason].filter(Boolean).join(' · ');
+        main.append(title, detail); row.append(number, main, stateBadge('skipped')); skipped.append(row);
+      });
+      drawer.append(skipped);
+    }
     if (!selectedRow) { drawer.hidden = true; return; }
     selectedRow.setAttribute('aria-expanded', 'true');
     const detailRow = document.createElement('tr'); detailRow.className = 'request-detail-row'; detailRow.dataset.requestDetailFor = id; const detailCell = document.createElement('td'); detailCell.colSpan = document.querySelector('[data-view-panel="requests"] thead tr')?.children.length || 1; detailCell.append(drawer); detailRow.append(detailCell); selectedRow.after(detailRow);

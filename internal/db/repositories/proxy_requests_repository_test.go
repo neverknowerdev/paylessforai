@@ -30,3 +30,21 @@ func TestProxyRequestsRepositoryIntegration(t *testing.T) {
 		t.Fatalf("resolution stats: %#v", stats[0])
 	}
 }
+
+func TestProxyRequestsRecordResolutionWithoutSelectedRoute(t *testing.T) {
+	i := newIntegrationDB(t)
+	if err := i.repos.ProxyRequests.Create(i.ctx, "request-no-route", "", "chat.completions", "model-a"); err != nil {
+		t.Fatal(err)
+	}
+	plan := `{"requested_model":"model-a","rejections":[{"code":"missing_capability"}]}`
+	if err := i.repos.ProxyRequests.RecordResolution(i.ctx, "request-no-route", "", 0, plan, ""); err != nil {
+		t.Fatal(err)
+	}
+	var stored string
+	if err := i.repos.DB().QueryRowContext(i.ctx, `SELECT resolved_plan_json FROM proxy_requests WHERE id = ?`, "request-no-route").Scan(&stored); err != nil {
+		t.Fatal(err)
+	}
+	if stored != plan {
+		t.Fatalf("expected unresolved route plan to be persisted, got %q", stored)
+	}
+}

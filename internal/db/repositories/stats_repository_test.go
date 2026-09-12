@@ -111,3 +111,25 @@ func TestStatsRepositoryIntegrationPreservesOverallErrorMessage(t *testing.T) {
 		t.Fatalf("lost overall failure or terminal classification: %#v", items)
 	}
 }
+
+func TestStatsRepositoryIncludesSkippedRoutesFromResolvedPlan(t *testing.T) {
+	i := newIntegrationDB(t)
+	if err := i.repos.ProxyRequests.Create(i.ctx, "skipped-route-request", "", "chat.completions", "model-a"); err != nil {
+		t.Fatal(err)
+	}
+	plan := `{"requested_model":"model-a","rejections":[{"route_id":"credential-1:model-a","provider":"opencode-go","logical_model":"model-a","upstream_model":"model-a","code":"missing_capability","detail":"route does not support structured output"}]}`
+	if _, err := i.repos.DB().ExecContext(i.ctx, `UPDATE proxy_requests SET resolved_plan_json = ? WHERE id = ?`, plan, "skipped-route-request"); err != nil {
+		t.Fatal(err)
+	}
+	items, err := i.repos.Stats.ListRequestStats(i.ctx, 10)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(items) != 1 || len(items[0].SkippedRoutes) != 1 {
+		t.Fatalf("expected one skipped route, got %#v", items)
+	}
+	skipped := items[0].SkippedRoutes[0]
+	if skipped.State != "skipped" || skipped.Provider != "opencode-go" || skipped.UpstreamModel != "model-a" || skipped.ReasonCode != "missing_capability" || skipped.Reason != "route does not support structured output" {
+		t.Fatalf("unexpected skipped route: %#v", skipped)
+	}
+}

@@ -408,6 +408,16 @@ func decodeChatStreamDelta(payload map[string]json.RawMessage) *Event {
 	if json.Unmarshal(choices[0]["delta"], &delta) != nil {
 		return nil
 	}
+	var tools []map[string]json.RawMessage
+	if json.Unmarshal(delta["tool_calls"], &tools) == nil && len(tools) > 0 {
+		call := tools[0]
+		fn, _ := rawObject(call["function"])
+		index := 0
+		if raw := call["index"]; len(raw) > 0 {
+			_ = json.Unmarshal(raw, &index)
+		}
+		return &Event{Type: EventToolCallDelta, ToolCall: &ToolCall{ID: stringValue(call["id"]), Type: "function", Index: index, Name: stringValue(fn["name"]), Arguments: json.RawMessage(stringValue(fn["arguments"]))}}
+	}
 	if text := stringValue(delta["content"]); text != "" {
 		return &Event{Type: EventTextDelta, Text: text}
 	}
@@ -419,9 +429,13 @@ func decodeChatStreamDelta(payload map[string]json.RawMessage) *Event {
 
 func encodeChatResponse(response Response) any {
 	message := map[string]any{"role": "assistant", "content": response.Text}
-	if len(response.Messages) > 0 && len(response.Messages[0].ToolCalls) > 0 {
-		calls := make([]any, 0, len(response.Messages[0].ToolCalls))
-		for _, call := range response.Messages[0].ToolCalls {
+	allCalls := make([]ToolCall, 0)
+	for _, message := range response.Messages {
+		allCalls = append(allCalls, message.ToolCalls...)
+	}
+	if len(allCalls) > 0 {
+		calls := make([]any, 0, len(allCalls))
+		for _, call := range allCalls {
 			calls = append(calls, map[string]any{"id": call.ID, "type": valueOr(call.Type, "function"), "function": map[string]any{"name": call.Name, "arguments": string(call.Arguments)}})
 		}
 		message["tool_calls"] = calls
@@ -431,5 +445,37 @@ func encodeChatResponse(response Response) any {
 }
 
 func encodeChatStreamEvent(event Event) any {
-	return map[string]any{"id": "chatcmpl-translation", "object": "chat.completion.chunk", "choices": []any{map[string]any{"index": 0, "delta": map[string]any{"role": "assistant", "content": event.Text}, "finish_reason": nil}}}
+	delta := map[string]any{}
+	if event.Text != "" {
+		delta["content"] = event.Text
+	}
+	if event.Reasoning != "" {
+		delta["reasoning_content"] = event.Reasoning
+	}
+	if event.ToolCall != nil {
+		call := event.ToolCall
+		fn := map[string]any{"arguments": string(call.Arguments)}
+		if call.Name != "" {
+			fn["name"] = call.Name
+		}
+		item := map[string]any{"index": call.Index, "function": fn}
+		if call.ID != "" {
+			item["id"] = call.ID
+		}
+		item["type"] = "function"
+		delta["tool_calls"] = []any{item}
+	}
+	finish := any(nil)
+	if event.Type == EventComplete {
+		finish = valueOr(event.FinishReason, "stop")
+		if event.Response != nil && len(event.Response.Messages) > 0 && len(event.Response.Messages[0].ToolCalls) > 0 {
+			calls := make([]any, 0, len(event.Response.Messages[0].ToolCalls))
+			for i, call := range event.Response.Messages[0].ToolCalls {
+				calls = append(calls, map[string]any{"index": i, "id": call.ID, "type": "function", "function": map[string]any{"name": call.Name, "arguments": string(call.Arguments)}})
+			}
+			delta["tool_calls"] = calls
+			finish = "tool_calls"
+		}
+	}
+	return map[string]any{"id": "chatcmpl-translation", "object": "chat.completion.chunk", "choices": []any{map[string]any{"index": 0, "delta": delta, "finish_reason": finish}}}
 }

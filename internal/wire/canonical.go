@@ -44,6 +44,7 @@ type ToolCall struct {
 	Type      string          `json:"type,omitempty"`
 	Name      string          `json:"name,omitempty"`
 	Arguments json.RawMessage `json:"arguments,omitempty"`
+	Index     int             `json:"-"`
 }
 
 type Message struct {
@@ -677,12 +678,65 @@ func encodeStreamFor(events EventStream, w http.ResponseWriter, streamEncoder fu
 	w.Header().Set("Content-Type", "text/event-stream")
 	w.WriteHeader(http.StatusOK)
 	flusher, _ := w.(http.Flusher)
+	var final *Response
+	textSeen := false
+	emittedTools := make(map[string]bool)
 	for _, event := range events.Events {
+		if event.Response != nil {
+			copy := *event.Response
+			final = &copy
+			continue
+		}
+		if event.Text != "" {
+			textSeen = true
+		}
+		if event.ToolCall != nil {
+			emittedTools[event.ToolCall.ID] = true
+		}
+		if event.Type == EventUsage {
+			continue
+		}
 		payload := streamEncoder(event)
+		if payload == nil {
+			continue
+		}
 		encoded, _ := json.Marshal(payload)
 		_, _ = io.WriteString(w, "data: "+string(encoded)+"\n\n")
 		if flusher != nil {
 			flusher.Flush()
+		}
+	}
+	if final != nil {
+		finish := Event{Type: EventComplete, Response: final, FinishReason: final.FinishReason}
+		if len(emittedTools) > 0 && len(final.Messages) > 0 {
+			finish.FinishReason = "tool_calls"
+		}
+		if !textSeen && len(final.Messages) > 0 && len(final.Messages[0].ToolCalls) == 0 {
+			finish.Text = final.Text
+		}
+		if len(emittedTools) > 0 {
+			remaining := make([]ToolCall, 0)
+			for _, message := range final.Messages {
+				for _, call := range message.ToolCalls {
+					if !emittedTools[call.ID] {
+						remaining = append(remaining, call)
+					}
+				}
+			}
+			finish.Response = &Response{ID: final.ID, Model: final.Model, FinishReason: final.FinishReason, Usage: final.Usage}
+			if len(remaining) > 0 {
+				finish.Response.Messages = []Message{{Role: RoleAssistant, ToolCalls: remaining}}
+			}
+		}
+		payload := streamEncoder(finish)
+		if payload != nil {
+			encoded, _ := json.Marshal(payload)
+			if _, err := io.WriteString(w, "data: "+string(encoded)+"\n\n"); err != nil {
+				return err
+			}
+			if flusher != nil {
+				flusher.Flush()
+			}
 		}
 	}
 	_, _ = io.WriteString(w, "data: [DONE]\n\n")

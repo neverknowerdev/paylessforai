@@ -370,8 +370,8 @@ func decodeAnthropicStreamDelta(payload map[string]json.RawMessage) *Event {
 
 func encodeAnthropicResponse(response Response) any {
 	content := []any{map[string]any{"type": "text", "text": response.Text}}
-	if len(response.Messages) > 0 {
-		for _, call := range response.Messages[0].ToolCalls {
+	for _, message := range response.Messages {
+		for _, call := range message.ToolCalls {
 			content = append(content, map[string]any{"type": "tool_use", "id": call.ID, "name": call.Name, "input": jsonObject(call.Arguments)})
 		}
 	}

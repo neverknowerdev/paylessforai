@@ -559,7 +559,9 @@ func (p *Proxy) executeTranslatedRoute(ctx context.Context, writer http.Response
 		if decodeErr != nil {
 			var partial *wire.PartialResponseError
 			if errors.As(decodeErr, &partial) && len(events.Events) > 0 {
-				_ = wire.EncodeResponse(clientFormat, events, writer)
+				if request.Stream {
+					_ = wire.EncodeResponse(clientFormat, events, writer)
+				}
 				if p.Repositories != nil {
 					_ = p.Repositories.ProxyRequests.Complete(ctx, requestID, "partial", "stream_error", sanitize(decodeErr.Error()))
 				}
@@ -574,6 +576,10 @@ func (p *Proxy) executeTranslatedRoute(ctx context.Context, writer http.Response
 			formatFailure = true
 			continue
 		}
+		// EventStream.Stream describes the upstream transport. The client
+		// request is authoritative for the downstream transport, so an SSE
+		// provider response can be reduced to JSON and vice versa.
+		events.Stream = request.Stream
 		if p.Repositories != nil {
 			if err := persistLearnedFormat(ctx, p.Repositories, route, candidate); err != nil {
 				// A valid upstream response is still useful. Persistence errors

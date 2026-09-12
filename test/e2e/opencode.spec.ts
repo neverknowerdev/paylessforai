@@ -89,6 +89,7 @@ test('shows planned routes skipped by request capability rules', async ({ page, 
     expect((await request.delete(`/api/providers/credentials/${credential.id}`)).ok()).toBeTruthy();
   }
   const model = 'skipped-structured-model';
+  expect((await request.post(`${upstream}/__mock/reset`)).ok()).toBeTruthy();
   expect((await request.post(`${upstream}/__mock/scenario`, { data: {
     models: [{ id: model, prompt_price: '0.000001', completion_price: '0.000002', context_length: 128000, max_completion_tokens: 4096 }],
     response_text: 'should not be called',

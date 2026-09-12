@@ -74,3 +74,11 @@ func (c WithManualModels) Discover(ctx context.Context) ([]Model, error) {
 	}
 	return models, nil
 }
+
+func (c WithManualModels) ProbeStructuredOutput(ctx context.Context, model Model) error {
+	prober, ok := c.Client.(StructuredOutputProber)
+	if !ok {
+		return fmt.Errorf("structured output probing is unavailable")
+	}
+	return prober.ProbeStructuredOutput(ctx, model)
+}

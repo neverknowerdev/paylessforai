@@ -149,6 +149,70 @@ func TestVerifyModelsUsesMinimalInference(t *testing.T) {
 	}
 }
 
+func TestProbeStructuredOutputVerifiesChatResponse(t *testing.T) {
+	client := NewHTTPClient("custom", "https://provider.invalid/v1", "key")
+	client.Client = &http.Client{Transport: roundTripFunc(func(r *http.Request) (*http.Response, error) {
+		if r.URL.Path != "/v1/chat/completions" || r.Method != http.MethodPost {
+			t.Fatalf("unexpected probe request: %s %s", r.Method, r.URL.Path)
+		}
+		body, _ := io.ReadAll(r.Body)
+		if !strings.Contains(string(body), `"response_format"`) || !strings.Contains(string(body), `"json_schema"`) {
+			t.Fatalf("probe did not request structured output: %s", body)
+		}
+		return &http.Response{StatusCode: http.StatusOK, Header: http.Header{"Content-Type": []string{"application/json"}}, Body: io.NopCloser(strings.NewReader(`{"choices":[{"message":{"role":"assistant","content":"{\"value\":\"ok\"}"}}]}`)), Request: r}, nil
+	})}
+	if err := client.ProbeStructuredOutput(context.Background(), Model{ID: "model-a", Format: wire.FormatChatCompletions}); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestProbeStructuredOutputRejectsInvalidResult(t *testing.T) {
+	client := NewHTTPClient("custom", "https://provider.invalid/v1", "key")
+	client.Client = &http.Client{Transport: roundTripFunc(func(r *http.Request) (*http.Response, error) {
+		return &http.Response{StatusCode: http.StatusOK, Header: http.Header{"Content-Type": []string{"application/json"}}, Body: io.NopCloser(strings.NewReader(`{"choices":[{"message":{"role":"assistant","content":"not json"}}]}`)), Request: r}, nil
+	})}
+	if err := client.ProbeStructuredOutput(context.Background(), Model{ID: "model-a", Format: wire.FormatChatCompletions}); err == nil || !strings.Contains(err.Error(), "not a JSON object") {
+		t.Fatalf("expected invalid structured output error, got %v", err)
+	}
+}
+
+func TestProbeStructuredOutputVerifiesResponsesResponse(t *testing.T) {
+	client := NewHTTPClient("custom", "https://provider.invalid/v1", "key")
+	client.Client = &http.Client{Transport: roundTripFunc(func(r *http.Request) (*http.Response, error) {
+		if r.URL.Path != "/v1/responses" {
+			t.Fatalf("unexpected probe endpoint: %s", r.URL.Path)
+		}
+		body, _ := io.ReadAll(r.Body)
+		if !strings.Contains(string(body), `"text":{"format"`) || !strings.Contains(string(body), `"type":"json_schema"`) {
+			t.Fatalf("probe did not request Responses structured output: %s", body)
+		}
+		return &http.Response{StatusCode: http.StatusOK, Header: http.Header{"Content-Type": []string{"application/json"}}, Body: io.NopCloser(strings.NewReader(`{"id":"r","output_text":"{\"value\":\"ok\"}"}`)), Request: r}, nil
+	})}
+	if err := client.ProbeStructuredOutput(context.Background(), Model{ID: "model-a", Format: wire.FormatResponses}); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestProbeStructuredOutputDoesNotRetryAuthenticationFailureAcrossFormats(t *testing.T) {
+	client := NewHTTPClient("custom", "https://provider.invalid/v1", "key")
+	attempts := 0
+	client.Client = &http.Client{Transport: roundTripFunc(func(r *http.Request) (*http.Response, error) {
+		attempts++
+		return &http.Response{StatusCode: http.StatusUnauthorized, Header: make(http.Header), Body: io.NopCloser(strings.NewReader(`{"error":"invalid key"}`)), Request: r}, nil
+	})}
+	err := client.ProbeStructuredOutput(context.Background(), Model{ID: "model-a"})
+	if err == nil {
+		t.Fatal("expected authentication failure")
+	}
+	var unsupported *StructuredOutputUnsupportedError
+	if errors.As(err, &unsupported) {
+		t.Fatalf("authentication failure was incorrectly classified as unsupported: %v", err)
+	}
+	if attempts != 1 {
+		t.Fatalf("authentication failure triggered %d probe requests, want one", attempts)
+	}
+}
+
 func TestDiscoverRecognizesFreeVariantWithoutPricing(t *testing.T) {
 	client := NewHTTPClient("openrouter", "https://provider.invalid/v1", "key")
 	client.Client = &http.Client{Transport: roundTripFunc(func(r *http.Request) (*http.Response, error) {

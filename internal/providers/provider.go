@@ -31,6 +31,13 @@ type Model struct {
 	Format wire.Format
 }
 
+// StructuredOutputProber verifies structured JSON output against the
+// provider's actual model endpoint. It is optional because older and custom
+// clients may not expose an active capability probe.
+type StructuredOutputProber interface {
+	ProbeStructuredOutput(context.Context, Model) error
+}
+
 // ManualModel is a model definition supplied by the user when an upstream
 // does not expose a catalog endpoint. Prices are pico-USD per token so the
 // manually configured route uses the same deterministic accounting as native

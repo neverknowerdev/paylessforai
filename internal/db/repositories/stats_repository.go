@@ -2,6 +2,8 @@ package repositories
 
 import (
 	"context"
+	"database/sql"
+	"encoding/json"
 	"fmt"
 	"sort"
 	"strings"
@@ -26,10 +28,11 @@ type ProviderStats = models.ProviderStats
 type GroupStats = models.GroupStats
 
 type statsData struct {
-	requests []*bobmodels.ProxyRequest
-	usage    map[string]*bobmodels.RequestUsage
-	attempts map[string][]*bobmodels.ProxyAttempt
-	groups   map[string]*bobmodels.RoutingGroup
+	requests  []*bobmodels.ProxyRequest
+	usage     map[string]*bobmodels.RequestUsage
+	attempts  map[string][]*bobmodels.ProxyAttempt
+	groups    map[string]*bobmodels.RoutingGroup
+	providers map[string]string
 }
 
 // RouteUsageSince counts requests by the provider and upstream model selected
@@ -76,9 +79,16 @@ func (r *StatsRepository) load(ctx context.Context) (statsData, error) {
 	if err != nil {
 		return statsData{}, err
 	}
-	data := statsData{requests: requests, usage: make(map[string]*bobmodels.RequestUsage, len(usageRows)), attempts: make(map[string][]*bobmodels.ProxyAttempt), groups: make(map[string]*bobmodels.RoutingGroup, len(groupRows))}
+	credentialRows, err := bobmodels.ProviderCredentials.Query().All(ctx, r.exec)
+	if err != nil {
+		return statsData{}, err
+	}
+	data := statsData{requests: requests, usage: make(map[string]*bobmodels.RequestUsage, len(usageRows)), attempts: make(map[string][]*bobmodels.ProxyAttempt), groups: make(map[string]*bobmodels.RoutingGroup, len(groupRows)), providers: make(map[string]string, len(credentialRows))}
 	for _, row := range groupRows {
 		data.groups[row.ID] = row
+	}
+	for _, row := range credentialRows {
+		data.providers[row.ID] = row.Provider
 	}
 	for _, row := range usageRows {
 		data.usage[row.RequestID] = row
@@ -225,6 +235,7 @@ func (r *StatsRepository) ListRequestStats(ctx context.Context, limit int) ([]Re
 		for _, attempt := range data.attempts[request.ID] {
 			item.AttemptDetails = append(item.AttemptDetails, attemptStatFromBob(attempt))
 		}
+		item.SkippedRoutes = skippedRoutesFromPlan(request.ResolvedPlanJSON, data.providers)
 		result = append(result, item)
 	}
 	return result, nil
@@ -527,6 +538,50 @@ func requestStatFromBob(request *bobmodels.ProxyRequest, usage *bobmodels.Reques
 		item.DiscountBPS = int64Pointer(usage.DiscountPercentBPS)
 	}
 	return item
+}
+
+func skippedRoutesFromPlan(plan sql.Null[string], providers map[string]string) []models.SkippedRouteStat {
+	if !plan.Valid || strings.TrimSpace(plan.V) == "" {
+		return nil
+	}
+	var stored struct {
+		Rejections []struct {
+			RouteID       string `json:"route_id"`
+			Provider      string `json:"provider"`
+			LogicalModel  string `json:"logical_model"`
+			UpstreamModel string `json:"upstream_model"`
+			Code          string `json:"code"`
+			Detail        string `json:"detail"`
+		} `json:"rejections"`
+	}
+	if err := json.Unmarshal([]byte(plan.V), &stored); err != nil {
+		return nil
+	}
+	result := make([]models.SkippedRouteStat, 0)
+	seen := make(map[string]bool)
+	for _, rejection := range stored.Rejections {
+		// wrong_model entries describe every other catalog route and are not
+		// candidates for this request. All other rejection codes occur after
+		// model matching and therefore identify a route considered for it.
+		if rejection.Code == "wrong_model" || rejection.RouteID == "" || seen[rejection.RouteID] {
+			continue
+		}
+		provider, upstream := rejection.Provider, rejection.UpstreamModel
+		if provider == "" || upstream == "" {
+			prefix, suffix, ok := strings.Cut(rejection.RouteID, ":")
+			if ok {
+				if provider == "" {
+					provider = providers[prefix]
+				}
+				if upstream == "" {
+					upstream = suffix
+				}
+			}
+		}
+		seen[rejection.RouteID] = true
+		result = append(result, models.SkippedRouteStat{RouteID: rejection.RouteID, Provider: provider, UpstreamModel: upstream, State: "skipped", ReasonCode: rejection.Code, Reason: rejection.Detail})
+	}
+	return result
 }
 
 func attemptStatFromBob(attempt *bobmodels.ProxyAttempt) AttemptStat {

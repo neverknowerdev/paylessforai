@@ -15,10 +15,10 @@ func (anthropicAdapter) DecodeRequest(body []byte) (*Request, error) {
 }
 func (anthropicAdapter) EncodeRequest(req *Request) ([]byte, error) { return encodeAnthropic(req) }
 func (anthropicAdapter) DecodeResponse(resp *http.Response) (EventStream, error) {
-	return decodeResponseFor(FormatAnthropicMessages, resp, decodeAnthropicResponsePayload, decodeAnthropicStreamDelta)
+	return decodeResponseFor(FormatAnthropicMessages, resp, decodeAnthropicResponsePayload)
 }
 func (anthropicAdapter) EncodeResponse(events EventStream, dst http.ResponseWriter) error {
-	return encodeResponseFor(FormatAnthropicMessages, events, dst, encodeAnthropicResponse, encodeAnthropicStreamEvent)
+	return encodeResponseFor(FormatAnthropicMessages, events, dst, encodeAnthropicResponse)
 }
 
 func decodeAnthropicOptions(payload map[string]json.RawMessage) (RequestOptions, error) {
@@ -361,8 +361,15 @@ func decodeAnthropicResponsePayload(payload map[string]json.RawMessage) (Respons
 func decodeAnthropicStreamDelta(payload map[string]json.RawMessage) *Event {
 	var delta map[string]json.RawMessage
 	if json.Unmarshal(payload["delta"], &delta) == nil {
+		typ := stringValue(delta["type"])
 		if text := stringValue(delta["text"]); text != "" {
 			return &Event{Type: EventTextDelta, Text: text}
+		}
+		if typ == "thinking_delta" {
+			return &Event{Type: EventReasoningDelta, Reasoning: stringValue(delta["thinking"])}
+		}
+		if typ == "input_json_delta" {
+			return &Event{Type: EventToolCallDelta, ToolCall: &ToolCall{Arguments: json.RawMessage(stringValue(delta["partial_json"]))}}
 		}
 	}
 	return nil
@@ -370,8 +377,8 @@ func decodeAnthropicStreamDelta(payload map[string]json.RawMessage) *Event {
 
 func encodeAnthropicResponse(response Response) any {
 	content := []any{map[string]any{"type": "text", "text": response.Text}}
-	if len(response.Messages) > 0 {
-		for _, call := range response.Messages[0].ToolCalls {
+	for _, message := range response.Messages {
+		for _, call := range message.ToolCalls {
 			content = append(content, map[string]any{"type": "tool_use", "id": call.ID, "name": call.Name, "input": jsonObject(call.Arguments)})
 		}
 	}
@@ -389,5 +396,20 @@ func encodeAnthropicResponse(response Response) any {
 }
 
 func encodeAnthropicStreamEvent(event Event) any {
+	if event.Type == EventError && event.Error != nil {
+		return map[string]any{"type": "error", "error": map[string]any{"type": valueOr(event.Error.Type, "api_error"), "message": event.Error.Message}}
+	}
+	if event.Type == EventUsage {
+		return map[string]any{"type": "message_delta", "delta": map[string]any{}, "usage": map[string]any{"input_tokens": event.Usage.InputTokens, "output_tokens": event.Usage.OutputTokens}}
+	}
+	if event.Type == EventComplete {
+		return map[string]any{"type": "message_stop"}
+	}
+	if event.Type == EventReasoningDelta {
+		return map[string]any{"type": "content_block_delta", "index": 0, "delta": map[string]any{"type": "thinking_delta", "thinking": event.Reasoning}}
+	}
+	if event.Type == EventToolCallDelta && event.ToolCall != nil {
+		return map[string]any{"type": "content_block_delta", "index": 0, "delta": map[string]any{"type": "input_json_delta", "partial_json": string(event.ToolCall.Arguments)}}
+	}
 	return map[string]any{"type": "content_block_delta", "delta": map[string]any{"type": "text_delta", "text": event.Text}}
 }

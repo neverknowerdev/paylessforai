@@ -29,7 +29,7 @@ func TestUpdateSettingsAPI(t *testing.T) {
 	}
 	get := httptest.NewRecorder()
 	server.httpServer.Handler.ServeHTTP(get, httptest.NewRequest(http.MethodGet, "/api/updates", nil))
-	if get.Code != http.StatusOK || !strings.Contains(get.Body.String(), `"interval_seconds":3600`) || !strings.Contains(get.Body.String(), `"channel":"releases"`) {
+	if get.Code != http.StatusOK || !strings.Contains(get.Body.String(), `"interval_seconds":3600`) || !strings.Contains(get.Body.String(), `"channel":"releases"`) || !strings.Contains(get.Body.String(), `"logs":[]`) {
 		t.Fatalf("unexpected defaults: %d %s", get.Code, get.Body.String())
 	}
 	put := httptest.NewRecorder()
@@ -41,5 +41,26 @@ func TestUpdateSettingsAPI(t *testing.T) {
 	server.httpServer.Handler.ServeHTTP(bad, httptest.NewRequest(http.MethodPut, "/api/updates/settings", strings.NewReader(`{"enabled":true,"channel":"other","interval_seconds":1800}`)))
 	if bad.Code != http.StatusBadRequest {
 		t.Fatalf("bad settings status: %d", bad.Code)
+	}
+}
+
+func TestUpdateInstallAPIRejectsMalformedRequest(t *testing.T) {
+	db, err := dbpkg.Open(context.Background(), filepath.Join(t.TempDir(), "payless.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	service, err := updater.NewService(t.TempDir(), db.Settings, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	server, err := NewWithDeps("127.0.0.1:0", time.Second, time.Second, db, nil, nil, CredentialDeps{Updates: service})
+	if err != nil {
+		t.Fatal(err)
+	}
+	response := httptest.NewRecorder()
+	server.httpServer.Handler.ServeHTTP(response, httptest.NewRequest(http.MethodPost, "/api/updates/install", strings.NewReader("not-json")))
+	if response.Code != http.StatusBadRequest || !strings.Contains(response.Body.String(), "invalid install request") {
+		t.Fatalf("malformed install request: %d %s", response.Code, response.Body.String())
 	}
 }

@@ -82,3 +82,64 @@ test('sends OpenCode sessions through format fallback, retries, and all client p
     }
   }
 });
+
+test('shows planned routes skipped by request capability rules', async ({ page, request }) => {
+  const credentials = await (await request.get('/api/providers/credentials')).json();
+  for (const credential of credentials.data) {
+    expect((await request.delete(`/api/providers/credentials/${credential.id}`)).ok()).toBeTruthy();
+  }
+  const model = 'skipped-structured-model';
+  expect((await request.post(`${upstream}/__mock/reset`)).ok()).toBeTruthy();
+  expect((await request.post(`${upstream}/__mock/scenario`, { data: {
+    models: [{ id: model, prompt_price: '0.000001', completion_price: '0.000002', context_length: 128000, max_completion_tokens: 4096 }],
+    response_text: 'should not be called',
+  } })).ok()).toBeTruthy();
+  expect((await request.post(`${upstream}/__mock/fixtures`, { data: { files: [] } })).ok()).toBeTruthy();
+  const metered = 'http://127.0.0.1:19476';
+  expect((await request.post(`${metered}/__mock/scenario`, { data: {
+    models: [{ id: model, prompt_price: '0.000001', completion_price: '0.000002', context_length: 128000, max_completion_tokens: 4096, supported_parameters: ['response_format'] }],
+    response_text: 'fallback should fail',
+  } })).ok()).toBeTruthy();
+  const fallback = await request.post('/api/providers/credentials', { data: {
+    provider: 'surplus', label: 'Skipped route fallback', api_key: 'mock-surplus-key',
+  } });
+  expect(fallback.status(), await fallback.text()).toBe(201);
+  expect((await request.post(`${metered}/__mock/scenario`, { data: {
+    models: [{ id: model, prompt_price: '0.000001', completion_price: '0.000002', context_length: 128000, max_completion_tokens: 4096, supported_parameters: ['response_format'] }],
+    status: 503, failure_message: 'fallback unavailable',
+  } })).ok()).toBeTruthy();
+  const saved = await request.post('/api/providers/credentials', { data: {
+    provider: 'opencode-go', label: 'Skipped route test', api_key: 'mock-opencode-key',
+    base_url: `${upstream}/zen/go/v1`, access_mode: 'subscription', subscription_fee_usd: '10',
+  } });
+  expect(saved.status(), await saved.text()).toBe(201);
+  const discovered = (await (await request.get('/api/models')).json()).data.filter((item: { model: string }) => item.model === model);
+  expect(discovered, JSON.stringify(discovered)).toEqual(expect.arrayContaining([expect.objectContaining({ provider: 'opencode-go', model })]));
+  const keyResponse = await request.post('/api/client-keys', { data: { label: 'skipped-route-e2e', harness: 'Other' } });
+  expect(keyResponse.status()).toBe(201);
+  const secret = (await keyResponse.json()).secret;
+  const response = await request.post('/v1/chat/completions', {
+    headers: { Authorization: `Bearer ${secret}` },
+    data: { model, messages: [{ role: 'user', content: 'structured please' }], response_format: { type: 'json_object' } },
+  });
+  expect(response.ok()).toBeFalsy();
+  const calls = (await (await request.get(`${upstream}/__mock/requests`)).json()).data.filter((item: { method: string; path: string }) => item.method === 'POST' && !item.path.startsWith('/__mock/'));
+  expect(calls.filter((item: { path: string }) => item.path.startsWith('/zen/go/v1/'))).toHaveLength(0);
+  const stats = (await (await request.get('/api/requests?limit=100')).json()).data.find((item: { model: string }) => item.model === model);
+  expect(stats, JSON.stringify(stats)).toBeTruthy();
+  expect(stats.skipped_routes, JSON.stringify(stats)).toEqual([expect.objectContaining({ provider: 'opencode-go', upstream_model: model, state: 'skipped', reason_code: 'missing_capability' })]);
+
+  await page.goto('/#requests');
+  await page.locator('#refresh-button').click();
+  await page.locator(`#requests-table-body tr[data-request-id="${stats.id}"]`).click();
+  await expect(page.locator('#request-detail')).toContainText('Skipped routes (1)');
+  await expect(page.locator('#request-detail .skipped-routes')).toContainText('OpenCode Go');
+  await expect(page.locator('#request-detail .skipped-routes')).toContainText('missing_capability');
+  await expect(page.locator('#request-detail .skipped-routes')).toContainText('route does not support structured output');
+  await expect(page.locator('#request-detail .skipped-routes .state-badge.skipped')).toHaveText('skipped');
+
+  const current = await (await request.get('/api/providers/credentials')).json();
+  for (const credential of current.data) {
+    expect((await request.delete(`/api/providers/credentials/${credential.id}`)).ok()).toBeTruthy();
+  }
+});

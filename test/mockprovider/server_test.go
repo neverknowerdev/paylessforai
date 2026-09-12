@@ -5,6 +5,7 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
+	"time"
 )
 
 func TestScenarioControlsCatalogInferenceAndRequests(t *testing.T) {
@@ -59,5 +60,43 @@ func TestScenarioOnlyStreamsWhenRequested(t *testing.T) {
 	server.ServeHTTP(response, request)
 	if got := response.Header().Get("Content-Type"); got != "application/json" {
 		t.Fatalf("non-stream request returned content type %q", got)
+	}
+}
+
+type releaseOnFlushWriter struct {
+	*httptest.ResponseRecorder
+	release func()
+}
+
+func (w *releaseOnFlushWriter) Flush() {
+	w.ResponseRecorder.Flush()
+	if w.release != nil {
+		release := w.release
+		w.release = nil
+		release()
+	}
+}
+
+func TestStreamReleaseDuringFirstFlushIsNotLost(t *testing.T) {
+	server := New(Scenario{ResponseText: "hello", StreamWait: true})
+	release := func() {
+		server.ServeHTTP(httptest.NewRecorder(), httptest.NewRequest(http.MethodPost, "/__mock/stream/release", nil))
+	}
+	response := &releaseOnFlushWriter{ResponseRecorder: httptest.NewRecorder(), release: release}
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		server.ServeHTTP(response, httptest.NewRequest(http.MethodPost, "/v1/chat/completions", strings.NewReader(`{"model":"m","messages":[],"stream":true}`)))
+	}()
+	select {
+	case <-done:
+		if !strings.Contains(response.Body.String(), "[DONE]") {
+			t.Fatalf("missing terminal: %s", response.Body.String())
+		}
+	case <-time.After(time.Second):
+		// Unblock an implementation that captured the replacement latch too late.
+		release()
+		<-done
+		t.Fatal("stream missed the release sent during its first flush")
 	}
 }

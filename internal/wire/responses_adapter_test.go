@@ -2,8 +2,10 @@ package wire
 
 import (
 	"encoding/json"
+	"errors"
 	"io"
 	"net/http"
+	"net/http/httptest"
 	"strings"
 	"testing"
 )
@@ -27,6 +29,64 @@ func TestResponsesStreamingCompletedEnvelopePreservesUsageDetails(t *testing.T) 
 	}
 	if got.InputTokens != 100 || got.OutputTokens != 20 || got.TotalTokens != 120 || got.CachedReadTokens != 60 || got.ReasoningTokens != 5 {
 		t.Fatalf("usage = %+v", got)
+	}
+}
+
+func TestResponsesStreamingToolCallPreservesItemAndCallIdentity(t *testing.T) {
+	body := "data: {\"type\":\"response.output_item.added\",\"item\":{\"type\":\"function_call\",\"id\":\"fc-1\",\"call_id\":\"call-1\",\"name\":\"tool_search\",\"arguments\":\"\"}}\n\n" +
+		"data: {\"type\":\"response.function_call_arguments.delta\",\"item_id\":\"fc-1\",\"delta\":\"{\\\"name\\\":\"}\n\n" +
+		"data: {\"type\":\"response.function_call_arguments.delta\",\"item_id\":\"fc-1\",\"delta\":\"\\\"hermes-agent\\\"}\"}\n\n" +
+		"data: {\"type\":\"response.completed\",\"response\":{\"id\":\"resp-1\",\"model\":\"m\",\"status\":\"completed\",\"output\":[{\"type\":\"function_call\",\"id\":\"fc-1\",\"call_id\":\"call-1\",\"name\":\"tool_search\",\"arguments\":\"{\\\"name\\\":\\\"hermes-agent\\\"}\"}]}}\n\n"
+	response := &http.Response{StatusCode: http.StatusOK, Header: http.Header{"Content-Type": []string{"text/event-stream"}}, Body: io.NopCloser(strings.NewReader(body))}
+	events, err := DecodeResponse(FormatResponses, response)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var got Response
+	for _, event := range events.Events {
+		if event.Response != nil {
+			got = *event.Response
+		}
+	}
+	if len(got.Messages) != 1 || len(got.Messages[0].ToolCalls) != 1 {
+		t.Fatalf("response tools = %#v", got.Messages)
+	}
+	call := got.Messages[0].ToolCalls[0]
+	if call.ID != "call-1" || call.Name != "tool_search" || string(call.Arguments) != `{"name":"hermes-agent"}` {
+		t.Fatalf("call = %#v", call)
+	}
+	w := httptest.NewRecorder()
+	if err := EncodeResponse(FormatChatCompletions, events, w); err != nil {
+		t.Fatal(err)
+	}
+	encoded := w.Body.String()
+	if !strings.Contains(encoded, `"name":"tool_search"`) || !strings.Contains(encoded, `"id":"call-1"`) || !strings.Contains(encoded, `hermes-agent`) {
+		t.Fatalf("encoded = %s", encoded)
+	}
+	if !strings.Contains(encoded, `"finish_reason":"tool_calls"`) {
+		t.Fatalf("missing tool_calls finish reason: %s", encoded)
+	}
+}
+
+func TestResponsesFullResponseKeepsAllFunctionCalls(t *testing.T) {
+	body := `{"id":"r","model":"m","status":"completed","output":[{"type":"function_call","id":"fc-1","call_id":"call-1","name":"one","arguments":"{}"},{"type":"function_call","id":"fc-2","call_id":"call-2","name":"two","arguments":"{}"}]}`
+	response := &http.Response{StatusCode: http.StatusOK, Header: http.Header{"Content-Type": []string{"application/json"}}, Body: io.NopCloser(strings.NewReader(body))}
+	events, err := DecodeResponse(FormatResponses, response)
+	if err != nil {
+		t.Fatal(err)
+	}
+	message := events.Events[0].Response.Messages
+	if len(message) != 1 || len(message[0].ToolCalls) != 2 {
+		t.Fatalf("messages = %#v", message)
+	}
+}
+
+func TestResponsesStreamingRequiresTerminalEvent(t *testing.T) {
+	response := &http.Response{StatusCode: http.StatusOK, Header: http.Header{"Content-Type": []string{"text/event-stream"}}, Body: io.NopCloser(strings.NewReader("data: {\"type\":\"response.output_text.delta\",\"delta\":\"partial\"}\n\n"))}
+	events, err := DecodeResponse(FormatResponses, response)
+	var partial *PartialResponseError
+	if !errors.As(err, &partial) || len(events.Events) != 1 || events.Events[0].Text != "partial" {
+		t.Fatalf("events=%#v err=%v", events, err)
 	}
 }
 

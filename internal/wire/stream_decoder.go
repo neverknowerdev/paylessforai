@@ -87,10 +87,18 @@ func readSSE(reader io.Reader, dispatch func(string, string) error) error {
 }
 
 type streamDecoder struct {
-	format   Format
-	emit     func(Event) error
-	count    int
-	terminal bool
+	format         Format
+	emit           func(Event) error
+	count          int
+	terminal       bool
+	responsesTools map[string]*responsesStreamTool
+}
+
+type responsesStreamTool struct {
+	callID  string
+	name    string
+	args    string
+	emitted int
 }
 
 func (d *streamDecoder) send(event Event) error {
@@ -102,6 +110,9 @@ func (d *streamDecoder) send(event Event) error {
 }
 
 func (d *streamDecoder) dispatch(name, data string) error {
+	if d.responsesTools == nil {
+		d.responsesTools = make(map[string]*responsesStreamTool)
+	}
 	if d.terminal || data == "" {
 		return nil
 	}
@@ -151,7 +162,7 @@ func (d *streamDecoder) dispatch(name, data string) error {
 	case FormatChatCompletions:
 		event = decodeChatStreamDelta(payload)
 	case FormatResponses:
-		event = decodeResponsesStreamDelta(payload)
+		event = d.decodeResponsesStreamDelta(payload)
 		if typ == "response.completed" {
 			d.terminal = true
 			if response, err := decodeResponsesResponsePayload(payload); err == nil {
@@ -166,6 +177,77 @@ func (d *streamDecoder) dispatch(name, data string) error {
 	}
 	if event != nil {
 		return d.send(*event)
+	}
+	return nil
+}
+
+func (d *streamDecoder) decodeResponsesStreamDelta(payload map[string]json.RawMessage) *Event {
+	typ := stringValue(payload["type"])
+	if typ == "response.output_item.added" || typ == "response.output_item.done" {
+		item, ok := rawObject(payload["item"])
+		if !ok {
+			return nil
+		}
+		itemType := stringValue(item["type"])
+		if itemType != "function_call" && itemType != "custom_tool_call" {
+			return nil
+		}
+		itemID := stringValue(item["id"])
+		if itemID == "" {
+			return nil
+		}
+		state := d.responsesTools[itemID]
+		if state == nil {
+			state = &responsesStreamTool{}
+			d.responsesTools[itemID] = state
+		}
+		state.callID = stringValue(item["call_id"])
+		if state.callID == "" {
+			state.callID = itemID
+		}
+		state.name = stringValue(item["name"])
+		if raw := item["arguments"]; len(raw) > 0 {
+			state.args = string(jsonArgument(raw))
+		}
+		if typ == "response.output_item.added" && state.name != "" && state.emitted == 0 {
+			state.emitted = len(state.args)
+			return &Event{Type: EventToolCallDelta, ToolCall: &ToolCall{ID: state.callID, Type: "function", Name: state.name}}
+		}
+		return nil
+	}
+	if typ == "response.function_call_arguments.delta" || typ == "response.function_call_arguments.done" {
+		itemID := stringValue(payload["item_id"])
+		if itemID == "" {
+			return nil
+		}
+		state := d.responsesTools[itemID]
+		if state == nil {
+			state = &responsesStreamTool{callID: itemID}
+			d.responsesTools[itemID] = state
+		}
+		if typ == "response.function_call_arguments.delta" {
+			state.args += stringValue(payload["delta"])
+		} else {
+			state.args = string(jsonArgument(payload["arguments"]))
+		}
+		if state.emitted > len(state.args) {
+			return nil
+		}
+		fragment := state.args[state.emitted:]
+		state.emitted = len(state.args)
+		if state.name == "" {
+			return nil
+		}
+		return &Event{Type: EventToolCallDelta, ToolCall: &ToolCall{ID: state.callID, Type: "function", Name: state.name, Arguments: json.RawMessage(fragment)}}
+	}
+	if typ == "response.output_text.delta" {
+		if text := stringValue(payload["delta"]); text != "" {
+			return &Event{Type: EventTextDelta, Text: text}
+		}
+		return nil
+	}
+	if typ == "response.reasoning_text.delta" || typ == "response.reasoning_summary_text.delta" {
+		return &Event{Type: EventReasoningDelta, Reasoning: stringValue(payload["delta"])}
 	}
 	return nil
 }

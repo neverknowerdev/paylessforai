@@ -84,6 +84,18 @@ func writeSSEFrame(w io.Writer, flusher http.Flusher, event string, payload any)
 
 func endStream(format Format, w http.ResponseWriter, flusher http.Flusher, response Response) error {
 	if format == FormatChatCompletions {
+		finish := "stop"
+		if len(response.Messages) > 0 {
+			for _, message := range response.Messages {
+				if len(message.ToolCalls) > 0 {
+					finish = "tool_calls"
+					break
+				}
+			}
+		}
+		if err := encodeStreamEvent(format, Event{Type: EventComplete, Response: &response, FinishReason: finish}, w, flusher); err != nil {
+			return err
+		}
 		if _, err := io.WriteString(w, "data: [DONE]\n\n"); err != nil {
 			return err
 		}

@@ -455,5 +455,17 @@ func encodeChatStreamEvent(event Event) any {
 	if event.Type == EventToolCallDelta && event.ToolCall != nil {
 		return map[string]any{"id": "chatcmpl-translation", "object": "chat.completion.chunk", "choices": []any{map[string]any{"index": 0, "delta": map[string]any{"tool_calls": []any{map[string]any{"id": event.ToolCall.ID, "type": "function", "function": map[string]any{"name": event.ToolCall.Name, "arguments": string(event.ToolCall.Arguments)}}}}}}}
 	}
+	if event.Type == EventComplete {
+		finish := valueOr(event.FinishReason, "stop")
+		if event.Response != nil {
+			for _, message := range event.Response.Messages {
+				if len(message.ToolCalls) > 0 {
+					finish = "tool_calls"
+					break
+				}
+			}
+		}
+		return map[string]any{"id": "chatcmpl-translation", "object": "chat.completion.chunk", "choices": []any{map[string]any{"index": 0, "delta": map[string]any{}, "finish_reason": finish}}}
+	}
 	return map[string]any{"id": "chatcmpl-translation", "object": "chat.completion.chunk", "choices": []any{map[string]any{"index": 0, "delta": map[string]any{"role": "assistant", "content": event.Text}, "finish_reason": nil}}}
 }

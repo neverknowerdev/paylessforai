@@ -355,7 +355,8 @@ func decodeResponsesResponsePayload(payload map[string]json.RawMessage) (Respons
 			return decodeResponsesResponsePayload(nested)
 		}
 	}
-	result := Response{ID: stringValue(payload["id"]), Model: stringValue(payload["model"]), Text: stringValue(payload["output_text"]), FinishReason: stringValue(payload["status"])}
+	result := Response{ID: stringValue(payload["id"]), Model: stringValue(payload["model"]), Text: stringValue(payload["output_text"]), FinishReason: responsesFinishReason(stringValue(payload["status"]))}
+	assistant := Message{Role: RoleAssistant}
 	if len(payload["output"]) > 0 {
 		var output []map[string]json.RawMessage
 		if json.Unmarshal(payload["output"], &output) == nil {
@@ -365,7 +366,11 @@ func decodeResponsesResponsePayload(payload map[string]json.RawMessage) (Respons
 					if id == "" {
 						id = stringValue(item["id"])
 					}
-					result.Messages = append(result.Messages, Message{Role: RoleAssistant, ToolCalls: []ToolCall{{ID: id, Type: typ, Name: stringValue(item["name"]), Arguments: jsonArgument(item["arguments"])}}})
+					name := stringValue(item["name"])
+					if strings.TrimSpace(name) == "" {
+						return result, errors.New("responses tool call has no function name")
+					}
+					assistant.ToolCalls = append(assistant.ToolCalls, ToolCall{ID: id, Type: "function", Name: name, Arguments: jsonArgument(item["arguments"])})
 					continue
 				}
 				role := stringValue(item["role"])
@@ -377,6 +382,9 @@ func decodeResponsesResponsePayload(payload map[string]json.RawMessage) (Respons
 			}
 		}
 	}
+	if len(assistant.ToolCalls) > 0 {
+		result.Messages = append(result.Messages, assistant)
+	}
 	if result.Text == "" {
 		for _, message := range result.Messages {
 			result.Text += blocksText(message.Content)
@@ -387,6 +395,17 @@ func decodeResponsesResponsePayload(payload map[string]json.RawMessage) (Respons
 		return result, errors.New("response has no semantic content")
 	}
 	return result, nil
+}
+
+func responsesFinishReason(status string) string {
+	switch status {
+	case "completed":
+		return "stop"
+	case "incomplete":
+		return "length"
+	default:
+		return status
+	}
 }
 
 func decodeResponsesStreamDelta(payload map[string]json.RawMessage) *Event {

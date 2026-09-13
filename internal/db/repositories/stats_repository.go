@@ -216,29 +216,95 @@ func (r *StatsRepository) GroupStats(ctx context.Context) ([]GroupStats, error) 
 }
 
 func (r *StatsRepository) ListRequestStats(ctx context.Context, limit int) ([]RequestStat, error) {
+	items, _, err := r.ListRequestStatsPage(ctx, limit, 0)
+	return items, err
+}
+
+// ListRequestStatsPage returns the newest request statistics for one page.
+// Related usage and attempt rows are fetched only for the returned requests;
+// the requests endpoint must not materialize the entire request history.
+func (r *StatsRepository) ListRequestStatsPage(ctx context.Context, limit, offset int) ([]RequestStat, bool, error) {
 	if limit <= 0 || limit > 500 {
 		limit = 100
 	}
-	data, err := r.load(ctx)
+	if offset < 0 {
+		offset = 0
+	}
+	if r == nil || r.exec == nil {
+		return nil, false, fmt.Errorf("database unavailable")
+	}
+
+	// Fetch one sentinel row so callers can render a load-more affordance
+	// without issuing a COUNT(*) over a potentially large history.
+	requests, err := bobmodels.ProxyRequests.Query(
+		sm.OrderBy(bobmodels.ProxyRequests.Columns.ReceivedAt).Desc(),
+		sm.OrderBy(bobmodels.ProxyRequests.Columns.ID).Desc(),
+		sm.Limit(limit+1),
+		sm.Offset(offset),
+	).All(ctx, r.exec)
 	if err != nil {
-		return nil, err
+		return nil, false, err
 	}
-	sort.SliceStable(data.requests, func(i, j int) bool {
-		return data.requests[i].ReceivedAt > data.requests[j].ReceivedAt
-	})
-	if len(data.requests) > limit {
-		data.requests = data.requests[:limit]
+	hasMore := len(requests) > limit
+	if hasMore {
+		requests = requests[:limit]
 	}
-	result := make([]RequestStat, 0, len(data.requests))
-	for _, request := range data.requests {
-		item := requestStatFromBob(request, data.usage[request.ID])
-		for _, attempt := range data.attempts[request.ID] {
+
+	if len(requests) == 0 {
+		return []RequestStat{}, false, nil
+	}
+	requestIDs := make([]string, 0, len(requests))
+	for _, request := range requests {
+		requestIDs = append(requestIDs, request.ID)
+	}
+	idArgs := make([]any, len(requestIDs))
+	for i, id := range requestIDs {
+		idArgs[i] = id
+	}
+	usageRows, err := bobmodels.RequestUsages.Query(
+		sm.Where(bobmodels.RequestUsages.Columns.RequestID.In(sqlite.Arg(idArgs...))),
+	).All(ctx, r.exec)
+	if err != nil {
+		return nil, false, err
+	}
+	attemptRows, err := bobmodels.ProxyAttempts.Query(
+		sm.Where(bobmodels.ProxyAttempts.Columns.RequestID.In(sqlite.Arg(idArgs...))),
+	).All(ctx, r.exec)
+	if err != nil {
+		return nil, false, err
+	}
+	credentialRows, err := bobmodels.ProviderCredentials.Query().All(ctx, r.exec)
+	if err != nil {
+		return nil, false, err
+	}
+	usage := make(map[string]*bobmodels.RequestUsage, len(usageRows))
+	for _, row := range usageRows {
+		usage[row.RequestID] = row
+	}
+	attempts := make(map[string][]*bobmodels.ProxyAttempt, len(requests))
+	for _, row := range attemptRows {
+		attempts[row.RequestID] = append(attempts[row.RequestID], row)
+	}
+	for requestID := range attempts {
+		sort.Slice(attempts[requestID], func(i, j int) bool {
+			return attempts[requestID][i].AttemptNumber < attempts[requestID][j].AttemptNumber
+		})
+	}
+	providers := make(map[string]string, len(credentialRows))
+	for _, row := range credentialRows {
+		providers[row.ID] = row.Provider
+	}
+
+	result := make([]RequestStat, 0, len(requests))
+	for _, request := range requests {
+		item := requestStatFromBob(request, usage[request.ID])
+		for _, attempt := range attempts[request.ID] {
 			item.AttemptDetails = append(item.AttemptDetails, attemptStatFromBob(attempt))
 		}
-		item.SkippedRoutes = skippedRoutesFromPlan(request.ResolvedPlanJSON, data.providers)
+		item.SkippedRoutes = skippedRoutesFromPlan(request.ResolvedPlanJSON, providers)
 		result = append(result, item)
 	}
-	return result, nil
+	return result, hasMore, nil
 }
 
 func (r *StatsRepository) RequestStatsSummary(ctx context.Context) (StatsSummary, error) {

@@ -80,12 +80,19 @@ func (s *Server) handleRequests(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	limit, _ := strconv.Atoi(r.URL.Query().Get("limit"))
-	items, err := s.db.Stats.ListRequestStats(r.Context(), limit)
+	offset, _ := strconv.Atoi(r.URL.Query().Get("offset"))
+	items, hasMore, err := s.db.Stats.ListRequestStatsPage(r.Context(), limit, offset)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "request_stats_failed", "could not list request statistics")
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"data": items})
+	if limit <= 0 || limit > 500 {
+		limit = 100
+	}
+	if offset < 0 {
+		offset = 0
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"data": items, "limit": limit, "offset": offset, "has_more": hasMore})
 }
 
 func (s *Server) handleStatsSummary(w http.ResponseWriter, r *http.Request) {

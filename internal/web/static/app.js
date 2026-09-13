@@ -1,4 +1,5 @@
 (() => {
+  const REQUEST_PAGE_SIZE = 50;
   const state = { requests: [], models: [], modelStats: [], providerStats: [], groupStats: [], groups: [], providers: [], summary: {}, network: {}, view: 'overview', detailDrawer: null, modelSort: { key: null, direction: null }, modelFilters: { model: [], provider: [], tags: [], input: [], output: [], usage: { min: null, max: null } }, filterPopover: null, updateOperation: null };
   const $ = (selector) => document.querySelector(selector);
   const $$ = (selector) => Array.from(document.querySelectorAll(selector));
@@ -262,8 +263,51 @@
     } catch (_) { setText('#metric-total', '—'); }
   }
 
-  async function loadRequests() {
-    try { state.requests = (await fetchJSON('/api/requests?limit=500')).data || []; renderRecentRequests(); renderRequestTable(); renderRequestSummary(); } catch (_) { setText('#request-list', 'Unable to load request statistics'); }
+  async function loadRequests(limit = state.view === 'requests' ? REQUEST_PAGE_SIZE : 5, offset = 0) {
+    if (state.requestPage?.loading) return;
+    state.requestPage = { ...(state.requestPage || {}), limit, offset, loading: true };
+    renderRequestsPager();
+    try {
+      const payload = await fetchJSON(`/api/requests?limit=${encodeURIComponent(limit)}&offset=${encodeURIComponent(offset)}`);
+      const incoming = payload.data || [];
+      state.requests = offset === 0 ? incoming : [...state.requests, ...incoming];
+      state.requestPage = { limit: payload.limit || limit, offset: offset + incoming.length, hasMore: Boolean(payload.has_more), loading: false };
+      renderRecentRequests();
+      renderRequestTable();
+      renderRequestSummary();
+    } catch (_) {
+      state.requestPage = { ...(state.requestPage || {}), loading: false };
+      setText('#request-list', 'Unable to load request statistics');
+      renderRequestsPager();
+    }
+  }
+  function renderRequestsPager() {
+    const body = $('#requests-table-body');
+    const card = body?.closest('.table-card');
+    if (!card) return;
+    let pager = card.querySelector('.request-pager');
+    if (!pager) {
+      pager = document.createElement('div');
+      pager.className = 'request-pager';
+      const note = document.createElement('small');
+      note.className = 'request-pager-note';
+      const button = document.createElement('button');
+      button.type = 'button';
+      button.className = 'quiet-button';
+      button.textContent = 'Load more';
+      pager.append(note, button);
+      card.append(pager);
+    }
+    const page = state.requestPage || {};
+    const note = pager.querySelector('.request-pager-note');
+    const button = pager.querySelector('button');
+    if (note) note.textContent = state.requests.length ? `Showing ${formatNumber(state.requests.length)} loaded request${state.requests.length === 1 ? '' : 's'}` : '';
+    if (button) {
+      button.hidden = !page.hasMore;
+      button.disabled = Boolean(page.loading);
+      button.textContent = page.loading ? 'Loading…' : 'Load more';
+      button.onclick = () => loadRequests(page.limit || REQUEST_PAGE_SIZE, page.offset || 0);
+    }
   }
   async function loadModelStats() { try { state.modelStats = (await fetchJSON('/api/stats/models')).data || []; renderStatsOverview(); renderModelStats(); } catch (_) { setText('#model-stats-body', 'Unable to load model statistics'); } }
   async function loadProviderStats() { try { state.providerStats = (await fetchJSON('/api/stats/providers')).data || []; renderProviderStats(); } catch (_) { setText('#provider-stats-body', 'Unable to load provider statistics'); } }
@@ -373,6 +417,7 @@
       appendTextCell(row, formatDuration(request.duration_ms)); const status = document.createElement('td'); status.append(stateBadge(request.state)); row.append(status); appendTextCell(row, dateValue(request.completed_at)); body.append(row);
     });
     empty.hidden = filteredRequests().length > 0;
+    renderRequestsPager();
   }
 
   function showRequestDetail(id) {
@@ -1723,5 +1768,12 @@
   $('#remote-access-stop')?.addEventListener('click', async () => { if (!window.confirm('Stop sharing PayLessForAI remotely?')) return; try { await fetchJSON('/api/remote-access', { method: 'PUT', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ mode: 'disabled', hostname: $('#remote-access-hostname').value }) }); await loadRemoteAccess(); } catch (error) { setText('#remote-access-error', error.message); $('#remote-access-error').hidden = false; } });
   $('#remote-access-forget')?.addEventListener('click', async () => { if (!window.confirm('Forget the saved Tailscale identity? You may need to remove the device from Tailscale separately.')) return; try { await fetchJSON('/api/remote-access/identity', { method: 'DELETE' }); await loadRemoteAccess(); } catch (error) { setText('#remote-access-error', error.message); $('#remote-access-error').hidden = false; } });
   $('#topbar-models').addEventListener('click', () => { $('#models-search').value = ''; clearModelFilters(); });
+  document.addEventListener('click', (event) => {
+    const requestsNav = event.target.closest('[data-view="requests"]');
+    if (!requestsNav) return;
+    window.setTimeout(() => {
+      if (state.view === 'requests' && state.requestPage?.limit !== REQUEST_PAGE_SIZE) loadRequests(REQUEST_PAGE_SIZE, 0);
+    }, 0);
+  });
   loadRemoteAccess();
 })();

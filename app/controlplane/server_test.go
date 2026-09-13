@@ -322,6 +322,16 @@ func TestProviderCredentialManagementAPI(t *testing.T) {
 	if rename.Code != http.StatusOK || !strings.Contains(rename.Body.String(), `"label":"renamed"`) {
 		t.Fatalf("unexpected provider rename response: %d %s", rename.Code, rename.Body.String())
 	}
+	changeAccess := httptest.NewRecorder()
+	server.httpServer.Handler.ServeHTTP(changeAccess, httptest.NewRequest(http.MethodPut, "/api/providers/credentials/"+listed.Data[0].ID, strings.NewReader(`{"label":"subscription","access_mode":"subscription","subscription_fee_usd":"12.50"}`)))
+	if changeAccess.Code != http.StatusOK || !strings.Contains(changeAccess.Body.String(), `"access_mode":"subscription"`) || !strings.Contains(changeAccess.Body.String(), `12500000000000`) {
+		t.Fatalf("unexpected provider access update response: %d %s", changeAccess.Code, changeAccess.Body.String())
+	}
+	updatedList := httptest.NewRecorder()
+	server.httpServer.Handler.ServeHTTP(updatedList, httptest.NewRequest(http.MethodGet, "/api/providers/credentials", nil))
+	if !strings.Contains(updatedList.Body.String(), `"access_mode":"subscription"`) || !strings.Contains(updatedList.Body.String(), `"subscription_fee_pico_usd":12500000000000`) {
+		t.Fatalf("provider access update was not persisted: %s", updatedList.Body.String())
+	}
 	custom := httptest.NewRecorder()
 	server.httpServer.Handler.ServeHTTP(custom, httptest.NewRequest(http.MethodPost, "/api/providers/credentials", strings.NewReader(`{"provider":"local-llm","label":"local","base_url":"http://custom.invalid/v1","api_key":"different-secret"}`)))
 	if custom.Code != http.StatusCreated || !strings.Contains(custom.Body.String(), `"provider":"local-llm"`) || !strings.Contains(custom.Body.String(), `"base_url":"http://custom.invalid/v1"`) {

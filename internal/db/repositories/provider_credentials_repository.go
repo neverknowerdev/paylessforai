@@ -65,6 +65,30 @@ func (r *ProviderCredentialsRepository) UpdateLabel(ctx context.Context, id, lab
 	now := time.Now().UTC().Format(time.RFC3339Nano)
 	return row.Update(ctx, r.exec, &bobmodels.ProviderCredentialSetter{Label: &label, UpdatedAt: &now})
 }
+
+func (r *ProviderCredentialsRepository) UpdateDetails(ctx context.Context, id, label, accessMode string, fee *int64) error {
+	row, err := bobmodels.FindProviderCredential(ctx, r.exec, id)
+	if err != nil {
+		return err
+	}
+	now := time.Now().UTC().Format(time.RFC3339Nano)
+	feeValue := nullableInt64(fee)
+	setter := &bobmodels.ProviderCredentialSetter{
+		Label:                  &label,
+		AccessMode:             &accessMode,
+		SubscriptionFeePicoUsd: &feeValue,
+		UpdatedAt:              &now,
+	}
+	if row.AccessMode != accessMode {
+		available := "available"
+		empty := sql.Null[string]{}
+		setter.SubscriptionStatus = &available
+		setter.NextAvailableAt = &empty
+		setter.StatusReason = &empty
+		setter.LastError = &empty
+	}
+	return row.Update(ctx, r.exec, setter)
+}
 func (r *ProviderCredentialsRepository) MarkLimited(ctx context.Context, provider string, next *time.Time, reason string) error {
 	var n *string
 	if next != nil {

@@ -177,12 +177,12 @@ func encodeResponses(request *Request) ([]byte, error) {
 	for _, message := range request.Messages {
 		switch message.Role {
 		case RoleSystem, RoleDeveloper, RoleUser, RoleAssistant:
+			if len(message.Reasoning) > 0 {
+				input = append(input, map[string]any{"type": "reasoning", "summary": []any{map[string]any{"type": "summary_text", "text": blocksText(message.Reasoning)}}})
+			}
 			content, err := encodeResponsesContent(message.Role, message.Content)
 			if err != nil {
 				return nil, err
-			}
-			if len(message.Reasoning) > 0 {
-				content = append(content, map[string]any{"type": "reasoning", "summary": []any{map[string]any{"type": "summary_text", "text": blocksText(message.Reasoning)}}})
 			}
 			input = append(input, map[string]any{"type": "message", "role": string(message.Role), "content": content})
 			for _, call := range message.ToolCalls {

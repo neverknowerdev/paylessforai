@@ -1,4 +1,5 @@
 (() => {
+  const REQUEST_PAGE_SIZE = 50;
   const state = { requests: [], models: [], modelStats: [], providerStats: [], groupStats: [], groups: [], providers: [], summary: {}, network: {}, view: 'overview', detailDrawer: null, modelSort: { key: null, direction: null }, modelFilters: { model: [], provider: [], tags: [], input: [], output: [], usage: { min: null, max: null } }, filterPopover: null, updateOperation: null };
   const $ = (selector) => document.querySelector(selector);
   const $$ = (selector) => Array.from(document.querySelectorAll(selector));
@@ -262,8 +263,58 @@
     } catch (_) { setText('#metric-total', '—'); }
   }
 
-  async function loadRequests() {
-    try { state.requests = (await fetchJSON('/api/requests?limit=500')).data || []; renderRecentRequests(); renderRequestTable(); renderRequestSummary(); } catch (_) { setText('#request-list', 'Unable to load request statistics'); }
+  async function loadRequests(limit = state.view === 'requests' ? REQUEST_PAGE_SIZE : 5, offset = 0) {
+    const current = state.requestPage;
+    if (current?.loading) {
+      if (offset === 0 && limit > Number(current.limit || 0)) current.pending = { limit, offset };
+      return;
+    }
+    state.requestPage = { ...(current || {}), limit, offset, loading: true, pending: undefined };
+    renderRequestsPager();
+    try {
+      const payload = await fetchJSON('/api/requests?limit=' + encodeURIComponent(limit) + '&offset=' + encodeURIComponent(offset));
+      const incoming = payload.data || [];
+      state.requests = offset === 0 ? incoming : [...state.requests, ...incoming];
+      state.requestPage = { limit: payload.limit || limit, offset: offset + incoming.length, hasMore: Boolean(payload.has_more), loading: true, pending: state.requestPage?.pending };
+      renderRecentRequests();
+      renderRequestTable();
+      renderRequestSummary();
+    } catch (_) {
+      setText('#request-list', 'Unable to load request statistics');
+    } finally {
+      const pending = state.requestPage?.pending;
+      state.requestPage = { ...(state.requestPage || {}), loading: false, pending: undefined };
+      renderRequestsPager();
+      if (pending) loadRequests(pending.limit, pending.offset);
+    }
+  }
+  function renderRequestsPager() {
+    const body = $('#requests-table-body');
+    const card = body?.closest('.table-card');
+    if (!card) return;
+    let pager = card.querySelector('.request-pager');
+    if (!pager) {
+      pager = document.createElement('div');
+      pager.className = 'request-pager';
+      const note = document.createElement('small');
+      note.className = 'request-pager-note';
+      const button = document.createElement('button');
+      button.type = 'button';
+      button.className = 'quiet-button';
+      button.textContent = 'Load more';
+      pager.append(note, button);
+      card.append(pager);
+    }
+    const page = state.requestPage || {};
+    const note = pager.querySelector('.request-pager-note');
+    const button = pager.querySelector('button');
+    if (note) note.textContent = state.requests.length ? `Showing ${formatNumber(state.requests.length)} loaded request${state.requests.length === 1 ? '' : 's'}` : '';
+    if (button) {
+      button.hidden = !page.hasMore;
+      button.disabled = Boolean(page.loading);
+      button.textContent = page.loading ? 'Loading…' : 'Load more';
+      button.onclick = () => loadRequests(page.limit || REQUEST_PAGE_SIZE, page.offset || 0);
+    }
   }
   async function loadModelStats() { try { state.modelStats = (await fetchJSON('/api/stats/models')).data || []; renderStatsOverview(); renderModelStats(); } catch (_) { setText('#model-stats-body', 'Unable to load model statistics'); } }
   async function loadProviderStats() { try { state.providerStats = (await fetchJSON('/api/stats/providers')).data || []; renderProviderStats(); } catch (_) { setText('#provider-stats-body', 'Unable to load provider statistics'); } }
@@ -373,6 +424,7 @@
       appendTextCell(row, formatDuration(request.duration_ms)); const status = document.createElement('td'); status.append(stateBadge(request.state)); row.append(status); appendTextCell(row, dateValue(request.completed_at)); body.append(row);
     });
     empty.hidden = filteredRequests().length > 0;
+    renderRequestsPager();
   }
 
   function showRequestDetail(id) {
@@ -1688,11 +1740,11 @@
   $('#provider-form').addEventListener('submit', async (event) => { event.preventDefault(); const custom = $('#provider-type').value === 'custom'; let manualModels = []; try { manualModels = parseManualModels(); } catch (error) { setProviderFeedback(error.message, 'error'); return; } setProviderFeedback(''); setProviderSaving(true); try { const payload = await fetchJSON('/api/providers/credentials', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ provider: custom ? $('#provider-name').value : $('#provider-type').value, base_url: custom ? $('#provider-base-url').value : '', label: $('#provider-label').value, api_key: $('#provider-key').value, manual_models: manualModels }) }); const found = Number(payload.models_found ?? Number(payload.models_discovered || 0) + Number(payload.models_verified || 0)); $('#provider-form').reset(); updateProviderFormMode(); $('#manual-model-fields').hidden = true; setProviderSaving(false); setProviderFeedback(`Found ${formatNumber(found)} model${found === 1 ? '' : 's'}. Provider verified and saved.`, 'success'); await Promise.all([loadProviders(), loadModels(), loadStatus()]); await new Promise((resolve) => setTimeout(resolve, 1200)); closeModal('provider-modal'); setProviderFeedback(''); } catch (error) { const details = error.payload?.error; if (details?.can_enter_models) { $('#manual-model-fields').hidden = false; setProviderFeedback(`${details.message} Enter model IDs and prices below; each will be verified before the credential is saved.`); } else { setProviderFeedback(error.message, 'error'); } } finally { setProviderSaving(false); } });
   $('#provider-edit-form').addEventListener('submit', async (event) => { event.preventDefault(); const id = $('#provider-edit-id').value; const label = $('#provider-edit-name').value.trim(); const accessMode = $('#provider-edit-access-mode').value; const fee = $('#provider-edit-subscription-fee').value; const feedback = $('#provider-edit-feedback'); feedback.hidden = true; try { await fetchJSON(`/api/providers/credentials/${encodeURIComponent(id)}`, { method: 'PUT', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ label, access_mode: accessMode, subscription_fee_usd: accessMode === 'subscription' ? fee : '' }) }); closeModal('provider-edit-modal'); await Promise.all([loadProviders(), loadModels(), loadStatus()]); } catch (error) { feedback.hidden = false; feedback.className = 'provider-feedback error'; feedback.textContent = error.message; } });
   $('#network-settings-form').addEventListener('submit', async (event) => { event.preventDefault(); setNetworkFeedback(''); const port = Number($('#network-port').value); try { const data = await fetchJSON('/api/settings/network', { method: 'PUT', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ port }) }); state.network = data; await loadNetworkSettings(); setNetworkFeedback(data.restart_required ? 'Port saved. Restart PayLessForAI to apply it.' : 'Port saved and active.', 'success'); } catch (error) { setNetworkFeedback(error.message, 'error'); } });
-  $('#open-key-modal').addEventListener('click', () => { clearNewKey(); $('#key-form').reset(); updateHarnessFormMode(); openModal('key-modal'); }); $('#open-provider-modal').addEventListener('click', () => { $('#provider-form').reset(); updateProviderFormMode(); $('#manual-model-fields').hidden = true; setProviderFeedback(''); openModal('provider-modal'); }); $('#key-harness').addEventListener('change', updateHarnessFormMode); $('#provider-type').addEventListener('change', updateProviderFormMode); $('#provider-edit-access-mode').addEventListener('change', updateProviderEditMode); $('#menu-toggle').addEventListener('click', () => $('#sidebar').classList.toggle('open')); $('#refresh-button').addEventListener('click', () => Promise.all([loadStatus(), loadSummary(), loadRequests(), loadModelStats(), loadProviderStats(), loadGroupStats(), loadModels(), loadKeys(), loadProviders(), loadGroups(), loadNetworkSettings()])); $('#models-refresh').addEventListener('click', loadModels);
+  $('#open-key-modal').addEventListener('click', () => { clearNewKey(); $('#key-form').reset(); updateHarnessFormMode(); openModal('key-modal'); }); $('#open-provider-modal').addEventListener('click', () => { $('#provider-form').reset(); updateProviderFormMode(); $('#manual-model-fields').hidden = true; setProviderFeedback(''); openModal('provider-modal'); }); $('#key-harness').addEventListener('change', updateHarnessFormMode); $('#provider-type').addEventListener('change', updateProviderFormMode); $('#provider-edit-access-mode').addEventListener('change', updateProviderEditMode); $('#menu-toggle').addEventListener('click', () => $('#sidebar').classList.toggle('open')); $('#refresh-button').addEventListener('click', () => Promise.all([loadStatus(), loadSummary(), loadRequests(), loadModels(), loadKeys(), loadProviders(), loadGroups(), loadNetworkSettings(), state.view === 'stats' ? ensureStatsLoaded(true) : Promise.resolve()])); $('#models-refresh').addEventListener('click', loadModels);
   $('#models-search').addEventListener('input', renderModels); $('#models-clear-filters').addEventListener('click', clearModelFilters); $$('.table-sort').forEach((button) => button.addEventListener('click', () => cycleModelSort(button.dataset.sortKey))); $$('.table-filter').forEach((button) => button.addEventListener('click', (event) => { event.stopPropagation(); openModelFilter(button.dataset.filterKey, button); })); $('#requests-search').addEventListener('input', renderRequestTable); $('#requests-state').addEventListener('change', renderRequestTable); $('#groups-search').addEventListener('input', renderGroups); $('#open-group-editor').addEventListener('click', () => openGroupEditor()); $('#close-group-editor').addEventListener('click', () => { $('#group-editor').hidden = true; }); $('#cancel-group').addEventListener('click', () => { $('#group-editor').hidden = true; }); $('#add-group-stage').addEventListener('click', () => { const current = collectGroupDefinition(); current.stages.push({ position: current.stages.length, name: `Fallback ${current.stages.length + 1}`, sources: [], billing_classes: ['free', 'subscription', 'metered'], selection: 'lowest_expected_cost', try_retries: 1 }); renderGroupStages(current); previewCurrentGroup(); }); $('#group-stage-list').addEventListener('change', previewCurrentGroup); $('#group-stage-list').addEventListener('input', previewCurrentGroup); $('#group-form').addEventListener('submit', async (event) => { event.preventDefault(); setGroupFeedback(''); const definition = collectGroupDefinition(); const id = definition.id; const url = id ? `/api/groups/${encodeURIComponent(id)}?revision=${encodeURIComponent(definition.revision)}` : '/api/groups'; try { const payload = await fetchJSON(url, { method: id ? 'PUT' : 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(definition) }); openGroupEditor(payload.data); setGroupFeedback('Group saved and ready to call.', 'success'); await Promise.all([loadGroups(), loadModels()]); } catch (error) { const details = error.payload?.error; setGroupFeedback(details?.issues?.[0]?.message || error.message, 'error'); } });
   document.addEventListener('click', (event) => { if (state.filterPopover && !event.target.closest('#models-filter-popover') && !event.target.closest('.table-filter')) closeModelFilter(); const target = event.target.closest('[data-view]'); if (target) { event.preventDefault(); navigate(target.dataset.view); } const requestTarget = event.target.closest('[data-request-id]'); if (requestTarget) showRequestDetail(requestTarget.dataset.requestId); const connectGroup = event.target.closest('[data-connect-group]'); if (connectGroup) { const group = state.groups.find((item) => item.id === connectGroup.dataset.connectGroup); if (group) showGroupInstructions(group); return; } const editGroup = event.target.closest('[data-edit-group]'); if (editGroup) { const group = state.groups.find((item) => item.id === editGroup.dataset.editGroup); if (group) openGroupEditor(group); } const editProvider = event.target.closest('[data-edit-provider]'); if (editProvider) { const provider = state.providers.find((item) => item.id === editProvider.dataset.editProvider); if (provider) openProviderEdit(provider); return; } const copyGroup = event.target.closest('[data-copy-group-slug]'); if (copyGroup) { navigator.clipboard?.writeText(copyGroup.dataset.copyGroupSlug); copyGroup.textContent = 'Copied'; setTimeout(() => { copyGroup.textContent = 'Copy slug'; }, 1200); } const revoke = event.target.closest('[data-revoke-key]'); if (revoke && window.confirm('Revoke this client key?')) fetchJSON(`/api/client-keys/${encodeURIComponent(revoke.dataset.revokeKey)}`, { method: 'DELETE' }).then(loadKeys); const remove = event.target.closest('[data-remove-provider]'); if (remove && window.confirm('Remove this provider credential?')) fetchJSON(`/api/providers/credentials/${encodeURIComponent(remove.dataset.removeProvider)}`, { method: 'DELETE' }).then(() => Promise.all([loadProviders(), loadModels(), loadStatus()])); const copy = event.target.closest('[data-copy-target]'); if (copy) { const value = $(`#${copy.dataset.copyTarget}`)?.textContent || ''; navigator.clipboard?.writeText(value); copy.textContent = 'Copied'; setTimeout(() => { copy.textContent = 'Copy'; }, 1200); } const duplicateStage = event.target.closest('[data-duplicate-stage]'); if (duplicateStage) { const current = collectGroupDefinition(); const index = Number(duplicateStage.dataset.duplicateStage); const stage = current.stages[index]; if (stage) { current.stages.splice(index + 1, 0, { ...stage, sources: stage.sources.map((source) => ({ ...source })) }); renderGroupStages(current); previewCurrentGroup(); } return; } if (event.target.closest('.remove-stage')) { const cards = $$('#group-stage-list .group-stage-card'); if (cards.length > 1) { const current = collectGroupDefinition(); const index = Number(event.target.closest('.group-stage-card').dataset.stageIndex); current.stages.splice(index, 1); renderGroupStages(current); previewCurrentGroup(); } } if (event.target.classList.contains('modal-backdrop')) closeModal(event.target); if (event.target.closest('.close-modal')) closeModal(event.target.closest('.modal-backdrop')); });
   document.addEventListener('keydown', (event) => { const requestTarget = event.target.closest?.('[data-request-id]'); if (requestTarget && (event.key === 'Enter' || event.key === ' ')) { event.preventDefault(); showRequestDetail(requestTarget.dataset.requestId); return; } if (event.key === 'Escape') { closeModelFilter(); $$('.modal-backdrop:not([hidden])').forEach(closeModal); } }); window.addEventListener('hashchange', () => navigate(window.location.hash.slice(1))); navigate(window.location.hash.slice(1) || 'overview');
-  updateProviderFormMode(); setText('#base-url', `${window.location.origin}/v1`); Promise.all([loadStatus(), loadSummary(), loadRequests(), loadModelStats(), loadProviderStats(), loadGroupStats(), loadModels(), loadKeys(), loadProviders(), loadGroups(), loadNetworkSettings()]);
+  updateProviderFormMode(); setText('#base-url', `${window.location.origin}/v1`); Promise.all([loadStatus(), loadSummary(), loadRequests(), loadModels(), loadKeys(), loadProviders(), loadGroups(), loadNetworkSettings()]);
   const statsPanel = document.querySelector('[data-view-panel="stats"]'); if (statsPanel && !$('#subscription-stats-body')) { const article = document.createElement('article'); article.className = 'panel-card table-card stats-table-card'; article.innerHTML = '<div class="panel-heading stats-heading"><h3>Subscription economics</h3><span class="card-note">Dynamic blended pricing; observed 5h min/max</span></div><div class="table-wrap"><table><thead><tr><th>Provider</th><th>Tokens</th><th>Input / output per 1M</th><th>5h min / max</th></tr></thead><tbody id="subscription-stats-body"></tbody></table></div><div class="empty-state" id="subscription-stats-empty" hidden>No subscription usage yet.</div>'; statsPanel.append(article); }
   $('#update-settings-form')?.addEventListener('submit', async (event) => { event.preventDefault(); try { await fetchJSON('/api/updates/settings', { method: 'PUT', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ enabled: $('#updates-enabled').checked, channel: $('#updates-channel').value, interval_seconds: Number($('#updates-interval').value) }) }); setUpdatesFeedback('Settings saved.'); await loadUpdates(); } catch (error) { setUpdatesFeedback(error.message, 'error'); } });
   $('#updates-channel')?.addEventListener('change', () => { const note = $('#main-channel-note'); if (note) note.hidden = $('#updates-channel').value !== 'main'; });
@@ -1708,7 +1760,6 @@
   const navigateWithSettingsDescription = navigate;
   navigate = (view) => { navigateWithSettingsDescription(view); if (state.view === 'settings') setText('#page-description', 'Choose how to reach PayLessForAI, then configure updates for this binary.'); };
   navigate(window.location.hash.slice(1) || 'overview');
-  loadSubscriptionStats();
   loadUpdates();
   document.addEventListener('click', (event) => {
     const copyGroup = event.target.closest('[data-copy-group-slug]');
@@ -1716,12 +1767,40 @@
     copyGroup.textContent = copyGroup.dataset.copiedLabel || '✓';
     setTimeout(() => { copyGroup.textContent = copyGroup.dataset.copyLabel || '⧉'; }, 1200);
   });
-  $('#refresh-button').addEventListener('click', loadSubscriptionStats);
   async function setRemoteAccessMode(mode) { const currentMode = remoteAccessStatus?.desired_mode || 'disabled'; if (mode === currentMode) return; const remoteServerRunning = remoteAccessStatus?.phase === 'online' && remoteAccessStatus?.effective_mode !== 'disabled'; if (mode === 'disabled' && remoteServerRunning && !window.confirm('Stop the Tailscale server and turn remote access off?')) return; const hostname = $('#remote-access-hostname')?.value.trim().toLowerCase() || 'paylessforai'; $$('.access-mode-option').forEach((option) => { option.disabled = true; }); try { await fetchJSON('/api/remote-access', { method: 'PUT', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ mode, hostname }) }); await loadRemoteAccess(); } catch (error) { setText('#remote-access-error', error.message); $('#remote-access-error').hidden = false; } finally { $$('.access-mode-option').forEach((option) => { option.disabled = false; }); } }
   $$('.access-mode-option').forEach((option) => option.addEventListener('click', () => setRemoteAccessMode(option.dataset.accessMode)));
   $('#remote-access-retry')?.addEventListener('click', async () => { try { await fetchJSON('/api/remote-access/retry', { method: 'POST' }); await loadRemoteAccess(); } catch (error) { setText('#remote-access-error', error.message); $('#remote-access-error').hidden = false; } });
   $('#remote-access-stop')?.addEventListener('click', async () => { if (!window.confirm('Stop sharing PayLessForAI remotely?')) return; try { await fetchJSON('/api/remote-access', { method: 'PUT', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ mode: 'disabled', hostname: $('#remote-access-hostname').value }) }); await loadRemoteAccess(); } catch (error) { setText('#remote-access-error', error.message); $('#remote-access-error').hidden = false; } });
   $('#remote-access-forget')?.addEventListener('click', async () => { if (!window.confirm('Forget the saved Tailscale identity? You may need to remove the device from Tailscale separately.')) return; try { await fetchJSON('/api/remote-access/identity', { method: 'DELETE' }); await loadRemoteAccess(); } catch (error) { setText('#remote-access-error', error.message); $('#remote-access-error').hidden = false; } });
   $('#topbar-models').addEventListener('click', () => { $('#models-search').value = ''; clearModelFilters(); });
+  document.addEventListener('click', (event) => {
+    const requestsNav = event.target.closest('[data-view="requests"]');
+    if (!requestsNav) return;
+    window.setTimeout(() => {
+      if (state.view === 'requests' && state.requestPage?.limit !== REQUEST_PAGE_SIZE) loadRequests(REQUEST_PAGE_SIZE, 0);
+    }, 0);
+  });
+  let statsLoadPromise = null;
+  async function ensureStatsLoaded(force = false) {
+    if (statsLoadPromise) return statsLoadPromise;
+    if (state.statsLoaded && !force) return;
+    state.statsLoaded = true;
+    statsLoadPromise = (async () => {
+      await Promise.all([loadModelStats(), loadProviderStats(), loadGroupStats()]);
+      await loadSubscriptionStats();
+    })();
+    try {
+      await statsLoadPromise;
+    } finally {
+      statsLoadPromise = null;
+    }
+  }
+  document.addEventListener('click', (event) => {
+    const statsNav = event.target.closest('[data-view="stats"]');
+    if (!statsNav) return;
+    window.setTimeout(() => { if (state.view === 'stats') ensureStatsLoaded(); }, 0);
+  });
+  window.addEventListener('hashchange', () => { if (state.view === 'stats') ensureStatsLoaded(); });
+  if (state.view === 'stats') ensureStatsLoaded();
   loadRemoteAccess();
 })();

@@ -11,8 +11,10 @@ import (
 
 	bobmodels "github.com/neverknowerdev/paylessforai/internal/db/bob/models"
 	"github.com/neverknowerdev/paylessforai/internal/db/models"
+	"github.com/stephenafamo/bob"
 	"github.com/stephenafamo/bob/dialect/sqlite"
 	"github.com/stephenafamo/bob/dialect/sqlite/sm"
+	"github.com/stephenafamo/scan"
 )
 
 // StatsRepository reads the persisted request, usage, and attempt models with
@@ -42,24 +44,64 @@ func (r *StatsRepository) RouteUsageSince(ctx context.Context, since time.Time) 
 	if r == nil || r.exec == nil {
 		return nil, fmt.Errorf("database unavailable")
 	}
-	rows, err := bobmodels.ProxyRequests.Query(
+	query := sqlite.Select(
+		sm.Columns(
+			bobmodels.ProxyRequests.Columns.SelectedProvider.As("provider"),
+			bobmodels.ProxyRequests.Columns.SelectedUpstreamModel.As("upstream_model"),
+			sqlite.Raw("COUNT(*)").As("requests"),
+		),
+		sm.From(bobmodels.ProxyRequests.NameAsExpr()),
 		sm.Where(bobmodels.ProxyRequests.Columns.ReceivedAt.GTE(sqlite.Arg(since.UTC().Format(time.RFC3339Nano)))),
-	).All(ctx, r.exec)
+		sm.GroupBy(sqlite.Raw("\"selected_provider\", \"selected_upstream_model\"")),
+	)
+	type routeUsageRow struct {
+		Provider      sql.Null[string]
+		UpstreamModel sql.Null[string]
+		Requests      int64
+	}
+	rows, err := bob.All(ctx, r.exec, query, scan.StructMapper[routeUsageRow]())
 	if err != nil {
 		return nil, err
 	}
-	result := make(map[string]int64)
+	result := make(map[string]int64, len(rows))
 	for _, row := range rows {
-		if !row.SelectedProvider.Valid || row.SelectedProvider.V == "" || !row.SelectedUpstreamModel.Valid || row.SelectedUpstreamModel.V == "" {
-			continue
+		if row.Provider.Valid && row.Provider.V != "" && row.UpstreamModel.Valid && row.UpstreamModel.V != "" {
+			result[row.Provider.V+"\x00"+row.UpstreamModel.V] = row.Requests
 		}
-		key := row.SelectedProvider.V + "\x00" + row.SelectedUpstreamModel.V
-		result[key]++
 	}
 	return result, nil
 }
 
-func (r *StatsRepository) load(ctx context.Context) (statsData, error) {
+type requestSummaryAggregate struct {
+	TotalRequests         int64         `db:"total_requests"`
+	SucceededRequests     int64         `db:"succeeded_requests"`
+	FailedRequests        int64         `db:"failed_requests"`
+	PartialRequests       int64         `db:"partial_requests"`
+	TotalAttempts         int64         `db:"total_attempts"`
+	RetriedRequests       int64         `db:"retried_requests"`
+	RequestsWithTime      int64         `db:"requests_with_time"`
+	FastestMS             sql.NullInt64 `db:"fastest_ms"`
+	SlowestMS             sql.NullInt64 `db:"slowest_ms"`
+	AverageMS             sql.NullInt64 `db:"average_ms"`
+	EligibleRequests      int64         `db:"eligible_requests"`
+	ExcludedLimitRequests int64         `db:"excluded_limit_requests"`
+}
+
+type usageSummaryAggregate struct {
+	InputTokens        int64 `db:"input_tokens"`
+	OutputTokens       int64 `db:"output_tokens"`
+	TotalTokens        int64 `db:"total_tokens"`
+	CachedReadTokens   int64 `db:"cached_read_tokens"`
+	CacheWriteTokens   int64 `db:"cache_write_tokens"`
+	ReasoningTokens    int64 `db:"reasoning_tokens"`
+	EstimatedCostPico  int64 `db:"estimated_cost_pico_usd"`
+	OfficialCostPico   int64 `db:"official_cost_pico_usd"`
+	ActualCostPico     int64 `db:"actual_cost_pico_usd"`
+	SavedCostPico      int64 `db:"saved_cost_pico_usd"`
+	RequestsWithActual int64 `db:"requests_with_actual_cost"`
+}
+
+func (r *StatsRepository) loadRequestData(ctx context.Context) (statsData, error) {
 	if r == nil || r.exec == nil {
 		return statsData{}, fmt.Errorf("database unavailable")
 	}
@@ -75,21 +117,7 @@ func (r *StatsRepository) load(ctx context.Context) (statsData, error) {
 	if err != nil {
 		return statsData{}, err
 	}
-	groupRows, err := bobmodels.RoutingGroups.Query().All(ctx, r.exec)
-	if err != nil {
-		return statsData{}, err
-	}
-	credentialRows, err := bobmodels.ProviderCredentials.Query().All(ctx, r.exec)
-	if err != nil {
-		return statsData{}, err
-	}
-	data := statsData{requests: requests, usage: make(map[string]*bobmodels.RequestUsage, len(usageRows)), attempts: make(map[string][]*bobmodels.ProxyAttempt), groups: make(map[string]*bobmodels.RoutingGroup, len(groupRows)), providers: make(map[string]string, len(credentialRows))}
-	for _, row := range groupRows {
-		data.groups[row.ID] = row
-	}
-	for _, row := range credentialRows {
-		data.providers[row.ID] = row.Provider
-	}
+	data := statsData{requests: requests, usage: make(map[string]*bobmodels.RequestUsage, len(usageRows)), attempts: make(map[string][]*bobmodels.ProxyAttempt)}
 	for _, row := range usageRows {
 		data.usage[row.RequestID] = row
 	}
@@ -100,6 +128,30 @@ func (r *StatsRepository) load(ctx context.Context) (statsData, error) {
 		sort.Slice(data.attempts[requestID], func(i, j int) bool {
 			return data.attempts[requestID][i].AttemptNumber < data.attempts[requestID][j].AttemptNumber
 		})
+	}
+	return data, nil
+}
+
+func (r *StatsRepository) load(ctx context.Context) (statsData, error) {
+	data, err := r.loadRequestData(ctx)
+	if err != nil {
+		return statsData{}, err
+	}
+	groupRows, err := bobmodels.RoutingGroups.Query().All(ctx, r.exec)
+	if err != nil {
+		return statsData{}, err
+	}
+	credentialRows, err := bobmodels.ProviderCredentials.Query().All(ctx, r.exec)
+	if err != nil {
+		return statsData{}, err
+	}
+	data.groups = make(map[string]*bobmodels.RoutingGroup, len(groupRows))
+	data.providers = make(map[string]string, len(credentialRows))
+	for _, row := range groupRows {
+		data.groups[row.ID] = row
+	}
+	for _, row := range credentialRows {
+		data.providers[row.ID] = row.Provider
 	}
 	return data, nil
 }
@@ -216,91 +268,160 @@ func (r *StatsRepository) GroupStats(ctx context.Context) ([]GroupStats, error) 
 }
 
 func (r *StatsRepository) ListRequestStats(ctx context.Context, limit int) ([]RequestStat, error) {
+	items, _, err := r.ListRequestStatsPage(ctx, limit, 0)
+	return items, err
+}
+
+// ListRequestStatsPage returns the newest request statistics for one page.
+// Related usage and attempt rows are fetched only for the returned requests;
+// the requests endpoint must not materialize the entire request history.
+func (r *StatsRepository) ListRequestStatsPage(ctx context.Context, limit, offset int) ([]RequestStat, bool, error) {
 	if limit <= 0 || limit > 500 {
 		limit = 100
 	}
-	data, err := r.load(ctx)
+	if offset < 0 {
+		offset = 0
+	}
+	if r == nil || r.exec == nil {
+		return nil, false, fmt.Errorf("database unavailable")
+	}
+
+	// Fetch one sentinel row so callers can render a load-more affordance
+	// without issuing a COUNT(*) over a potentially large history.
+	requests, err := bobmodels.ProxyRequests.Query(
+		sm.OrderBy(bobmodels.ProxyRequests.Columns.ReceivedAt).Desc(),
+		sm.OrderBy(bobmodels.ProxyRequests.Columns.ID).Desc(),
+		sm.Limit(limit+1),
+		sm.Offset(offset),
+	).All(ctx, r.exec)
 	if err != nil {
-		return nil, err
+		return nil, false, err
 	}
-	sort.SliceStable(data.requests, func(i, j int) bool {
-		return data.requests[i].ReceivedAt > data.requests[j].ReceivedAt
-	})
-	if len(data.requests) > limit {
-		data.requests = data.requests[:limit]
+	hasMore := len(requests) > limit
+	if hasMore {
+		requests = requests[:limit]
 	}
-	result := make([]RequestStat, 0, len(data.requests))
-	for _, request := range data.requests {
-		item := requestStatFromBob(request, data.usage[request.ID])
-		for _, attempt := range data.attempts[request.ID] {
+
+	if len(requests) == 0 {
+		return []RequestStat{}, false, nil
+	}
+	requestIDs := make([]string, 0, len(requests))
+	for _, request := range requests {
+		requestIDs = append(requestIDs, request.ID)
+	}
+	idArgs := make([]any, len(requestIDs))
+	for i, id := range requestIDs {
+		idArgs[i] = id
+	}
+	usageRows, err := bobmodels.RequestUsages.Query(
+		sm.Where(bobmodels.RequestUsages.Columns.RequestID.In(sqlite.Arg(idArgs...))),
+	).All(ctx, r.exec)
+	if err != nil {
+		return nil, false, err
+	}
+	attemptRows, err := bobmodels.ProxyAttempts.Query(
+		sm.Where(bobmodels.ProxyAttempts.Columns.RequestID.In(sqlite.Arg(idArgs...))),
+	).All(ctx, r.exec)
+	if err != nil {
+		return nil, false, err
+	}
+	credentialRows, err := bobmodels.ProviderCredentials.Query().All(ctx, r.exec)
+	if err != nil {
+		return nil, false, err
+	}
+	usage := make(map[string]*bobmodels.RequestUsage, len(usageRows))
+	for _, row := range usageRows {
+		usage[row.RequestID] = row
+	}
+	attempts := make(map[string][]*bobmodels.ProxyAttempt, len(requests))
+	for _, row := range attemptRows {
+		attempts[row.RequestID] = append(attempts[row.RequestID], row)
+	}
+	for requestID := range attempts {
+		sort.Slice(attempts[requestID], func(i, j int) bool {
+			return attempts[requestID][i].AttemptNumber < attempts[requestID][j].AttemptNumber
+		})
+	}
+	providers := make(map[string]string, len(credentialRows))
+	for _, row := range credentialRows {
+		providers[row.ID] = row.Provider
+	}
+
+	result := make([]RequestStat, 0, len(requests))
+	for _, request := range requests {
+		item := requestStatFromBob(request, usage[request.ID])
+		for _, attempt := range attempts[request.ID] {
 			item.AttemptDetails = append(item.AttemptDetails, attemptStatFromBob(attempt))
 		}
-		item.SkippedRoutes = skippedRoutesFromPlan(request.ResolvedPlanJSON, data.providers)
+		item.SkippedRoutes = skippedRoutesFromPlan(request.ResolvedPlanJSON, providers)
 		result = append(result, item)
 	}
-	return result, nil
+	return result, hasMore, nil
 }
 
 func (r *StatsRepository) RequestStatsSummary(ctx context.Context) (StatsSummary, error) {
-	data, err := r.load(ctx)
+	if r == nil || r.exec == nil {
+		return StatsSummary{}, fmt.Errorf("database unavailable")
+	}
+	requestQuery := sqlite.Select(
+		sm.Columns(
+			sqlite.Raw("COUNT(*)").As("total_requests"),
+			sqlite.Raw("COALESCE(SUM(CASE WHEN state = \x27succeeded\x27 THEN 1 ELSE 0 END), 0)").As("succeeded_requests"),
+			sqlite.Raw("COALESCE(SUM(CASE WHEN state = \x27failed\x27 THEN 1 ELSE 0 END), 0)").As("failed_requests"),
+			sqlite.Raw("COALESCE(SUM(CASE WHEN state = \x27partial\x27 THEN 1 ELSE 0 END), 0)").As("partial_requests"),
+			sqlite.Raw("COALESCE(SUM(attempt_count), 0)").As("total_attempts"),
+			sqlite.Raw("COALESCE(SUM(CASE WHEN attempt_count > 1 THEN 1 ELSE 0 END), 0)").As("retried_requests"),
+			sqlite.Raw("COUNT(duration_ms)").As("requests_with_time"),
+			sqlite.Raw("MIN(duration_ms)").As("fastest_ms"),
+			sqlite.Raw("MAX(duration_ms)").As("slowest_ms"),
+			sqlite.Raw("CAST(AVG(duration_ms) AS INTEGER)").As("average_ms"),
+			sqlite.Raw("COALESCE(SUM(CASE WHEN stats_disposition = \x27included\x27 THEN 1 ELSE 0 END), 0)").As("eligible_requests"),
+			sqlite.Raw("COALESCE(SUM(CASE WHEN stats_disposition = \x27excluded_limit\x27 THEN 1 ELSE 0 END), 0)").As("excluded_limit_requests"),
+		),
+		sm.From(bobmodels.ProxyRequests.NameAsExpr()),
+	)
+	requestTotals, err := bob.One(ctx, r.exec, requestQuery, scan.StructMapper[requestSummaryAggregate]())
 	if err != nil {
 		return StatsSummary{}, err
 	}
-	var summary StatsSummary
-	var fastest, slowest, durationTotal int64
-	for _, request := range data.requests {
-		summary.TotalRequests++
-		switch request.State {
-		case "succeeded":
-			summary.SucceededRequests++
-		case "failed":
-			summary.FailedRequests++
-		case "partial":
-			summary.PartialRequests++
-		}
-		if request.StatsDisposition == "included" {
-			summary.EligibleRequests++
-		} else if request.StatsDisposition == "excluded_limit" {
-			summary.ExcludedLimitRequests++
-		}
-		summary.TotalAttempts += request.AttemptCount
-		if request.AttemptCount > 1 {
-			summary.RetriedRequests++
-		}
-		if request.DurationMS.Valid {
-			value := request.DurationMS.V
-			if summary.RequestsWithTime == 0 || value < fastest {
-				fastest = value
-			}
-			if summary.RequestsWithTime == 0 || value > slowest {
-				slowest = value
-			}
-			durationTotal += value
-			summary.RequestsWithTime++
-		}
-		if usage := data.usage[request.ID]; usage != nil {
-			summary.InputTokens += usage.InputTokens
-			summary.OutputTokens += usage.OutputTokens
-			summary.TotalTokens += usage.TotalTokens
-			summary.CachedReadTokens += usage.CachedReadTokens
-			summary.CacheWriteTokens += usage.CacheWriteTokens
-			summary.ReasoningTokens += usage.ReasoningTokens
-			summary.EstimatedCostPico += usage.EstimatedCostPicoUsd
-			summary.OfficialCostPico += usage.OfficialCostPicoUsd
-			if usage.ActualCostPicoUsd.Valid {
-				summary.ActualCostPico += usage.ActualCostPicoUsd.V
-				summary.RequestsWithActual++
-			}
-			if usage.DiscountPicoUsd.Valid && usage.DiscountPicoUsd.V > 0 {
-				summary.SavedCostPico += usage.DiscountPicoUsd.V
-			}
-		}
+	usageQuery := sqlite.Select(
+		sm.Columns(
+			sqlite.Raw("COALESCE(SUM(input_tokens), 0)").As("input_tokens"),
+			sqlite.Raw("COALESCE(SUM(output_tokens), 0)").As("output_tokens"),
+			sqlite.Raw("COALESCE(SUM(total_tokens), 0)").As("total_tokens"),
+			sqlite.Raw("COALESCE(SUM(cached_read_tokens), 0)").As("cached_read_tokens"),
+			sqlite.Raw("COALESCE(SUM(cache_write_tokens), 0)").As("cache_write_tokens"),
+			sqlite.Raw("COALESCE(SUM(reasoning_tokens), 0)").As("reasoning_tokens"),
+			sqlite.Raw("COALESCE(SUM(estimated_cost_pico_usd), 0)").As("estimated_cost_pico_usd"),
+			sqlite.Raw("COALESCE(SUM(official_cost_pico_usd), 0)").As("official_cost_pico_usd"),
+			sqlite.Raw("COALESCE(SUM(actual_cost_pico_usd), 0)").As("actual_cost_pico_usd"),
+			sqlite.Raw("COALESCE(SUM(CASE WHEN discount_pico_usd > 0 THEN discount_pico_usd ELSE 0 END), 0)").As("saved_cost_pico_usd"),
+			sqlite.Raw("COUNT(actual_cost_pico_usd)").As("requests_with_actual_cost"),
+		),
+		sm.From(bobmodels.RequestUsages.NameAsExpr()),
+	)
+	usageTotals, err := bob.One(ctx, r.exec, usageQuery, scan.StructMapper[usageSummaryAggregate]())
+	if err != nil {
+		return StatsSummary{}, err
 	}
-	if summary.RequestsWithTime > 0 {
-		summary.FastestMS = &fastest
-		summary.SlowestMS = &slowest
-		average := durationTotal / summary.RequestsWithTime
-		summary.AverageMS = &average
+	summary := StatsSummary{
+		TotalRequests: requestTotals.TotalRequests, SucceededRequests: requestTotals.SucceededRequests, FailedRequests: requestTotals.FailedRequests, PartialRequests: requestTotals.PartialRequests,
+		TotalAttempts: requestTotals.TotalAttempts, RetriedRequests: requestTotals.RetriedRequests, RequestsWithTime: requestTotals.RequestsWithTime,
+		EligibleRequests: requestTotals.EligibleRequests, ExcludedLimitRequests: requestTotals.ExcludedLimitRequests,
+		InputTokens: usageTotals.InputTokens, OutputTokens: usageTotals.OutputTokens, TotalTokens: usageTotals.TotalTokens, CachedReadTokens: usageTotals.CachedReadTokens, CacheWriteTokens: usageTotals.CacheWriteTokens, ReasoningTokens: usageTotals.ReasoningTokens,
+		EstimatedCostPico: usageTotals.EstimatedCostPico, OfficialCostPico: usageTotals.OfficialCostPico, ActualCostPico: usageTotals.ActualCostPico, SavedCostPico: usageTotals.SavedCostPico, RequestsWithActual: usageTotals.RequestsWithActual,
+	}
+	if requestTotals.FastestMS.Valid {
+		value := requestTotals.FastestMS.Int64
+		summary.FastestMS = &value
+	}
+	if requestTotals.SlowestMS.Valid {
+		value := requestTotals.SlowestMS.Int64
+		summary.SlowestMS = &value
+	}
+	if requestTotals.AverageMS.Valid {
+		value := requestTotals.AverageMS.Int64
+		summary.AverageMS = &value
 	}
 	if summary.OfficialCostPico > 0 {
 		value := summary.SavedCostPico * 10000 / summary.OfficialCostPico
@@ -313,7 +434,7 @@ func (r *StatsRepository) RequestStatsSummary(ctx context.Context) (StatsSummary
 }
 
 func (r *StatsRepository) ModelStats(ctx context.Context, freeModels map[string]bool) ([]ModelStats, error) {
-	data, err := r.load(ctx)
+	data, err := r.loadRequestData(ctx)
 	if err != nil {
 		return nil, err
 	}
@@ -417,7 +538,7 @@ func (r *StatsRepository) ModelStats(ctx context.Context, freeModels map[string]
 }
 
 func (r *StatsRepository) ProviderStats(ctx context.Context) ([]ProviderStats, error) {
-	data, err := r.load(ctx)
+	data, err := r.loadRequestData(ctx)
 	if err != nil {
 		return nil, err
 	}

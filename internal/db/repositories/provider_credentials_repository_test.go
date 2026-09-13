@@ -18,6 +18,16 @@ func TestProviderCredentialsRepositoryIntegration(t *testing.T) {
 	if err != nil || len(credentials) != 1 || credentials[0].AccessMode != "subscription" {
 		t.Fatalf("list: %+v, %v", credentials, err)
 	}
+	if err := i.repos.ProviderCredentials.UpdateDetails(i.ctx, credential.ID, "API", "api", nil); err != nil {
+		t.Fatal(err)
+	}
+	updated, err := i.repos.ProviderCredentials.List(i.ctx)
+	if err != nil || len(updated) != 1 || updated[0].AccessMode != "api" || updated[0].SubscriptionFeePicoUSD != nil {
+		t.Fatalf("updated: %+v, %v", updated, err)
+	}
+	if err := i.repos.ProviderCredentials.UpdateDetails(i.ctx, credential.ID, "Subscription", "subscription", &fee); err != nil {
+		t.Fatal(err)
+	}
 	next := time.Now().UTC().Add(time.Hour)
 	if err := i.repos.ProviderCredentials.MarkLimited(i.ctx, "provider", &next, "quota"); err != nil {
 		t.Fatal(err)

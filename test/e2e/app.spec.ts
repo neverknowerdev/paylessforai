@@ -32,6 +32,26 @@ test('configures providers, creates a client key, and routes an OpenAI request',
   await expect(page.locator('#provider-list')).toContainText('openrouter');
   await expect(page.locator('#provider-modal')).toBeHidden();
 
+  const firstProvider = page.locator('#provider-list .credential-row').first();
+  await firstProvider.getByRole('button', { name: 'Edit' }).click();
+  await expect(page.locator('#provider-edit-access-mode')).toHaveValue('api');
+  await expect(page.locator('#provider-edit-subscription-fields')).toBeHidden();
+  await page.locator('#provider-edit-access-mode').selectOption('subscription');
+  await expect(page.locator('#provider-edit-subscription-fields')).toBeVisible();
+  await page.locator('#provider-edit-subscription-fee').fill('12.50');
+  await page.getByRole('button', { name: 'Save changes' }).click();
+  await expect(firstProvider).toContainText('Subscription');
+  let editedCredentials = await (await request.get('/api/providers/credentials')).json();
+  expect(editedCredentials.data.find((item: { provider: string }) => item.provider === 'openrouter')).toMatchObject({ access_mode: 'subscription', subscription_fee_pico_usd: 12500000000000 });
+
+  await firstProvider.getByRole('button', { name: 'Edit' }).click();
+  await page.locator('#provider-edit-access-mode').selectOption('api');
+  await expect(page.locator('#provider-edit-subscription-fields')).toBeHidden();
+  await page.getByRole('button', { name: 'Save changes' }).click();
+  editedCredentials = await (await request.get('/api/providers/credentials')).json();
+  expect(editedCredentials.data.find((item: { provider: string }) => item.provider === 'openrouter')).toMatchObject({ access_mode: 'api' });
+  expect(editedCredentials.data.find((item: { provider: string }) => item.provider === 'openrouter').subscription_fee_pico_usd).toBeUndefined();
+
   await page.getByRole('button', { name: 'Add provider' }).click();
   await page.locator('#provider-type').selectOption('openrouter');
   await page.locator('#provider-label').fill('duplicate-openrouter');

@@ -210,18 +210,49 @@ func (s *Server) handleProviderCredential(w http.ResponseWriter, r *http.Request
 	}
 	if r.Method == http.MethodPut {
 		var input struct {
-			Label string `json:"label"`
+			Label              string  `json:"label"`
+			AccessMode         *string `json:"access_mode"`
+			SubscriptionFeeUSD string  `json:"subscription_fee_usd"`
 		}
 		if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 4096)).Decode(&input); err != nil || strings.TrimSpace(input.Label) == "" {
 			writeError(w, http.StatusBadRequest, "invalid_request", "label is required")
 			return
 		}
 		label := strings.TrimSpace(input.Label)
-		if err := s.db.ProviderCredentials.UpdateLabel(r.Context(), id, label); err != nil {
+		if input.AccessMode == nil {
+			if err := s.db.ProviderCredentials.UpdateLabel(r.Context(), id, label); err != nil {
+				writeError(w, http.StatusInternalServerError, "credential_update_failed", "could not update provider credential")
+				return
+			}
+			writeJSON(w, http.StatusOK, map[string]any{"updated": true, "label": label})
+			return
+		}
+		accessMode := strings.ToLower(strings.TrimSpace(*input.AccessMode))
+		if accessMode != "api" && accessMode != "subscription" {
+			writeError(w, http.StatusBadRequest, "invalid_access_mode", "access_mode must be api or subscription")
+			return
+		}
+		var feePico *int64
+		if accessMode == "subscription" {
+			fee, err := strconv.ParseFloat(strings.TrimSpace(input.SubscriptionFeeUSD), 64)
+			if err != nil || fee <= 0 {
+				writeError(w, http.StatusBadRequest, "invalid_subscription_fee", "subscription_fee_usd must be a positive amount")
+				return
+			}
+			value := int64(math.Round(fee * 1e12))
+			feePico = &value
+		}
+		if err := s.db.ProviderCredentials.UpdateDetails(r.Context(), id, label, accessMode, feePico); err != nil {
 			writeError(w, http.StatusInternalServerError, "credential_update_failed", "could not update provider credential")
 			return
 		}
-		writeJSON(w, http.StatusOK, map[string]any{"updated": true, "label": label})
+		response := map[string]any{"updated": true, "label": label, "access_mode": accessMode, "subscription_fee_pico_usd": feePico}
+		if s.credentials.Reload != nil {
+			if err := s.credentials.Reload(); err != nil {
+				response["catalog_refresh_warning"] = sanitizeError(err.Error())
+			}
+		}
+		writeJSON(w, http.StatusOK, response)
 		return
 	}
 	if r.Method != http.MethodDelete {

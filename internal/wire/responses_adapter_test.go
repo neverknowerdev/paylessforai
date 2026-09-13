@@ -6,6 +6,8 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 )
@@ -160,5 +162,58 @@ func TestResponsesHistoryUsesRoleSpecificTextTypes(t *testing.T) {
 				}
 			}
 		})
+	}
+}
+
+func TestResponsesHistoryPlacesReasoningBeforeAssistantMessage(t *testing.T) {
+	body, err := os.ReadFile(filepath.Join("testdata", "openrouter-kimi-k3-reasoning-history.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	request, err := DecodeRequest(FormatChatCompletions, body)
+	if err != nil {
+		t.Fatal(err)
+	}
+	encoded, err := EncodeRequest(FormatResponses, request)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	var payload struct {
+		Input []struct {
+			Type    string `json:"type"`
+			Role    string `json:"role"`
+			Content []struct {
+				Type    string `json:"type"`
+				Text    string `json:"text"`
+				Summary []struct {
+					Type string `json:"type"`
+					Text string `json:"text"`
+				} `json:"summary"`
+			} `json:"content"`
+			Summary []struct {
+				Type string `json:"type"`
+				Text string `json:"text"`
+			} `json:"summary"`
+		}
+	}
+	if err := json.Unmarshal(encoded, &payload); err != nil {
+		t.Fatal(err)
+	}
+	if len(payload.Input) != 4 {
+		t.Fatalf("input item count = %d, want 4: %s", len(payload.Input), encoded)
+	}
+	if got := payload.Input[1]; got.Type != "reasoning" || len(got.Summary) != 1 || got.Summary[0].Type != "summary_text" || got.Summary[0].Text != "I need to inspect the deployment before answering." {
+		t.Fatalf("reasoning item = %#v, encoded=%s", got, encoded)
+	}
+	if got := payload.Input[2]; got.Type != "message" || got.Role != "assistant" || len(got.Content) != 1 || got.Content[0].Type != "output_text" || got.Content[0].Text != "I found the deployment details." {
+		t.Fatalf("assistant item = %#v, encoded=%s", got, encoded)
+	}
+	for index, item := range payload.Input {
+		for _, block := range item.Content {
+			if block.Type == "reasoning" {
+				t.Fatalf("reasoning was nested in content item %d: %s", index, encoded)
+			}
+		}
 	}
 }

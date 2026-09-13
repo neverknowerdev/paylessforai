@@ -1,0 +1,18 @@
+{
+  "model": "moonshotai/kimi-k3",
+  "messages": [
+    {
+      "role": "user",
+      "content": "Inspect the current deployment."
+    },
+    {
+      "role": "assistant",
+      "content": "I found the deployment details.",
+      "reasoning_content": "I need to inspect the deployment before answering."
+    },
+    {
+      "role": "user",
+      "content": "Continue with the diagnosis."
+    }
+  ]
+}

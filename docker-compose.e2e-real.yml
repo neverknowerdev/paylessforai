@@ -1,0 +1,45 @@
+name: paylessforai-e2e-real
+
+# Real-upstream app host for the gated e2e-real spec (NEV-55 follow-up).
+# App ONLY — no mocks. Upstream base URLs are left at production defaults
+# (openrouter.ai, api.surplusintelligence.ai, opencode.ai zen/go); provider
+# keys are NEVER baked in here — the operator exports them in the spec's env
+# (OPENROUTER_API_KEY, SURPLUS_API_KEY, OPENCODE_GO_API_KEY,
+# OPENCODE_ZEN_API_KEY; NEV-47 tracks provisioning) and the spec registers
+# them at runtime via /api/providers/credentials. Zero keys -> spec skips,
+# exit 0, zero spend. Never referenced by PR CI (see .github/workflows:
+# harness-stub runs on PRs, e2e-real runs manual/nightly only).
+#
+# Run infra: docker compose -f docker-compose.e2e-real.yml up -d --build
+# Run spec against it (from test/e2e, keys in env):
+# APP_BASE_URL=http://127.0.0.1:9472 OPENROUTER_API_KEY=... SURPLUS_API_KEY=... \
+#   npx playwright test --config e2e-real.config.ts
+# Tear down (wipes the ephemeral data volume):
+# docker compose -f docker-compose.e2e-real.yml down -v
+
+services:
+  paylessforai-app:
+    image: golang:1.26-bookworm
+    working_dir: /src
+    volumes:
+      - .:/src
+      - payless-e2e-real-data:/tmp/payless-e2e-real
+    command:
+      - sh
+      - -c
+      - |
+        go run ./cmd/paylessforai-app
+        -data-dir /tmp/payless-e2e-real
+        -listen 0.0.0.0:9472
+    expose:
+      - "9472"
+    ports:
+      - "9472:9472"
+    healthcheck:
+      test: ["CMD-SHELL", "curl -fsS http://127.0.0.1:9472/readyz >/dev/null"]
+      interval: 3s
+      timeout: 3s
+      retries: 40
+
+volumes:
+  payless-e2e-real-data:

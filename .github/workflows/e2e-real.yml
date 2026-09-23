@@ -9,7 +9,7 @@ name: E2E Real Providers (spend-capped, gated)
 # - `environment: e2e-real` lets the board add approval gates / scoped secret
 #   storage later; harmless until the environment is configured.
 # - `concurrency: e2e-real` serialises runs so spend cannot multiply.
-# - The test script skips gracefully (exit 0, zero spend) when the board has
+# - The spec skips gracefully (exit 0, zero spend) when the board has
 #   not yet provisioned secret names in the CI store.
 #
 # Spend cap (defence in depth):
@@ -79,6 +79,15 @@ jobs:
         run: |
           CGO_ENABLED=0 go build -o /tmp/paylessforai-app ./cmd/paylessforai-app
 
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Install E2E dependencies
+        working-directory: test/e2e
+        run: npm install --no-audit --no-fund
+
       - name: Mask provider keys in logs
         run: |
           for v in "$OPENROUTER_API_KEY" "$SURPLUS_API_KEY" "$OPENCODE_GO_API_KEY" "$OPENCODE_ZEN_API_KEY"; do
@@ -97,8 +106,10 @@ jobs:
             >/tmp/paylessforai-real.log 2>&1 &
           echo $! > /tmp/paylessforai-real.pid
 
+      # Request-fixture only (no `page` usage), so no browser install is needed.
       - name: Run gated real-provider checks (skips if secrets absent)
-        run: bash test/e2e/e2e-real.sh
+        working-directory: test/e2e
+        run: npx playwright test --config e2e-real.config.ts
         env:
           APP_BASE_URL: http://127.0.0.1:9472
           OPENROUTER_API_KEY: ${{ secrets.OPENROUTER_API_KEY }}

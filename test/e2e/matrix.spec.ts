@@ -11,15 +11,11 @@ import { expect, test, type APIRequestContext } from '@playwright/test';
 // Output shape is pinned black-box via the credential base_url suffix
 // (ExactURL pin: .../chat/completions, .../responses, .../messages) and
 // verified via attempt_details[].provider_format + the upstream path the mock
-// actually received. Mock mode spends nothing.
-//
-// Live mode: MATRIX_REAL=1 with OPENROUTER_API_KEY set registers the real
-// OpenRouter credential (models per NEV-59) instead of mocks. Surplus /
-// opencode keys are picked up the same way when present.
+// actually received. Mock mode spends nothing. Mock-only: live runs live in
+// matrix.live.spec.ts (manual only, never CI).
 
 const APP = process.env.APP_BASE_URL || 'http://127.0.0.1:19477';
 const EXPECT_TEXT = 'matrix hello';
-const REAL = process.env.MATRIX_REAL === '1';
 
 // One upstream model per pinned output shape. Route IDs (and therefore
 // learned upstream formats) are keyed by provider+upstream model, so sharing
@@ -52,9 +48,9 @@ interface Provider {
 }
 
 const PROVIDERS: Provider[] = [
-  { name: 'openrouter', port: 19474 },
-  { name: 'surplus', port: 19475 },
-  { name: 'opencode-go', port: 19476 },
+  { name: 'openrouter', port: Number(process.env.MOCK_OPENROUTER_PORT || '19474') },
+  { name: 'surplus', port: Number(process.env.MOCK_SURPLUS_PORT || '19475') },
+  { name: 'opencode-go', port: Number(process.env.MOCK_OPENCODE_PORT || '19476') },
 ];
 
 type InputShape = 'chat' | 'responses' | 'messages';
@@ -261,7 +257,6 @@ test.beforeAll(async ({ request }) => {
   expect(key.ok()).toBeTruthy();
   secret = (((await key.json()) as { secret?: string }).secret ?? '');
   expect(secret).toBeTruthy();
-  if (REAL) return;
   for (const provider of PROVIDERS) await configureMock(request, provider.port);
   await clearCredentials(request);
   await clearGroups(request);
@@ -271,7 +266,6 @@ test.beforeAll(async ({ request }) => {
 for (const output of OUTPUTS) {
   test.describe(`output=${output.key}`, () => {
     test.beforeAll(async ({ request }) => {
-      test.skip(REAL, 'mock-mode pinning only');
       await clearCredentials(request);
       await clearGroups(request);
       for (const provider of PROVIDERS) {
@@ -407,7 +401,6 @@ async function runToolLeg(api: APIRequestContext, input: InputShape, provider: P
 
 test.describe('intra-group format switching', () => {
   test.beforeAll(async ({ request }) => {
-    test.skip(REAL, 'mock-mode switching only');
     await clearCredentials(request);
     await clearGroups(request);
     // Hop1 speaks chat toward openrouter; hop2 speaks messages toward opencode.

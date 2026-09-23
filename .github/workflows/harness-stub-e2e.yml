@@ -1,4 +1,9 @@
-name: Harness Stub E2E (mock-only)
+name: Harness Stub E2E (mock-only, docker harness)
+
+# NEV-59 review fix §3: the harness (mock upstreams + app) runs INSIDE
+# docker compose — the workflow only drives the Playwright spec against it.
+# Previously the workflow started bare binaries on the runner; now
+# docker-compose.e2e.yml is the single definition of the harness.
 
 on:
   push:
@@ -19,33 +24,18 @@ jobs:
       - name: Check out source
         uses: actions/checkout@v4
 
-      - name: Set up Go
-        uses: actions/setup-go@v5
-        with:
-          go-version-file: go.mod
-          cache: true
+      - name: Start harness inside docker compose
+        run: docker compose -f docker-compose.e2e.yml up -d --build
 
-      - name: Build binaries
+      - name: Wait for app readiness
         run: |
-          CGO_ENABLED=0 go build -o /tmp/paylessforai-app ./cmd/paylessforai-app
-          CGO_ENABLED=0 go build -o /tmp/mockprovider ./cmd/mockprovider
-
-      - name: Start mock upstreams + app (mock-only, throwaway keys)
-        run: |
-          /tmp/mockprovider -listen 127.0.0.1:19474 >/tmp/mock-openrouter.log 2>&1 &
-          echo $! > /tmp/mock-openrouter.pid
-          /tmp/mockprovider -listen 127.0.0.1:19475 >/tmp/mock-surplus.log 2>&1 &
-          echo $! > /tmp/mock-surplus.pid
-          /tmp/mockprovider -listen 127.0.0.1:19476 >/tmp/mock-opencode.log 2>&1 &
-          echo $! > /tmp/mock-opencode.pid
-          rm -rf /tmp/payless-harness-stub && mkdir -p /tmp/payless-harness-stub
-          /tmp/paylessforai-app -data-dir /tmp/payless-harness-stub -listen 127.0.0.1:9472 \
-            -openrouter-base-url http://127.0.0.1:19474/openrouter/api/v1 \
-            -surplus-base-url http://127.0.0.1:19475/surplus/v1 \
-            -provider-base-url opencode-go=http://127.0.0.1:19476/zen/go/v1 \
-            -provider-base-url opencode-zen=http://127.0.0.1:19476/zen/go/v1 \
-            >/tmp/paylessforai-app.log 2>&1 &
-          echo $! > /tmp/paylessforai-app.pid
+          for i in $(seq 1 60); do
+            curl -fsS http://127.0.0.1:9472/readyz >/dev/null && exit 0
+            sleep 3
+          done
+          echo "app never became ready" >&2
+          docker compose -f docker-compose.e2e.yml logs paylessforai-app
+          exit 1
 
       - name: Set up Node.js
         uses: actions/setup-node@v4
@@ -65,26 +55,10 @@ jobs:
           MOCK_SURPLUS_URL: http://127.0.0.1:19475
           MOCK_OPENCODE_URL: http://127.0.0.1:19476
 
-      - name: Upload Playwright diagnostics
+      - name: Show harness logs on failure
         if: failure()
-        uses: actions/upload-artifact@v4
-        with:
-          name: harness-stub-diagnostics
-          if-no-files-found: ignore
-          path: test/e2e/test-results
+        run: docker compose -f docker-compose.e2e.yml logs --tail=200
 
-      - name: Show logs on failure
-        if: failure()
-        run: |
-          tail -n 100 /tmp/mock-openrouter.log || true
-          tail -n 100 /tmp/mock-surplus.log || true
-          tail -n 100 /tmp/mock-opencode.log || true
-          tail -n 200 /tmp/paylessforai-app.log || true
-
-      - name: Stop background processes
+      - name: Tear down harness
         if: always()
-        run: |
-          for f in /tmp/mock-openrouter.pid /tmp/mock-surplus.pid /tmp/mock-opencode.pid /tmp/paylessforai-app.pid; do
-            [ -f "$f" ] && kill "$(cat "$f")" || true
-          done
-          rm -rf /tmp/payless-harness-stub
+        run: docker compose -f docker-compose.e2e.yml down -v

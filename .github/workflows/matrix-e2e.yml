@@ -1,0 +1,67 @@
+name: Matrix E2E (mock-only, docker harness)
+
+# NEV-59: 27-cell format x provider matrix + intra-group switching, all
+# mock-only (zero spend). The harness (3 mock upstreams + app) runs INSIDE
+# docker compose (docker-compose.matrix.yml); the spec drives HTTP against
+# it with MATRIX_EXTERNAL=1 (no Playwright webServer). No live-provider
+# workflow exists on purpose — live runs are manual only:
+# test/e2e/matrix.live.spec.ts (`npm run matrix:live` / `matrix:record`).
+
+on:
+  push:
+    branches:
+      - main
+  pull_request: {}
+
+permissions:
+  contents: read
+
+jobs:
+  matrix:
+    name: Docker matrix (mocks only)
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+
+    steps:
+      - name: Check out source
+        uses: actions/checkout@v4
+
+      - name: Start matrix harness inside docker compose
+        run: docker compose -f docker-compose.matrix.yml up -d --build
+
+      - name: Wait for app readiness
+        run: |
+          for i in $(seq 1 60); do
+            curl -fsS http://127.0.0.1:19477/readyz >/dev/null && exit 0
+            sleep 3
+          done
+          echo "app never became ready" >&2
+          docker compose -f docker-compose.matrix.yml logs paylessforai-app
+          exit 1
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Install E2E dependencies
+        working-directory: test/e2e
+        run: npm install --no-audit --no-fund
+
+      - name: Run matrix spec against docker harness (mock-only)
+        working-directory: test/e2e
+        run: npm run matrix
+        env:
+          MATRIX_EXTERNAL: 1
+          APP_BASE_URL: http://127.0.0.1:19477
+          MOCK_OPENROUTER_PORT: 19474
+          MOCK_SURPLUS_PORT: 19475
+          MOCK_OPENCODE_PORT: 19476
+
+      - name: Show harness logs on failure
+        if: failure()
+        run: docker compose -f docker-compose.matrix.yml logs --tail=200
+
+      - name: Tear down harness
+        if: always()
+        run: docker compose -f docker-compose.matrix.yml down -v

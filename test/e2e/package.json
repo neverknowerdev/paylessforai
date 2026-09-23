@@ -4,7 +4,8 @@
   "scripts": {
     "test": "playwright test",
     "matrix": "playwright test --config=matrix.config.ts",
-    "matrix:real": "MATRIX_REAL=1 playwright test --config=matrix.config.ts"
+    "matrix:live": "playwright test --config=matrix.live.config.ts",
+    "matrix:record": "RECORD=1 playwright test --config=matrix.live.config.ts"
   },
   "devDependencies": {
     "@playwright/test": "^1.55.0"

@@ -1,14 +1,10 @@
-name: paylessforai-e2e
+name: paylessforai-matrix
 
-# Mock-only harness e2e (NEV-45, follow-up to NEV-44 §2/§6; NEV-59 §3).
-# Services: paylessforai-app + mock-openrouter/surplus/opencode.
-# This compose file IS the harness: .github/workflows/harness-stub-e2e.yml
-# starts it (`docker compose up`) and only drives the spec against it.
-# Harness assertions live in test/e2e/harness-stub.spec.ts (Playwright, API-only,
-# no browsers); test/e2e/harness-stub.sh is a thin wrapper around it.
-# Run infra: docker compose -f docker-compose.e2e.yml up -d --build
-# Run spec against it (from test/e2e):
-# APP_BASE_URL=http://127.0.0.1:9472 MOCK_OPENROUTER_URL=http://127.0.0.1:19474 MOCK_SURPLUS_URL=http://127.0.0.1:19475 MOCK_OPENCODE_URL=http://127.0.0.1:19476 npx playwright test harness-stub
+# Mock-only harness for the NEV-59 matrix (NEV-59 review fix §2/§3).
+# The full harness (3 mock upstreams + app) runs INSIDE docker compose;
+# the Playwright spec only drives HTTP against it (MATRIX_EXTERNAL=1).
+# No separate harness-stub leg: matrix.spec.ts covers basic + tool-use +
+# streaming on every format x provider cell, which subsumes the stub.
 
 services:
   mock-openrouter:
@@ -16,7 +12,7 @@ services:
     working_dir: /src
     volumes:
       - .:/src
-    command: ["go", "run", "./cmd/mockprovider", "-listen", "0.0.0.0:8080"]
+    command: ["go", "run", "./cmd/mockprovider", "-listen", "0.0.0.0:8080", "-fixtures", "test/e2e/mocks/matrix"]
     expose:
       - "8080"
     ports:
@@ -32,7 +28,7 @@ services:
     working_dir: /src
     volumes:
       - .:/src
-    command: ["go", "run", "./cmd/mockprovider", "-listen", "0.0.0.0:8080"]
+    command: ["go", "run", "./cmd/mockprovider", "-listen", "0.0.0.0:8080", "-fixtures", "test/e2e/mocks/matrix"]
     expose:
       - "8080"
     ports:
@@ -48,7 +44,7 @@ services:
     working_dir: /src
     volumes:
       - .:/src
-    command: ["go", "run", "./cmd/mockprovider", "-listen", "0.0.0.0:8080"]
+    command: ["go", "run", "./cmd/mockprovider", "-listen", "0.0.0.0:8080", "-fixtures", "test/e2e/mocks/matrix"]
     expose:
       - "8080"
     ports:
@@ -64,22 +60,18 @@ services:
     working_dir: /src
     volumes:
       - .:/src
-      - payless-e2e-data:/tmp/payless-e2e
+      - payless-matrix-data:/tmp/payless-matrix
     command:
       - sh
       - -c
       - |
         go run ./cmd/paylessforai-app
-        -data-dir /tmp/payless-e2e
+        -data-dir /tmp/payless-matrix
         -listen 0.0.0.0:9472
-        -openrouter-base-url http://mock-openrouter:8080/openrouter/api/v1
-        -surplus-base-url http://mock-surplus:8080/surplus/v1
-        -provider-base-url opencode-go=http://mock-opencode:8080/zen/go/v1
-        -provider-base-url opencode-zen=http://mock-opencode:8080/zen/go/v1
     expose:
       - "9472"
     ports:
-      - "9472:9472"
+      - "19477:9472"
     depends_on:
       mock-openrouter:
         condition: service_healthy
@@ -94,4 +86,4 @@ services:
       retries: 40
 
 volumes:
-  payless-e2e-data:
+  payless-matrix-data:

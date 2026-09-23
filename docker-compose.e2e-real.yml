@@ -1,19 +1,17 @@
 name: paylessforai-e2e-real
 
-# Real-upstream app host for the gated e2e-real spec (NEV-55 follow-up).
+# Manual-only real-upstream app host (NEV-59: no CI workflow references this).
 # App ONLY — no mocks. Upstream base URLs are left at production defaults
 # (openrouter.ai, api.surplusintelligence.ai, opencode.ai zen/go); provider
-# keys are NEVER baked in here — the operator exports them in the spec's env
-# (OPENROUTER_API_KEY, SURPLUS_API_KEY, OPENCODE_GO_API_KEY,
-# OPENCODE_ZEN_API_KEY; NEV-47 tracks provisioning) and the spec registers
-# them at runtime via /api/providers/credentials. Zero keys -> spec skips,
-# exit 0, zero spend. Never referenced by PR CI (see .github/workflows:
-# harness-stub runs on PRs, e2e-real runs manual/nightly only).
+# keys are NEVER baked in here — the operator exports them in the shell
+# (OPENROUTER_API_KEY, SURPLUS_API_KEY, OPENCODE_GO_API_KEY) and the manual
+# live spec registers them at runtime via /api/providers/credentials.
+# With RECORD=1 the live spec routes through mockrecord proxies and
+# auto-saves upstream responses into test/e2e/mocks/matrix/recorded/.
 #
-# Run infra: docker compose -f docker-compose.e2e-real.yml up -d --build
-# Run spec against it (from test/e2e, keys in env):
-# APP_BASE_URL=http://127.0.0.1:9472 OPENROUTER_API_KEY=... SURPLUS_API_KEY=... \
-#   npx playwright test --config e2e-real.config.ts
+# Manual run (from test/e2e, keys in env):
+# APP_BASE_URL=http://127.0.0.1:9472 OPENROUTER_API_KEY=... npm run matrix:live
+# RECORD=1 APP_BASE_URL=http://127.0.0.1:9472 OPENROUTER_API_KEY=... npm run matrix:record
 # Tear down (wipes the ephemeral data volume):
 # docker compose -f docker-compose.e2e-real.yml down -v
 

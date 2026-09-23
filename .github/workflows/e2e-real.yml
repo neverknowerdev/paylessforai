@@ -1,0 +1,133 @@
+name: E2E Real Providers (spend-capped, gated)
+
+# NEV-46 (per NEV-44 §5/§6). Board decision: ALL providers
+# (openrouter, surplus, opencode-go, opencode-zen), manual + nightly, spend-capped.
+#
+# Gating:
+# - Runs ONLY on workflow_dispatch (manual) and schedule (nightly 03:00 UTC).
+#   Never on push/PR, so normal CI spends nothing.
+# - `environment: e2e-real` lets the board add approval gates / scoped secret
+#   storage later; harmless until the environment is configured.
+# - `concurrency: e2e-real` serialises runs so spend cannot multiply.
+# - The spec skips gracefully (exit 0, zero spend) when the board has
+#   not yet provisioned secret names in the CI store.
+#
+# Spend cap (defence in depth):
+# - One chat/completions call per configured provider, cheap model per provider
+#   (overridable via dispatch inputs), max_tokens capped (default 16).
+# - Every call routes through a per-provider price-ceiling group
+#   (metered-only, provider-pinned, maximum_expected_cost_pico_usd +
+#   per-token ceilings); a 1-pico deny-group negative check proves the ceiling
+#   is enforced with zero upstream spend.
+#
+# Secrets (names only here; values live in the CI store):
+# OPENROUTER_API_KEY, SURPLUS_API_KEY, OPENCODE_GO_API_KEY, OPENCODE_ZEN_API_KEY.
+# Keys are masked (::add-mask::), never echoed, never dumped on failure; the
+# app encrypts them at rest and the data-dir is ephemeral per run.
+
+on:
+  workflow_dispatch:
+    inputs:
+      openrouter_model:
+        description: 'OpenRouter model (blank = auto-pick cheapest metered route)'
+        required: false
+        default: ''
+      surplus_model:
+        description: 'Surplus model (blank = auto-pick cheapest metered route)'
+        required: false
+        default: ''
+      opencode_go_model:
+        description: 'opencode-go model (blank = auto-pick cheapest metered route)'
+        required: false
+        default: ''
+      opencode_zen_model:
+        description: 'opencode-zen model (blank = auto-pick cheapest metered route)'
+        required: false
+        default: ''
+      max_tokens:
+        description: Max completion tokens per real call (spend cap)
+        required: false
+        default: "16"
+  schedule:
+    - cron: "0 3 * * *"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: e2e-real
+  cancel-in-progress: false
+
+jobs:
+  e2e-real:
+    name: Real-provider spot check (1 capped call/provider)
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    environment: e2e-real
+
+    steps:
+      - name: Check out source
+        uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      - name: Build binaries
+        run: |
+          CGO_ENABLED=0 go build -o /tmp/paylessforai-app ./cmd/paylessforai-app
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Install E2E dependencies
+        working-directory: test/e2e
+        run: npm install --no-audit --no-fund
+
+      - name: Mask provider keys in logs
+        run: |
+          for v in "$OPENROUTER_API_KEY" "$SURPLUS_API_KEY" "$OPENCODE_GO_API_KEY" "$OPENCODE_ZEN_API_KEY"; do
+            [ -n "$v" ] && echo "::add-mask::$v" || true
+          done
+        env:
+          OPENROUTER_API_KEY: ${{ secrets.OPENROUTER_API_KEY }}
+          SURPLUS_API_KEY: ${{ secrets.SURPLUS_API_KEY }}
+          OPENCODE_GO_API_KEY: ${{ secrets.OPENCODE_GO_API_KEY }}
+          OPENCODE_ZEN_API_KEY: ${{ secrets.OPENCODE_ZEN_API_KEY }}
+
+      - name: Start app on ephemeral data-dir (real upstreams)
+        run: |
+          echo "E2E_REAL_DATA_DIR=$(mktemp -d /tmp/payless-e2e-real-XXXXXX)" >> "$GITHUB_ENV"
+          /tmp/paylessforai-app -data-dir "$E2E_REAL_DATA_DIR" -listen 127.0.0.1:9472 \
+            >/tmp/paylessforai-real.log 2>&1 &
+          echo $! > /tmp/paylessforai-real.pid
+
+      # Request-fixture only (no `page` usage), so no browser install is needed.
+      - name: Run gated real-provider checks (skips if secrets absent)
+        working-directory: test/e2e
+        run: npx playwright test --config e2e-real.config.ts
+        env:
+          APP_BASE_URL: http://127.0.0.1:9472
+          OPENROUTER_API_KEY: ${{ secrets.OPENROUTER_API_KEY }}
+          SURPLUS_API_KEY: ${{ secrets.SURPLUS_API_KEY }}
+          OPENCODE_GO_API_KEY: ${{ secrets.OPENCODE_GO_API_KEY }}
+          OPENCODE_ZEN_API_KEY: ${{ secrets.OPENCODE_ZEN_API_KEY }}
+          E2E_REAL_OPENROUTER_MODEL: ${{ inputs.openrouter_model }}
+          E2E_REAL_SURPLUS_MODEL: ${{ inputs.surplus_model }}
+          E2E_REAL_OPENCODE_GO_MODEL: ${{ inputs.opencode_go_model }}
+          E2E_REAL_OPENCODE_ZEN_MODEL: ${{ inputs.opencode_zen_model }}
+          E2E_REAL_MAX_TOKENS: ${{ inputs.max_tokens }}
+
+      - name: Show app log tail on failure (keys masked, no bodies dumped)
+        if: failure()
+        run: tail -n 100 /tmp/paylessforai-real.log || true
+
+      - name: Stop app and wipe ephemeral data-dir
+        if: always()
+        run: |
+          [ -f /tmp/paylessforai-real.pid ] && kill "$(cat /tmp/paylessforai-real.pid)" || true
+          rm -rf "${E2E_REAL_DATA_DIR:-/tmp/payless-e2e-real-orphan}"

@@ -1,0 +1,106 @@
+name: paylessforai-e2e
+
+# Mock-only harness e2e (NEV-45, follow-up to NEV-44 §2/§6; NEV-59 §3).
+# Services: paylessforai-app + mock-openrouter/surplus/opencode.
+# This compose file IS the harness: .github/workflows/harness-stub-e2e.yml
+# starts it (`docker compose up`) and only drives the spec against it.
+# Images are prebuilt from Dockerfile.e2e (module layer caching, instant
+# start) — `go run` inside services never became ready in CI in time.
+# Harness assertions live in test/e2e/harness-stub.spec.ts (Playwright, API-only,
+# no browsers); test/e2e/harness-stub.sh is a thin wrapper around it.
+# Run infra: docker compose -f docker-compose.e2e.yml up -d --build
+# Run spec against it (from test/e2e):
+# APP_BASE_URL=http://127.0.0.1:9472 MOCK_OPENROUTER_URL=http://127.0.0.1:19474 MOCK_SURPLUS_URL=http://127.0.0.1:19475 MOCK_OPENCODE_URL=http://127.0.0.1:19476 npx playwright test harness-stub
+
+services:
+  mock-openrouter:
+    build:
+      context: .
+      dockerfile: Dockerfile.e2e
+      args:
+        PKG: ./cmd/mockprovider
+    command: ["-listen", "0.0.0.0:8080"]
+    expose:
+      - "8080"
+    ports:
+      - "19474:8080"
+    healthcheck:
+      test: ["CMD-SHELL", "curl -fsS http://127.0.0.1:8080/healthz >/dev/null"]
+      interval: 2s
+      timeout: 2s
+      retries: 30
+
+  mock-surplus:
+    build:
+      context: .
+      dockerfile: Dockerfile.e2e
+      args:
+        PKG: ./cmd/mockprovider
+    command: ["-listen", "0.0.0.0:8080"]
+    expose:
+      - "8080"
+    ports:
+      - "19475:8080"
+    healthcheck:
+      test: ["CMD-SHELL", "curl -fsS http://127.0.0.1:8080/healthz >/dev/null"]
+      interval: 2s
+      timeout: 2s
+      retries: 30
+
+  mock-opencode:
+    build:
+      context: .
+      dockerfile: Dockerfile.e2e
+      args:
+        PKG: ./cmd/mockprovider
+    command: ["-listen", "0.0.0.0:8080"]
+    expose:
+      - "8080"
+    ports:
+      - "19476:8080"
+    healthcheck:
+      test: ["CMD-SHELL", "curl -fsS http://127.0.0.1:8080/healthz >/dev/null"]
+      interval: 2s
+      timeout: 2s
+      retries: 30
+
+  paylessforai-app:
+    build:
+      context: .
+      dockerfile: Dockerfile.e2e
+      args:
+        PKG: ./cmd/paylessforai-app
+    volumes:
+      - payless-e2e-data:/tmp/payless-e2e
+    command:
+      - -data-dir
+      - /tmp/payless-e2e
+      - -listen
+      - 0.0.0.0:9472
+      - -openrouter-base-url
+      - http://mock-openrouter:8080/openrouter/api/v1
+      - -surplus-base-url
+      - http://mock-surplus:8080/surplus/v1
+      - -provider-base-url
+      - opencode-go=http://mock-opencode:8080/zen/go/v1
+      - -provider-base-url
+      - opencode-zen=http://mock-opencode:8080/zen/go/v1
+    expose:
+      - "9472"
+    ports:
+      - "9472:9472"
+    depends_on:
+      mock-openrouter:
+        condition: service_healthy
+      mock-surplus:
+        condition: service_healthy
+      mock-opencode:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "curl -fsS http://127.0.0.1:9472/readyz >/dev/null"]
+      interval: 3s
+      timeout: 3s
+      retries: 40
+
+volumes:
+  payless-e2e-data:

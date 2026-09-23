@@ -1,0 +1,43 @@
+name: paylessforai-e2e-real
+
+# Manual-only real-upstream app host (NEV-59: no CI workflow references this).
+# App ONLY — no mocks. Upstream base URLs are left at production defaults
+# (openrouter.ai, api.surplusintelligence.ai, opencode.ai zen/go); provider
+# keys are NEVER baked in here — the operator exports them in the shell
+# (OPENROUTER_API_KEY, SURPLUS_API_KEY, OPENCODE_GO_API_KEY) and the manual
+# live spec registers them at runtime via /api/providers/credentials.
+# With RECORD=1 the live spec routes through mockrecord proxies and
+# auto-saves upstream responses into test/e2e/mocks/matrix/recorded/.
+#
+# Manual run (from test/e2e, keys in env):
+# APP_BASE_URL=http://127.0.0.1:9472 OPENROUTER_API_KEY=... npm run matrix:live
+# RECORD=1 APP_BASE_URL=http://127.0.0.1:9472 OPENROUTER_API_KEY=... npm run matrix:record
+# Tear down (wipes the ephemeral data volume):
+# docker compose -f docker-compose.e2e-real.yml down -v
+
+services:
+  paylessforai-app:
+    image: golang:1.26-bookworm
+    working_dir: /src
+    volumes:
+      - .:/src
+      - payless-e2e-real-data:/tmp/payless-e2e-real
+    command:
+      - sh
+      - -c
+      - |
+        go run ./cmd/paylessforai-app
+        -data-dir /tmp/payless-e2e-real
+        -listen 0.0.0.0:9472
+    expose:
+      - "9472"
+    ports:
+      - "9472:9472"
+    healthcheck:
+      test: ["CMD-SHELL", "curl -fsS http://127.0.0.1:9472/readyz >/dev/null"]
+      interval: 3s
+      timeout: 3s
+      retries: 40
+
+volumes:
+  payless-e2e-real-data:

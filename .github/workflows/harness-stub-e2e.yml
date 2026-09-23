@@ -1,0 +1,64 @@
+name: Harness Stub E2E (mock-only, docker harness)
+
+# NEV-59 review fix §3: the harness (mock upstreams + app) runs INSIDE
+# docker compose — the workflow only drives the Playwright spec against it.
+# Previously the workflow started bare binaries on the runner; now
+# docker-compose.e2e.yml is the single definition of the harness.
+
+on:
+  push:
+    branches:
+      - main
+  pull_request: {}
+
+permissions:
+  contents: read
+
+jobs:
+  harness-stub:
+    name: Docker harness-stub (mocks only)
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    steps:
+      - name: Check out source
+        uses: actions/checkout@v4
+
+      - name: Start harness inside docker compose
+        run: docker compose -f docker-compose.e2e.yml up -d --build
+
+      - name: Wait for app readiness
+        run: |
+          for i in $(seq 1 60); do
+            curl -fsS http://127.0.0.1:9472/readyz >/dev/null && exit 0
+            sleep 3
+          done
+          echo "app never became ready" >&2
+          docker compose -f docker-compose.e2e.yml logs paylessforai-app
+          exit 1
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Install E2E dependencies
+        working-directory: test/e2e
+        run: npm install --no-audit --no-fund
+
+      - name: Run harness stub spec (mock-only, API-only, no browsers)
+        working-directory: test/e2e
+        run: npx playwright test harness-stub
+        env:
+          APP_BASE_URL: http://127.0.0.1:9472
+          MOCK_OPENROUTER_URL: http://127.0.0.1:19474
+          MOCK_SURPLUS_URL: http://127.0.0.1:19475
+          MOCK_OPENCODE_URL: http://127.0.0.1:19476
+
+      - name: Show harness logs on failure
+        if: failure()
+        run: docker compose -f docker-compose.e2e.yml logs --tail=200
+
+      - name: Tear down harness
+        if: always()
+        run: docker compose -f docker-compose.e2e.yml down -v

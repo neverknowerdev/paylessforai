@@ -392,7 +392,29 @@ func encodeAnthropicResponse(response Response) any {
 	if response.Usage.ReasoningTokens != 0 {
 		usage["output_tokens_details"] = map[string]any{"thinking_tokens": response.Usage.ReasoningTokens}
 	}
-	return map[string]any{"id": valueOr(response.ID, "msg-translation"), "type": "message", "role": "assistant", "model": response.Model, "content": content, "stop_reason": valueOr(response.FinishReason, "end_turn"), "usage": usage}
+	return map[string]any{"id": valueOr(response.ID, "msg-translation"), "type": "message", "role": "assistant", "model": response.Model, "content": content, "stop_reason": anthropicStopReason(response), "usage": usage}
+}
+
+// anthropicStopReason maps the canonical finish reason (which may originate
+// from a chat or responses upstream) into Anthropic stop_reason vocabulary.
+// A response carrying tool calls always stops with tool_use, matching the
+// native Anthropic contract regardless of the upstream wire format.
+func anthropicStopReason(response Response) string {
+	for _, message := range response.Messages {
+		if len(message.ToolCalls) > 0 {
+			return "tool_use"
+		}
+	}
+	switch response.FinishReason {
+	case "tool_calls", "function_call", "tool_use":
+		return "tool_use"
+	case "length", "max_tokens":
+		return "max_tokens"
+	case "stop", "end_turn", "completed", "":
+		return "end_turn"
+	default:
+		return response.FinishReason
+	}
 }
 
 func encodeAnthropicStreamEvent(event Event) any {

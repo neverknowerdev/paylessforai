@@ -3,16 +3,21 @@ name: paylessforai-matrix
 # Mock-only harness for the NEV-59 matrix (NEV-59 review fix §2/§3).
 # The full harness (3 mock upstreams + app) runs INSIDE docker compose;
 # the Playwright spec only drives HTTP against it (MATRIX_EXTERNAL=1).
+# Images are prebuilt from Dockerfile.e2e (module layer caching, instant
+# start) — `go run` inside services never became ready in CI in time.
 # No separate harness-stub leg: matrix.spec.ts covers basic + tool-use +
 # streaming on every format x provider cell, which subsumes the stub.
 
 services:
   mock-openrouter:
-    image: golang:1.26-bookworm
-    working_dir: /src
+    build:
+      context: .
+      dockerfile: Dockerfile.e2e
+      args:
+        PKG: ./cmd/mockprovider
+    command: ["-listen", "0.0.0.0:8080", "-fixtures", "/fixtures"]
     volumes:
-      - .:/src
-    command: ["go", "run", "./cmd/mockprovider", "-listen", "0.0.0.0:8080", "-fixtures", "test/e2e/mocks/matrix"]
+      - ./test/e2e/mocks/matrix:/fixtures:ro
     expose:
       - "8080"
     ports:
@@ -24,11 +29,14 @@ services:
       retries: 30
 
   mock-surplus:
-    image: golang:1.26-bookworm
-    working_dir: /src
+    build:
+      context: .
+      dockerfile: Dockerfile.e2e
+      args:
+        PKG: ./cmd/mockprovider
+    command: ["-listen", "0.0.0.0:8080", "-fixtures", "/fixtures"]
     volumes:
-      - .:/src
-    command: ["go", "run", "./cmd/mockprovider", "-listen", "0.0.0.0:8080", "-fixtures", "test/e2e/mocks/matrix"]
+      - ./test/e2e/mocks/matrix:/fixtures:ro
     expose:
       - "8080"
     ports:
@@ -40,11 +48,14 @@ services:
       retries: 30
 
   mock-opencode:
-    image: golang:1.26-bookworm
-    working_dir: /src
+    build:
+      context: .
+      dockerfile: Dockerfile.e2e
+      args:
+        PKG: ./cmd/mockprovider
+    command: ["-listen", "0.0.0.0:8080", "-fixtures", "/fixtures"]
     volumes:
-      - .:/src
-    command: ["go", "run", "./cmd/mockprovider", "-listen", "0.0.0.0:8080", "-fixtures", "test/e2e/mocks/matrix"]
+      - ./test/e2e/mocks/matrix:/fixtures:ro
     expose:
       - "8080"
     ports:
@@ -56,18 +67,18 @@ services:
       retries: 30
 
   paylessforai-app:
-    image: golang:1.26-bookworm
-    working_dir: /src
+    build:
+      context: .
+      dockerfile: Dockerfile.e2e
+      args:
+        PKG: ./cmd/paylessforai-app
     volumes:
-      - .:/src
       - payless-matrix-data:/tmp/payless-matrix
     command:
-      - sh
-      - -c
-      - |
-        go run ./cmd/paylessforai-app
-        -data-dir /tmp/payless-matrix
-        -listen 0.0.0.0:9472
+      - -data-dir
+      - /tmp/payless-matrix
+      - -listen
+      - 0.0.0.0:9472
     expose:
       - "9472"
     ports:

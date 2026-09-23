@@ -4,6 +4,8 @@ name: paylessforai-e2e
 # Services: paylessforai-app + mock-openrouter/surplus/opencode.
 # This compose file IS the harness: .github/workflows/harness-stub-e2e.yml
 # starts it (`docker compose up`) and only drives the spec against it.
+# Images are prebuilt from Dockerfile.e2e (module layer caching, instant
+# start) — `go run` inside services never became ready in CI in time.
 # Harness assertions live in test/e2e/harness-stub.spec.ts (Playwright, API-only,
 # no browsers); test/e2e/harness-stub.sh is a thin wrapper around it.
 # Run infra: docker compose -f docker-compose.e2e.yml up -d --build
@@ -12,11 +14,12 @@ name: paylessforai-e2e
 
 services:
   mock-openrouter:
-    image: golang:1.26-bookworm
-    working_dir: /src
-    volumes:
-      - .:/src
-    command: ["go", "run", "./cmd/mockprovider", "-listen", "0.0.0.0:8080"]
+    build:
+      context: .
+      dockerfile: Dockerfile.e2e
+      args:
+        PKG: ./cmd/mockprovider
+    command: ["-listen", "0.0.0.0:8080"]
     expose:
       - "8080"
     ports:
@@ -28,11 +31,12 @@ services:
       retries: 30
 
   mock-surplus:
-    image: golang:1.26-bookworm
-    working_dir: /src
-    volumes:
-      - .:/src
-    command: ["go", "run", "./cmd/mockprovider", "-listen", "0.0.0.0:8080"]
+    build:
+      context: .
+      dockerfile: Dockerfile.e2e
+      args:
+        PKG: ./cmd/mockprovider
+    command: ["-listen", "0.0.0.0:8080"]
     expose:
       - "8080"
     ports:
@@ -44,11 +48,12 @@ services:
       retries: 30
 
   mock-opencode:
-    image: golang:1.26-bookworm
-    working_dir: /src
-    volumes:
-      - .:/src
-    command: ["go", "run", "./cmd/mockprovider", "-listen", "0.0.0.0:8080"]
+    build:
+      context: .
+      dockerfile: Dockerfile.e2e
+      args:
+        PKG: ./cmd/mockprovider
+    command: ["-listen", "0.0.0.0:8080"]
     expose:
       - "8080"
     ports:
@@ -60,22 +65,26 @@ services:
       retries: 30
 
   paylessforai-app:
-    image: golang:1.26-bookworm
-    working_dir: /src
+    build:
+      context: .
+      dockerfile: Dockerfile.e2e
+      args:
+        PKG: ./cmd/paylessforai-app
     volumes:
-      - .:/src
       - payless-e2e-data:/tmp/payless-e2e
     command:
-      - sh
-      - -c
-      - |
-        go run ./cmd/paylessforai-app
-        -data-dir /tmp/payless-e2e
-        -listen 0.0.0.0:9472
-        -openrouter-base-url http://mock-openrouter:8080/openrouter/api/v1
-        -surplus-base-url http://mock-surplus:8080/surplus/v1
-        -provider-base-url opencode-go=http://mock-opencode:8080/zen/go/v1
-        -provider-base-url opencode-zen=http://mock-opencode:8080/zen/go/v1
+      - -data-dir
+      - /tmp/payless-e2e
+      - -listen
+      - 0.0.0.0:9472
+      - -openrouter-base-url
+      - http://mock-openrouter:8080/openrouter/api/v1
+      - -surplus-base-url
+      - http://mock-surplus:8080/surplus/v1
+      - -provider-base-url
+      - opencode-go=http://mock-opencode:8080/zen/go/v1
+      - -provider-base-url
+      - opencode-zen=http://mock-opencode:8080/zen/go/v1
     expose:
       - "9472"
     ports:

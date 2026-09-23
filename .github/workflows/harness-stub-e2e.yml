@@ -1,0 +1,72 @@
+name: Harness Stub E2E (mock-only)
+
+on:
+  push:
+    branches:
+      - main
+  pull_request: {}
+
+permissions:
+  contents: read
+
+jobs:
+  harness-stub:
+    name: Docker harness-stub (mocks only)
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    steps:
+      - name: Check out source
+        uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      - name: Build binaries
+        run: |
+          CGO_ENABLED=0 go build -o /tmp/paylessforai-app ./cmd/paylessforai-app
+          CGO_ENABLED=0 go build -o /tmp/mockprovider ./cmd/mockprovider
+
+      - name: Start mock upstreams + app (mock-only, throwaway keys)
+        run: |
+          /tmp/mockprovider -listen 127.0.0.1:19474 >/tmp/mock-openrouter.log 2>&1 &
+          echo $! > /tmp/mock-openrouter.pid
+          /tmp/mockprovider -listen 127.0.0.1:19475 >/tmp/mock-surplus.log 2>&1 &
+          echo $! > /tmp/mock-surplus.pid
+          /tmp/mockprovider -listen 127.0.0.1:19476 >/tmp/mock-opencode.log 2>&1 &
+          echo $! > /tmp/mock-opencode.pid
+          rm -rf /tmp/payless-harness-stub && mkdir -p /tmp/payless-harness-stub
+          /tmp/paylessforai-app -data-dir /tmp/payless-harness-stub -listen 127.0.0.1:9472 \
+            -openrouter-base-url http://127.0.0.1:19474/openrouter/api/v1 \
+            -surplus-base-url http://127.0.0.1:19475/surplus/v1 \
+            -provider-base-url opencode-go=http://127.0.0.1:19476/zen/go/v1 \
+            -provider-base-url opencode-zen=http://127.0.0.1:19476/zen/go/v1 \
+            >/tmp/paylessforai-app.log 2>&1 &
+          echo $! > /tmp/paylessforai-app.pid
+
+      - name: Run harness stub (mock-only)
+        run: bash test/e2e/harness-stub.sh
+        env:
+          APP_BASE_URL: http://127.0.0.1:9472
+          MOCK_OPENROUTER_URL: http://127.0.0.1:19474
+          MOCK_SURPLUS_URL: http://127.0.0.1:19475
+          MOCK_OPENCODE_URL: http://127.0.0.1:19476
+
+      - name: Show logs on failure
+        if: failure()
+        run: |
+          tail -n 100 /tmp/mock-openrouter.log || true
+          tail -n 100 /tmp/mock-surplus.log || true
+          tail -n 100 /tmp/mock-opencode.log || true
+          tail -n 200 /tmp/paylessforai-app.log || true
+
+      - name: Stop background processes
+        if: always()
+        run: |
+          for f in /tmp/mock-openrouter.pid /tmp/mock-surplus.pid /tmp/mock-opencode.pid /tmp/paylessforai-app.pid; do
+            [ -f "$f" ] && kill "$(cat "$f")" || true
+          done
+          rm -rf /tmp/payless-harness-stub

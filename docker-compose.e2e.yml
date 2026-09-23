@@ -1,0 +1,110 @@
+name: paylessforai-e2e
+
+# Mock-only harness e2e (NEV-45, follow-up to NEV-44 §2/§6).
+# Services: paylessforai-app + mock-openrouter/surplus/opencode.
+# Harness side is test/e2e/harness-stub.sh (curl+jq, no secrets, no browser).
+# Run: docker compose -f docker-compose.e2e.yml up -d --build && ./test/e2e/harness-stub.sh
+
+services:
+  mock-openrouter:
+    image: golang:1.26-bookworm
+    working_dir: /src
+    volumes:
+      - .:/src
+    command: ["go", "run", "./cmd/mockprovider", "-listen", "0.0.0.0:8080"]
+    expose:
+      - "8080"
+    ports:
+      - "19474:8080"
+    healthcheck:
+      test: ["CMD-SHELL", "curl -fsS http://127.0.0.1:8080/healthz >/dev/null"]
+      interval: 2s
+      timeout: 2s
+      retries: 30
+
+  mock-surplus:
+    image: golang:1.26-bookworm
+    working_dir: /src
+    volumes:
+      - .:/src
+    command: ["go", "run", "./cmd/mockprovider", "-listen", "0.0.0.0:8080"]
+    expose:
+      - "8080"
+    ports:
+      - "19475:8080"
+    healthcheck:
+      test: ["CMD-SHELL", "curl -fsS http://127.0.0.1:8080/healthz >/dev/null"]
+      interval: 2s
+      timeout: 2s
+      retries: 30
+
+  mock-opencode:
+    image: golang:1.26-bookworm
+    working_dir: /src
+    volumes:
+      - .:/src
+    command: ["go", "run", "./cmd/mockprovider", "-listen", "0.0.0.0:8080"]
+    expose:
+      - "8080"
+    ports:
+      - "19476:8080"
+    healthcheck:
+      test: ["CMD-SHELL", "curl -fsS http://127.0.0.1:8080/healthz >/dev/null"]
+      interval: 2s
+      timeout: 2s
+      retries: 30
+
+  paylessforai-app:
+    image: golang:1.26-bookworm
+    working_dir: /src
+    volumes:
+      - .:/src
+      - payless-e2e-data:/tmp/payless-e2e
+    command:
+      - sh
+      - -c
+      - |
+        go run ./cmd/paylessforai-app
+        -data-dir /tmp/payless-e2e
+        -listen 0.0.0.0:9472
+        -openrouter-base-url http://mock-openrouter:8080/openrouter/api/v1
+        -surplus-base-url http://mock-surplus:8080/surplus/v1
+        -provider-base-url opencode-go=http://mock-opencode:8080/zen/go/v1
+        -provider-base-url opencode-zen=http://mock-opencode:8080/zen/go/v1
+    expose:
+      - "9472"
+    ports:
+      - "9472:9472"
+    depends_on:
+      mock-openrouter:
+        condition: service_healthy
+      mock-surplus:
+        condition: service_healthy
+      mock-opencode:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "curl -fsS http://127.0.0.1:9472/readyz >/dev/null"]
+      interval: 3s
+      timeout: 3s
+      retries: 40
+
+  # Optional: run the harness stub inside the compose network.
+  # Default CI runs the script on the host instead (see workflow).
+  harness-stub:
+    image: debian:stable-slim
+    working_dir: /src
+    volumes:
+      - .:/src
+    environment:
+      APP_BASE_URL: http://paylessforai-app:9472
+      MOCK_OPENROUTER_URL: http://mock-openrouter:8080
+      MOCK_SURPLUS_URL: http://mock-surplus:8080
+      MOCK_OPENCODE_URL: http://mock-opencode:8080
+    command: ["bash", "test/e2e/harness-stub.sh"]
+    depends_on:
+      paylessforai-app:
+        condition: service_healthy
+    profiles: ["stub"]
+
+volumes:
+  payless-e2e-data:

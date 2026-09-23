@@ -1,0 +1,24 @@
+{
+  "status": 200,
+  "body": {
+    "id": "matrix-tool-messages",
+    "type": "message",
+    "role": "assistant",
+    "model": "matrix-model",
+    "content": [
+      {
+        "type": "tool_use",
+        "id": "toolu_matrix_1",
+        "name": "get_weather",
+        "input": {
+          "city": "Paris"
+        }
+      }
+    ],
+    "stop_reason": "tool_use",
+    "usage": {
+      "input_tokens": 12,
+      "output_tokens": 8
+    }
+  }
+}

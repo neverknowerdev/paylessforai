@@ -4,7 +4,7 @@ const appURL = 'http://127.0.0.1:19477';
 
 export default defineConfig({
   testDir: '.',
-  testIgnore: 'e2e-real.spec.ts',
+  testIgnore: ['e2e-real.spec.ts', 'matrix.spec.ts'],
   timeout: 30_000,
   fullyParallel: false,
   workers: 1,

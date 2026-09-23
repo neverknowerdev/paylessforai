@@ -1,0 +1,21 @@
+{
+  "status": 200,
+  "body": {
+    "id": "matrix-tool-responses",
+    "object": "response",
+    "status": "completed",
+    "output": [
+      {
+        "type": "function_call",
+        "call_id": "call_matrix_1",
+        "name": "get_weather",
+        "arguments": "{\"city\":\"Paris\"}"
+      }
+    ],
+    "usage": {
+      "input_tokens": 12,
+      "output_tokens": 8,
+      "total_tokens": 20
+    }
+  }
+}

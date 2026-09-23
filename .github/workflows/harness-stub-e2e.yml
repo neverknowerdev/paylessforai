@@ -47,13 +47,31 @@ jobs:
             >/tmp/paylessforai-app.log 2>&1 &
           echo $! > /tmp/paylessforai-app.pid
 
-      - name: Run harness stub (mock-only)
-        run: bash test/e2e/harness-stub.sh
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Install E2E dependencies
+        working-directory: test/e2e
+        run: npm install --no-audit --no-fund
+
+      - name: Run harness stub spec (mock-only, API-only, no browsers)
+        working-directory: test/e2e
+        run: npx playwright test harness-stub
         env:
           APP_BASE_URL: http://127.0.0.1:9472
           MOCK_OPENROUTER_URL: http://127.0.0.1:19474
           MOCK_SURPLUS_URL: http://127.0.0.1:19475
           MOCK_OPENCODE_URL: http://127.0.0.1:19476
+
+      - name: Upload Playwright diagnostics
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: harness-stub-diagnostics
+          if-no-files-found: ignore
+          path: test/e2e/test-results
 
       - name: Show logs on failure
         if: failure()

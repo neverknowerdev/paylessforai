@@ -2,8 +2,11 @@ name: paylessforai-e2e
 
 # Mock-only harness e2e (NEV-45, follow-up to NEV-44 §2/§6).
 # Services: paylessforai-app + mock-openrouter/surplus/opencode.
-# Harness side is test/e2e/harness-stub.sh (curl+jq, no secrets, no browser).
-# Run: docker compose -f docker-compose.e2e.yml up -d --build && ./test/e2e/harness-stub.sh
+# Harness assertions live in test/e2e/harness-stub.spec.ts (Playwright, API-only,
+# no browsers); test/e2e/harness-stub.sh is a thin wrapper around it.
+# Run infra: docker compose -f docker-compose.e2e.yml up -d --build
+# Run spec against it (from test/e2e):
+# APP_BASE_URL=http://127.0.0.1:9472 MOCK_OPENROUTER_URL=http://127.0.0.1:19474 MOCK_SURPLUS_URL=http://127.0.0.1:19475 MOCK_OPENCODE_URL=http://127.0.0.1:19476 npx playwright test harness-stub
 
 services:
   mock-openrouter:
@@ -87,24 +90,6 @@ services:
       interval: 3s
       timeout: 3s
       retries: 40
-
-  # Optional: run the harness stub inside the compose network.
-  # Default CI runs the script on the host instead (see workflow).
-  harness-stub:
-    image: debian:stable-slim
-    working_dir: /src
-    volumes:
-      - .:/src
-    environment:
-      APP_BASE_URL: http://paylessforai-app:9472
-      MOCK_OPENROUTER_URL: http://mock-openrouter:8080
-      MOCK_SURPLUS_URL: http://mock-surplus:8080
-      MOCK_OPENCODE_URL: http://mock-opencode:8080
-    command: ["bash", "test/e2e/harness-stub.sh"]
-    depends_on:
-      paylessforai-app:
-        condition: service_healthy
-    profiles: ["stub"]
 
 volumes:
   payless-e2e-data:

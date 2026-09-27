@@ -1,0 +1,84 @@
+{
+  "status": 200,
+  "body": {
+    "id": "gen-1790535510-bk4tpbVstsvp1FHiOGgu",
+    "object": "response",
+    "created_at": 1790535510,
+    "model": "google/gemma-4-31b-it",
+    "status": "completed",
+    "completed_at": 1790535521,
+    "output": [
+      {
+        "id": "fc_tmp_fz4twyav8an",
+        "type": "function_call",
+        "status": "completed",
+        "call_id": "971a822b-f548-9a44-b1e6-d7913aa355eb_0",
+        "name": "get_weather",
+        "arguments": "{\"city\":\"Paris\"}"
+      }
+    ],
+    "error": null,
+    "incomplete_details": null,
+    "tools": [
+      {
+        "type": "function",
+        "name": "get_weather",
+        "description": "Get weather",
+        "parameters": {
+          "properties": {
+            "city": {
+              "type": "string"
+            }
+          },
+          "type": "object"
+        },
+        "strict": null
+      }
+    ],
+    "tool_choice": "auto",
+    "parallel_tool_calls": true,
+    "max_output_tokens": 64,
+    "temperature": 1,
+    "top_p": 1,
+    "presence_penalty": 0,
+    "frequency_penalty": 0,
+    "top_logprobs": 0,
+    "max_tool_calls": null,
+    "metadata": {},
+    "background": false,
+    "previous_response_id": null,
+    "service_tier": "auto",
+    "truncation": "disabled",
+    "store": false,
+    "instructions": null,
+    "text": {
+      "format": {
+        "type": "text"
+      }
+    },
+    "reasoning": {
+      "effort": "none"
+    },
+    "safety_identifier": null,
+    "prompt_cache_key": null,
+    "prompt_cache_options": null,
+    "usage": {
+      "input_tokens": 55,
+      "input_tokens_details": {
+        "cached_tokens": 0
+      },
+      "output_tokens": 15,
+      "output_tokens_details": {
+        "reasoning_tokens": 0
+      },
+      "total_tokens": 70,
+      "cost": 5.625e-05,
+      "is_byok": false,
+      "cost_details": {
+        "upstream_inference_cost": 5.625e-05,
+        "upstream_inference_input_cost": 4.125e-05,
+        "upstream_inference_output_cost": 1.5e-05
+      }
+    }
+  }
+}

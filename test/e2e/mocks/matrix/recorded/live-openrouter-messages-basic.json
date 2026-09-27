@@ -1,0 +1,43 @@
+{
+  "status": 200,
+  "body": {
+    "id": "gen-1790535568-yRYanczjNzKjvy7YW5dS",
+    "type": "message",
+    "role": "assistant",
+    "container": null,
+    "content": [
+      {
+        "type": "text",
+        "text": "I do not have access to a live terminal or network tools to perform a real-time \"ping\" command to a specific server or website for you.\n\n",
+        "citations": []
+      }
+    ],
+    "model": "google/gemma-4-26b-a4b-it",
+    "stop_reason": "max_tokens",
+    "stop_details": null,
+    "stop_sequence": null,
+    "usage": {
+      "input_tokens": 15,
+      "output_tokens": 32,
+      "output_tokens_details": {
+        "thinking_tokens": 0
+      },
+      "cache_creation_input_tokens": null,
+      "cache_read_input_tokens": 0,
+      "cache_creation": null,
+      "inference_geo": null,
+      "server_tool_use": null,
+      "service_tier": null,
+      "speed": "standard",
+      "cost": 1.146e-05,
+      "is_byok": false,
+      "cost_details": {
+        "upstream_inference_cost": 1.146e-05,
+        "upstream_inference_prompt_cost": 9e-07,
+        "upstream_inference_completions_cost": 1.056e-05
+      }
+    },
+    "context_management": null,
+    "provider": "DekaLLM"
+  }
+}

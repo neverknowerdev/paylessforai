@@ -4,6 +4,7 @@ const appURL = 'http://127.0.0.1:19477';
 
 export default defineConfig({
   testDir: '.',
+  testIgnore: ['matrix.spec.ts', 'matrix.live.spec.ts'],
   timeout: 30_000,
   fullyParallel: false,
   workers: 1,

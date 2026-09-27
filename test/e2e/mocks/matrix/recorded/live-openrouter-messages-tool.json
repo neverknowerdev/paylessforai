@@ -1,0 +1,49 @@
+{
+  "status": 200,
+  "body": {
+    "id": "gen-1790535572-WavuMcx2pyhuOdgruph8",
+    "type": "message",
+    "role": "assistant",
+    "container": null,
+    "content": [
+      {
+        "type": "tool_use",
+        "id": "chatcmpl-tool-a0b14f08fded4b0d",
+        "caller": {
+          "type": "direct"
+        },
+        "name": "get_weather",
+        "input": {
+          "city": "Paris"
+        }
+      }
+    ],
+    "model": "google/gemma-4-26b-a4b-it",
+    "stop_reason": "tool_use",
+    "stop_details": null,
+    "stop_sequence": null,
+    "usage": {
+      "input_tokens": 7,
+      "output_tokens": 15,
+      "output_tokens_details": {
+        "thinking_tokens": 0
+      },
+      "cache_creation_input_tokens": null,
+      "cache_read_input_tokens": 48,
+      "cache_creation": null,
+      "inference_geo": null,
+      "server_tool_use": null,
+      "service_tier": null,
+      "speed": "standard",
+      "cost": 5.6475e-06,
+      "is_byok": false,
+      "cost_details": {
+        "upstream_inference_cost": 5.6475e-06,
+        "upstream_inference_prompt_cost": 2.2725e-06,
+        "upstream_inference_completions_cost": 3.375e-06
+      }
+    },
+    "context_management": null,
+    "provider": "NextBit"
+  }
+}

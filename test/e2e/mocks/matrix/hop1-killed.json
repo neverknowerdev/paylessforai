@@ -1,0 +1,9 @@
+{
+  "status": 503,
+  "body": {
+    "error": {
+      "message": "matrix hop1 killed for switching test",
+      "type": "mock_error"
+    }
+  }
+}

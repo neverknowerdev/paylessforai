@@ -33,3 +33,13 @@ review before promoting.
 4. Run the mock-only matrix to prove the curated fixtures go green:
    `npm run matrix` (zero spend).
 5. Commit the curated fixtures; recorded originals may be deleted after.
+
+## Latest capture (2026-09-27, committed)
+
+Record pass with org keys: openrouter (gemma-4-31b-it chat+responses,
+gemma-4-26b-a4b-it messages) + surplus (gemini-3.1-flash-lite), 12/18 live
+cells green. Committed proof files `live-*.json` (basic + tool per pin;
+auth stripped, bodies byte-real). Noise (Discover `/models` polling, error
+responses, SSE) deleted. Canonical `tool-{chat,responses,messages}.json`
+are these captures with only the top-level `id` normalized to `matrix-*`;
+mock matrix replays them 30/30 green.

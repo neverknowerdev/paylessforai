@@ -1,0 +1,41 @@
+{
+  "status": 200,
+  "body": {
+    "id": "F2e5asHLJfKU1MkP_YbcqQE",
+    "object": "chat.completion",
+    "created": 1790535447,
+    "model": "gemini-3.1-flash-lite",
+    "choices": [
+      {
+        "index": 0,
+        "message": {
+          "role": "assistant",
+          "content": null,
+          "tool_calls": [
+            {
+              "id": "call_46124",
+              "type": "function",
+              "function": {
+                "name": "get_weather",
+                "arguments": "{\"city\":\"Paris\"}"
+              },
+              "extra_content": {
+                "google": {
+                  "thought_signature": "EnMKcQFpFH0Tq0zfuwVmCaI8F/QmN5sEccJH5AwnZ8kJidKlkChzh+h1sM05iu8DJ8iku34u73YdMM4ZaHAYhnw7+5lJZv9Hf683ao5cq1Uidk3fa0dljfnb/zzfRO4je3PhIchyiCEGxnykO6daGOIpApu5"
+                }
+              }
+            }
+          ]
+        },
+        "finish_reason": "stop",
+        "logprobs": null
+      }
+    ],
+    "usage": {
+      "completion_tokens": 16,
+      "prompt_tokens": 38,
+      "total_tokens": 54,
+      "buyer_cost_micro": 0
+    }
+  }
+}

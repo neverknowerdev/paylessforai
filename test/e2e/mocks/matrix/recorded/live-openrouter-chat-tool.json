@@ -1,7 +1,7 @@
 {
   "status": 200,
   "body": {
-    "id": "matrix-tool-chat",
+    "id": "gen-1790535439-RLtW4l0RaaFmVYdHHPDp",
     "object": "chat.completion",
     "created": 1790535439,
     "model": "google/gemma-4-31b-it",

@@ -1,0 +1,26 @@
+{
+  "status": 200,
+  "body": {
+    "id": "Fme5auj9HuOd1MkPp-vWGQ",
+    "object": "chat.completion",
+    "created": 1790535446,
+    "model": "gemini-3.1-flash-lite",
+    "choices": [
+      {
+        "index": 0,
+        "message": {
+          "role": "assistant",
+          "content": "To \"live ping\" usually means to check if a device or server is currently reachable in real-time. Depending on your operating system,"
+        },
+        "finish_reason": "length",
+        "logprobs": null
+      }
+    ],
+    "usage": {
+      "completion_tokens": 28,
+      "prompt_tokens": 3,
+      "total_tokens": 31,
+      "buyer_cost_micro": 0
+    }
+  }
+}

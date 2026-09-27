@@ -1,43 +1,36 @@
 {
   "status": 200,
   "body": {
-    "id": "matrix-tool-responses",
+    "id": "gen-1790535476-vaDBOAL43e889t3s0Lki",
     "object": "response",
-    "created_at": 1790535510,
+    "created_at": 1790535476,
     "model": "google/gemma-4-31b-it",
-    "status": "completed",
-    "completed_at": 1790535521,
+    "status": "incomplete",
+    "completed_at": 1790535481,
     "output": [
       {
-        "id": "fc_tmp_fz4twyav8an",
-        "type": "function_call",
+        "id": "msg_tmp_c1d91p5uqe",
+        "type": "message",
+        "role": "assistant",
         "status": "completed",
-        "call_id": "971a822b-f548-9a44-b1e6-d7913aa355eb_0",
-        "name": "get_weather",
-        "arguments": "{\"city\":\"Paris\"}"
+        "content": [
+          {
+            "type": "output_text",
+            "text": "Since I am an AI running on a server and not a local device on your network, I cannot \"ping\" your computer directly. However, depending on what",
+            "annotations": [],
+            "logprobs": []
+          }
+        ]
       }
     ],
     "error": null,
-    "incomplete_details": null,
-    "tools": [
-      {
-        "type": "function",
-        "name": "get_weather",
-        "description": "Get weather",
-        "parameters": {
-          "properties": {
-            "city": {
-              "type": "string"
-            }
-          },
-          "type": "object"
-        },
-        "strict": null
-      }
-    ],
+    "incomplete_details": {
+      "reason": "max_output_tokens"
+    },
+    "tools": [],
     "tool_choice": "auto",
     "parallel_tool_calls": true,
-    "max_output_tokens": 64,
+    "max_output_tokens": 32,
     "temperature": 1,
     "top_p": 1,
     "presence_penalty": 0,
@@ -63,21 +56,21 @@
     "prompt_cache_key": null,
     "prompt_cache_options": null,
     "usage": {
-      "input_tokens": 55,
+      "input_tokens": 15,
       "input_tokens_details": {
         "cached_tokens": 0
       },
-      "output_tokens": 15,
+      "output_tokens": 32,
       "output_tokens_details": {
         "reasoning_tokens": 0
       },
-      "total_tokens": 70,
-      "cost": 5.625e-05,
+      "total_tokens": 47,
+      "cost": 1.238e-05,
       "is_byok": false,
       "cost_details": {
-        "upstream_inference_cost": 5.625e-05,
-        "upstream_inference_input_cost": 4.125e-05,
-        "upstream_inference_output_cost": 1.5e-05
+        "upstream_inference_cost": 1.238e-05,
+        "upstream_inference_input_cost": 1.5e-06,
+        "upstream_inference_output_cost": 1.088e-05
       }
     }
   }

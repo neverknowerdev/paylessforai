@@ -44,9 +44,9 @@ const LIVE_PROVIDERS: LiveProvider[] = [
     realBaseURL: 'https://openrouter.ai/api/v1',
     recordURL: 'http://127.0.0.1:19574/openrouter/api/v1',
     models: {
-      chat: process.env.LIVE_CHAT_MODEL || 'nex-agi/nex-n2.5-mini:free',
-      responses: process.env.LIVE_RESPONSES_MODEL || 'dots-studio/dots-3-note-preview:free',
-      messages: process.env.LIVE_MESSAGES_MODEL || 'anthropic/claude-3-haiku',
+      chat: process.env.LIVE_CHAT_MODEL || 'gemma-4.31b-it',
+      responses: process.env.LIVE_RESPONSES_MODEL || 'gemma-4.31b-it',
+      messages: process.env.LIVE_MESSAGES_MODEL || 'gemma-4.26b-a4b-it',
     },
   },
   {
@@ -55,9 +55,9 @@ const LIVE_PROVIDERS: LiveProvider[] = [
     realBaseURL: 'https://api.surplusintelligence.ai/v1',
     recordURL: 'http://127.0.0.1:19575/surplus/v1',
     models: {
-      chat: process.env.LIVE_SURPLUS_CHAT_MODEL || 'surplus-mini',
-      responses: process.env.LIVE_SURPLUS_RESPONSES_MODEL || 'surplus-mini',
-      messages: process.env.LIVE_SURPLUS_MESSAGES_MODEL || 'surplus-mini',
+      chat: process.env.LIVE_SURPLUS_CHAT_MODEL || 'gemini-3.1-flash-lite',
+      responses: process.env.LIVE_SURPLUS_RESPONSES_MODEL || 'gemini-3.1-flash-lite',
+      messages: process.env.LIVE_SURPLUS_MESSAGES_MODEL || 'gemini-3.1-flash-lite',
     },
   },
   {
@@ -139,49 +139,49 @@ test.beforeAll(async ({ request }) => {
   expect(key.ok()).toBeTruthy();
   secret = (((await key.json()) as { secret?: string }).secret ?? '');
   expect(secret).toBeTruthy();
-  await clearCredentials(request);
-  await clearGroups(request);
-  for (const provider of underTest) {
-    const apiKey = process.env[provider.keyEnv] as string;
-    for (const output of OUTPUTS) {
-      const response = await request.post(`${APP}/api/providers/credentials`, {
-        data: {
-          provider: provider.name,
-          label: `live-${provider.name}-${output.key}`,
-          api_key: apiKey,
-          base_url: `${baseFor(provider)}${output.suffix}`,
-          access_mode: 'api',
-        },
-      });
-      expect(response.status()).toBe(201);
-    }
-    // One group per provider; the model id selects the pinned output shape.
-    for (const output of OUTPUTS) {
-      const model = provider.models[output.key];
-      const created = await request.post(`${APP}/api/groups`, {
-        data: {
-          name: `${groupSlug(provider.name)}-${output.key}`,
-          slug: `${groupSlug(provider.name)}-${output.key}`,
-          enabled: true,
-          stages: [{
-            position: 0,
-            name: 'only',
-            sources: [{ kind: 'model', model_id: model }],
-            provider_names: [provider.name],
-            billing_classes: ['metered'],
-            selection: 'lowest_expected_cost',
-          }],
-        },
-      });
-      expect(created.status()).toBe(201);
-    }
-  }
 });
 
-for (const provider of underTest) {
-  for (const output of OUTPUTS) {
-    for (const input of INPUTS) {
-      test(`live in=${input} via=${provider.name} out=${output.key}`, async ({ request }) => {
+// Setup is per (output, provider): the server rejects two credentials sharing
+// one API key (duplicate_provider_credential), so each block registers exactly
+// one credential per provider and clears the previous block's pins first.
+for (const output of OUTPUTS) {
+  test.describe(`live out=${output.key}`, () => {
+    for (const provider of underTest) {
+      test.describe(`via=${provider.name}`, () => {
+        test.beforeAll(async ({ request }) => {
+          await clearCredentials(request);
+          await clearGroups(request);
+          const apiKey = process.env[provider.keyEnv] as string;
+          const response = await request.post(`${APP}/api/providers/credentials`, {
+            data: {
+              provider: provider.name,
+              label: `live-${provider.name}-${output.key}`,
+              api_key: apiKey,
+              base_url: `${baseFor(provider)}${output.suffix}`,
+              access_mode: 'api',
+            },
+          });
+          expect(response.status()).toBe(201);
+          const model = provider.models[output.key];
+          const created = await request.post(`${APP}/api/groups`, {
+            data: {
+              name: `${groupSlug(provider.name)}-${output.key}`,
+              slug: `${groupSlug(provider.name)}-${output.key}`,
+              enabled: true,
+              stages: [{
+                position: 0,
+                name: 'only',
+                sources: [{ kind: 'model', model_id: model }],
+                provider_names: [provider.name],
+                billing_classes: ['metered'],
+                selection: 'lowest_expected_cost',
+              }],
+            },
+          });
+          expect(created.status()).toBe(201);
+        });
+        for (const input of INPUTS) {
+        test(`live in=${input} via=${provider.name} out=${output.key}`, async ({ request }) => {
         const slug = `${groupSlug(provider.name)}-${output.key}`;
         const proof: string[] = [];
         if (input === 'chat') {
@@ -273,6 +273,8 @@ for (const provider of underTest) {
         // eslint-disable-next-line no-console
         console.log(`LIVE in=${input} via=${provider.name} out=${output.key} :: ${proof.join(' | ')}`);
       });
+      }
+    });
     }
-  }
+  });
 }

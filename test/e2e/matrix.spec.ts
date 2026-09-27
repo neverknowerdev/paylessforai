@@ -53,6 +53,18 @@ const PROVIDERS: Provider[] = [
   { name: 'opencode-go', port: Number(process.env.MOCK_OPENCODE_PORT || '19476') },
 ];
 
+// Runner-side mock address (control plane: __mock/*) vs app-side mock
+// address (data plane: credential base_url). Identical for local runs;
+// split in docker CI where the app lives inside the compose network
+// (127.0.0.1 there is the app container itself).
+function mockBaseURL(provider: Provider): string {
+  const override =
+    provider.name === 'openrouter' ? process.env.MATRIX_OPENROUTER_BASE_FOR_APP :
+    provider.name === 'surplus' ? process.env.MATRIX_SURPLUS_BASE_FOR_APP :
+    process.env.MATRIX_OPENCODE_BASE_FOR_APP;
+  return override || `http://127.0.0.1:${provider.port}`;
+}
+
 type InputShape = 'chat' | 'responses' | 'messages';
 const INPUTS: InputShape[] = ['chat', 'responses', 'messages'];
 
@@ -194,7 +206,7 @@ async function registerPinned(api: APIRequestContext, provider: Provider, output
       provider: provider.name,
       label: `matrix-${provider.name}-${output.key}`,
       api_key: `matrix-mock-${provider.name}-${output.key}`,
-      base_url: `http://127.0.0.1:${provider.port}/mx/${provider.name}/v1${output.suffix}`,
+      base_url: `${mockBaseURL(provider)}/mx/${provider.name}/v1${output.suffix}`,
       access_mode: 'api',
     },
   });

@@ -57,6 +57,10 @@ jobs:
           MOCK_OPENROUTER_PORT: 19474
           MOCK_SURPLUS_PORT: 19475
           MOCK_OPENCODE_PORT: 19476
+          # App-side data plane (compose network service names).
+          MATRIX_OPENROUTER_BASE_FOR_APP: http://mock-openrouter:8080
+          MATRIX_SURPLUS_BASE_FOR_APP: http://mock-surplus:8080
+          MATRIX_OPENCODE_BASE_FOR_APP: http://mock-opencode:8080
 
       - name: Show harness logs on failure
         if: failure()

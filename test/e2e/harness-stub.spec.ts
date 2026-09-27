@@ -10,6 +10,13 @@ const MOCK_SURPLUS = process.env.MOCK_SURPLUS_URL || 'http://127.0.0.1:19475';
 const MOCK_OPENCODE = process.env.MOCK_OPENCODE_URL || 'http://127.0.0.1:19476';
 const MOCKS = [MOCK_OPENROUTER, MOCK_SURPLUS, MOCK_OPENCODE];
 
+// App-side mock addresses (credential base_url data plane). Defaults match
+// local runs; docker CI overrides with compose service URLs because inside
+// the app container 127.0.0.1 is the app itself, not the mocks.
+const MOCK_OPENROUTER_FOR_APP = process.env.MOCK_OPENROUTER_URL_FOR_APP || MOCK_OPENROUTER;
+const MOCK_SURPLUS_FOR_APP = process.env.MOCK_SURPLUS_URL_FOR_APP || MOCK_SURPLUS;
+const MOCK_OPENCODE_FOR_APP = process.env.MOCK_OPENCODE_URL_FOR_APP || MOCK_OPENCODE;
+
 let APP = process.env.APP_BASE_URL || '';
 let secret = '';
 
@@ -105,9 +112,9 @@ test.beforeAll(async ({ request }, testInfo) => {
   for (const mock of MOCKS) await configureMockScenario(api, mock);
   const credentials = ((await (await api.get(`${APP}/api/providers/credentials`)).json()) as { data?: Array<{ id: string }> }).data ?? [];
   for (const credential of credentials) expect((await api.delete(`${APP}/api/providers/credentials/${credential.id}`)).ok()).toBeTruthy();
-  await registerCredential(api, { provider: 'openrouter', label: 'stub-openrouter', api_key: 'mock-key-not-secret', base_url: `${MOCK_OPENROUTER}/openrouter/api/v1` });
-  await registerCredential(api, { provider: 'surplus', label: 'stub-surplus', api_key: 'mock-surplus-not-secret', base_url: `${MOCK_SURPLUS}/surplus/v1` });
-  await registerCredential(api, { provider: 'opencode-go', label: 'stub-opencode', api_key: 'mock-opencode-not-secret', base_url: `${MOCK_OPENCODE}/zen/go/v1`, access_mode: 'api' });
+  await registerCredential(api, { provider: 'openrouter', label: 'stub-openrouter', api_key: 'mock-key-not-secret', base_url: `${MOCK_OPENROUTER_FOR_APP}/openrouter/api/v1` });
+  await registerCredential(api, { provider: 'surplus', label: 'stub-surplus', api_key: 'mock-surplus-not-secret', base_url: `${MOCK_SURPLUS_FOR_APP}/surplus/v1` });
+  await registerCredential(api, { provider: 'opencode-go', label: 'stub-opencode', api_key: 'mock-opencode-not-secret', base_url: `${MOCK_OPENCODE_FOR_APP}/zen/go/v1`, access_mode: 'api' });
 });
 
 test('lists stub-model in GET /v1/models', async ({ request }) => {

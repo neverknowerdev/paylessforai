@@ -48,12 +48,17 @@ jobs:
 
       - name: Run harness stub spec (mock-only, API-only, no browsers)
         working-directory: test/e2e
-        run: npx playwright test harness-stub
+        run: npx playwright test --config=harness-stub.config.ts
         env:
           APP_BASE_URL: http://127.0.0.1:9472
           MOCK_OPENROUTER_URL: http://127.0.0.1:19474
           MOCK_SURPLUS_URL: http://127.0.0.1:19475
           MOCK_OPENCODE_URL: http://127.0.0.1:19476
+          # App-side data plane: inside the compose network the app reaches
+          # mocks via service names (127.0.0.1 there is the app itself).
+          MOCK_OPENROUTER_URL_FOR_APP: http://mock-openrouter:8080
+          MOCK_SURPLUS_URL_FOR_APP: http://mock-surplus:8080
+          MOCK_OPENCODE_URL_FOR_APP: http://mock-opencode:8080
 
       - name: Show harness logs on failure
         if: failure()
